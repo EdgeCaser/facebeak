@@ -26,6 +26,7 @@ class FacebeakGUI:
         self.det_thresh = tk.Entry(root, width=10)
         self.det_thresh.insert(0, "0.3")
         self.det_thresh.pack()
+        tk.Label(root, text="Lower = more sensitive to detecting birds", font=("Arial", 8)).pack()
 
         # Similarity threshold
         tk.Label(root, text="Similarity Threshold (0.0-1.0):").pack()
