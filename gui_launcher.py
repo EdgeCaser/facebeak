@@ -40,6 +40,7 @@ class FacebeakGUI:
         self.skip_entry = tk.Entry(root, width=10)
         self.skip_entry.insert(0, "1")
         self.skip_entry.pack()
+        tk.Label(root, text="Higher = faster processing but might miss quick movements", font=("Arial", 8)).pack()
 
         # Run button
         tk.Button(root, text="Run facebeak", command=self.run_facebeak).pack(pady=10)
