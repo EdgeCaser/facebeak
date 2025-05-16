@@ -1,0 +1,10 @@
+---
+description: How to detect crows from video frames.
+globs:
+  - detection.py
+alwaysApply: true
+---
+
+- Use TorchVision's Faster R-CNN model (`fasterrcnn_resnet50_fpn`) for bird detection.
+- Filter detections by COCO label #20 (bird) and a configurable score threshold.
+- Optimize for fast, low-memory use, and allow later swapping to YOLOv8 or custom model.

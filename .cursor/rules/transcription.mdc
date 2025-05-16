@@ -1,0 +1,11 @@
+---
+description: Visual identity tracking for crows.
+globs:
+  - tracking.py
+alwaysApply: true
+---
+
+- Use ResNet18 (with identity head) to compute 128x1 embeddings of crow crops.
+- Use Euclidean distance to compare embeddings and assign consistent IDs across frames.
+- Avoid reassigning new IDs unless distance exceeds the configurable threshold.
+- Designed for quick iteration and model swapping later.

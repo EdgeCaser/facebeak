@@ -1,0 +1,8 @@
+{
+  "description": "facebeak identifies and tracks individual crows using video and (soon) audio input.",
+  "goals": [
+    "Detect birds in video",
+    "Assign persistent visual IDs",
+    "Plan for future vocal/UV ID fusion"
+  ]
+}

@@ -1,0 +1,11 @@
+---
+description: Planned behavior for integrating crow audio traits.
+globs:
+  - audio.py
+  - audio/**/*.wav
+alwaysApply: false
+---
+
+- Stub in place. Future version will extract MFCC or spectrogram features using `librosa`.
+- Goal is to characterize vocalizations for individual personality tracking.
+- Audio embeddings may be used alongside visual embeddings to strengthen identity resolution.

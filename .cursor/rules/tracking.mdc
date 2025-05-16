@@ -1,0 +1,10 @@
+---
+description: Assign persistent crow identities across frames using visual similarity.
+globs:
+  - tracking.py
+alwaysApply: true
+---
+
+- Use ResNet18 to extract crow image embeddings.
+- Compare embeddings with Euclidean distance to determine if a crow has already been seen.
+- Assign and reuse numeric IDs for tracking across video frames.
