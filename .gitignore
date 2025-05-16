@@ -172,4 +172,21 @@ crow_embeddings.db
 sample.mp4
 output.mp4
 config.yaml
+
+# Additional privacy/security
+*.pkl
+*.h5
+*.model
+*.weights
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.pb
+facebeak_session.log
+.env.local
+.env.*.local
+secrets.yaml
+credentials.json
+token.json
 # End facebeak additions
