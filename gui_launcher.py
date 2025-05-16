@@ -7,7 +7,7 @@ class FacebeakGUI:
     def __init__(self, root):
         self.root = root
         root.title("facebeak Launcher")
-        root.geometry("600x400")
+        root.geometry("800x650")  # Increased height for new control
 
         # Video file selection
         tk.Label(root, text="Input Video:").pack()
@@ -26,6 +26,13 @@ class FacebeakGUI:
         self.det_thresh = tk.Entry(root, width=10)
         self.det_thresh.insert(0, "0.3")
         self.det_thresh.pack()
+
+        # Similarity threshold
+        tk.Label(root, text="Similarity Threshold (0.0-1.0):").pack()
+        self.sim_thresh = tk.Entry(root, width=10)
+        self.sim_thresh.insert(0, "0.85")
+        self.sim_thresh.pack()
+        tk.Label(root, text="Higher = stricter matching between frames", font=("Arial", 8)).pack()
 
         # Skip
         tk.Label(root, text="Frame Skip:").pack()
@@ -50,8 +57,26 @@ class FacebeakGUI:
         video = self.video_entry.get()
         output = self.output_entry.get()
         det_thresh = self.det_thresh.get()
+        sim_thresh = self.sim_thresh.get()
         skip = self.skip_entry.get()
-        cmd = ["python", "main.py", "--video", video, "--output", output, "--detection-threshold", det_thresh, "--skip", skip]
+        
+        # Validate thresholds
+        try:
+            det_thresh_float = float(det_thresh)
+            sim_thresh_float = float(sim_thresh)
+            if not (0 <= det_thresh_float <= 1 and 0 <= sim_thresh_float <= 1):
+                messagebox.showerror("Invalid Input", "Thresholds must be between 0.0 and 1.0")
+                return
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Thresholds must be valid numbers")
+            return
+            
+        cmd = ["python", "main.py", 
+               "--video", video, 
+               "--output", output, 
+               "--detection-threshold", det_thresh,
+               "--similarity-threshold", sim_thresh,
+               "--skip", skip]
         self.output_box.insert(tk.END, f"Running: {' '.join(cmd)}\n")
         self.output_box.see(tk.END)
         threading.Thread(target=self._run_cmd, args=(cmd,)).start()
