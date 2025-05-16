@@ -1,5 +1,7 @@
 # For GPU support, install torch/torchvision with the correct CUDA version:
 # pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+torch>=2.1.0
+torchvision>=0.16.0
 opencv-python>=4.8.0
 pyyaml>=6.0.1
 numpy>=1.24.0
@@ -9,6 +11,9 @@ matplotlib>=3.7.0
 scikit-learn>=1.3.0
 pandas>=2.0.0
 librosa>=0.10.0  # For future audio analysis
-sqlalchemy>=2.0.0  # For future database integration
+sqlalchemy>=2.0.0  # For database integration
 filterpy>=1.4.5
 scikit-image>=0.21.0
+python-dotenv>=1.0.0  # For environment variable management
+requests>=2.31.0  # For API calls
+tensorboard>=2.14.0  # For training visualization
