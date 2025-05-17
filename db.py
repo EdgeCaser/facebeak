@@ -3,14 +3,19 @@ import numpy as np
 import os
 from datetime import datetime
 from scipy.spatial.distance import cosine
-from db_security import secure_database_connection, DatabaseEncryption
+from db_security import secure_database_connection
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 DB_PATH = 'crow_embeddings.db'
 
 def initialize_database():
-    """Initialize the database with encryption."""
+    """Initialize the database."""
     try:
-        # Create encrypted connection
+        # Create connection
         conn = secure_database_connection(DB_PATH)
         c = conn.cursor()
         
@@ -40,14 +45,14 @@ def initialize_database():
         
         conn.commit()
         conn.close()
-        print("[INFO] Database initialized successfully")
+        logger.info("Database initialized successfully")
         
     except Exception as e:
-        print(f"[ERROR] Failed to initialize database: {str(e)}")
+        logger.error(f"Failed to initialize database: {e}")
         raise
 
 def get_connection():
-    """Get a secure database connection."""
+    """Get a database connection."""
     return secure_database_connection(DB_PATH)
 
 def save_crow_embedding(embedding, video_path=None, frame_number=None, confidence=1.0):
@@ -255,9 +260,66 @@ def get_crow_embeddings(crow_id):
     } for row in rows]
 
 def backup_database():
-    """Create an encrypted backup of the database."""
-    encryption = DatabaseEncryption(DB_PATH)
-    return encryption.backup_database()
+    """Create a backup of the database."""
+    try:
+        backup_dir = 'backups'
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_path = os.path.join(backup_dir, f'crow_embeddings_{timestamp}.db')
+        
+        # Copy the database file
+        import shutil
+        shutil.copy2(DB_PATH, backup_path)
+        
+        logger.info(f"Database backup created: {backup_path}")
+        return backup_path
+    except Exception as e:
+        logger.error(f"Failed to create backup: {e}")
+        return None
+
+def clear_database():
+    """Clear all data from the database."""
+    conn = None
+    try:
+        # Get a connection
+        conn = get_connection()
+        if not conn:
+            logger.error("Failed to get database connection")
+            return False
+            
+        # Disable foreign key constraints
+        conn.execute("PRAGMA foreign_keys = OFF")
+        
+        # Delete all entries from tables
+        conn.execute("DELETE FROM crow_embeddings")
+        conn.execute("DELETE FROM crows")
+        
+        # Reset autoincrement counters
+        conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('crows', 'crow_embeddings')")
+        
+        # Re-enable foreign key constraints
+        conn.execute("PRAGMA foreign_keys = ON")
+        
+        # Commit changes
+        conn.commit()
+        logger.info("Database cleared successfully")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error clearing database: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+        return False
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
 
 # Initialize database on module import
 initialize_database() 
