@@ -12,7 +12,7 @@ facebeak is an AI-powered tool for identifying and tracking individual crows (an
 ## Quick Start Guide (For Non-Coders)
 
 ### Installation
-1. Download and install Python 3.8 or newer from [python.org](https://www.python.org/downloads/)
+1. Download and install Python 3.11.9 
    - During installation, make sure to check "Add Python to PATH"
 2. Download this project by clicking the green "Code" button above and selecting "Download ZIP"
 3. Extract the ZIP file to a folder on your computer
@@ -60,7 +60,7 @@ facebeak is an AI-powered tool for identifying and tracking individual crows (an
 ## Technical Details (For Developers)
 
 ## Requirements
-- Python 3.8+
+- Python 3.11.9
 - See `requirements.txt` for dependencies
 
 ## Usage
