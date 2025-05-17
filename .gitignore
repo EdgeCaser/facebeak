@@ -85,21 +85,21 @@ ipython_config.py
 # pyenv
 #   For a library or package, you might want to ignore these files since the code is
 #   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+.python-version
 
 # pipenv
 #   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
 #   However, in case of collaboration, if having platform-specific dependencies or dependencies
 #   having no cross-platform support, pipenv may install dependencies that don't work, or not
 #   install all needed dependencies.
-#Pipfile.lock
+Pipfile.lock
 
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
 #   This is especially recommended for binary packages to ensure reproducibility, and is more
 #   commonly ignored for libraries.
 #   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
+poetry.lock
 
 # pdm
 #   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
@@ -160,7 +160,12 @@ cython_debug/
 #.idea/
 
 # facebeak specific
+# Database files
 crow_embeddings.db
+*.db
+*.db-journal
+
+# Video files
 *.mp4
 *.avi
 *.mov
@@ -171,9 +176,15 @@ crow_embeddings.db
 *.webm
 sample.mp4
 output.mp4
-config.yaml
+output/
+temp_*.mp4
 
-# Additional privacy/security
+# Log files
+facebeak_session.log
+*.log
+logs/
+
+# Model files and weights
 *.pkl
 *.h5
 *.model
@@ -183,10 +194,55 @@ config.yaml
 *.onnx
 *.tflite
 *.pb
-facebeak_session.log
+models/
+weights/
+
+# Configuration and secrets
+config.yaml
 .env.local
 .env.*.local
 secrets.yaml
 credentials.json
 token.json
-# End facebeak additions
+*.key
+*.pem
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Debug files
+debug/
+*.debug
+*.prof
+*.trace
+
+# Output directories
+output/
+results/
+exports/
+
+# Cache directories
+.cache/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Documentation builds
+docs/_build/
+site/
+
+# Test coverage
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# Environment variables
+.env
+.env.*
+!.env.example

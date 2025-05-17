@@ -80,8 +80,39 @@ python main.py --video sample.mp4 --output output.mp4 --detection-threshold 0.3 
 3. The output video will be saved with bounding boxes and persistent crow IDs.
 4. The system will build a database (`crow_embeddings.db`) to remember crows across sessions.
 
-## Security & Publishing
-- Before publishing, ensure all sensitive or risky files are excluded from version control (see `.gitignore`)
+## Security & Privacy
+
+The system maintains a database (`crow_embeddings.db`) containing sensitive information about crow sightings, including:
+- Visual embeddings of individual crows
+- Timestamps and locations of sightings
+- Video paths and frame numbers
+- Confidence scores for identifications
+
+### Database Encryption
+
+The database is automatically encrypted for security:
+- A secure random password is generated on first run
+- The password is stored in a `.env` file (excluded from version control)
+- The database is encrypted at rest and only decrypted during use
+- Automatic backups are created during encryption
+- The database is automatically re-encrypted when the program exits
+
+### Data Protection
+
+To protect your crow data:
+- Never share the `.env` file or database file
+- Keep backups of both the database and `.env` file
+- The database and its backups are excluded from version control
+- If you need to share data, export it through the program's export features
+
+### Publishing Data
+
+When publishing data or results:
+- Ensure you have necessary permits for wildlife observation
+- Consider privacy implications for the crows
+- Use aggregated data when possible
+- Remove or anonymize sensitive location data
+- Follow local wildlife protection guidelines
 
 ## Roadmap
 - Audio analysis and UV support (planned)

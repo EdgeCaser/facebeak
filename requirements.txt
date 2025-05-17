@@ -17,3 +17,5 @@ scikit-image>=0.21.0
 python-dotenv>=1.0.0  # For environment variable management
 requests>=2.31.0  # For API calls
 tensorboard>=2.14.0  # For training visualization
+ultralytics>=8.0.0  # For YOLOv8 detection
+cryptography>=41.0.0  # For database encryption
