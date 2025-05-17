@@ -3,6 +3,29 @@ from tkinter import filedialog, messagebox, ttk
 import subprocess
 import threading
 from typing import List
+import os
+import sys
+import pkg_resources
+import subprocess
+from db import clear_database
+
+def ensure_requirements():
+    """Ensure all required packages are installed."""
+    try:
+        # Try to import cryptography to check if it's installed
+        import cryptography
+    except ImportError:
+        # If not installed, install requirements
+        try:
+            requirements_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'requirements.txt')
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-r', requirements_path])
+        except subprocess.CalledProcessError as e:
+            messagebox.showerror("Error", f"Failed to install required packages: {e}")
+            sys.exit(1)
+
+def get_venv_python():
+    """Get the path to the Python interpreter."""
+    return sys.executable
 
 class FacebeakGUI:
     def __init__(self, root):
@@ -94,13 +117,22 @@ class FacebeakGUI:
         self.skip_entry.insert(0, "5")
         ttk.Label(control_frame, text="Higher = faster processing but might miss quick movements", font=("Arial", 8)).grid(row=8, column=2, sticky="w")
 
+        # Add database management buttons
+        db_frame = ttk.Frame(control_frame)
+        db_frame.grid(row=10, column=0, columnspan=3, pady=5)
+        ttk.Button(db_frame, text="Clear Database", command=self.clear_db, style='Danger.TButton').pack(side=tk.LEFT, padx=5)
+        
+        # Configure danger button style
+        style = ttk.Style()
+        style.configure('Danger.TButton', foreground='red')
+
         # Run button (moved to class variable for access in other methods)
         self.run_button = ttk.Button(control_frame, text="Process Videos", command=self.run_facebeak)
-        self.run_button.grid(row=9, column=0, columnspan=3, pady=10)
+        self.run_button.grid(row=11, column=0, columnspan=3, pady=10)
 
-        # Output box with scrollbar
+        # Output box with scrollbar (moved down one row)
         output_frame = ttk.Frame(root)
-        output_frame.grid(row=10, column=0, sticky="nsew", padx=10, pady=5)
+        output_frame.grid(row=12, column=0, sticky="nsew", padx=10, pady=5)
         output_frame.grid_columnconfigure(0, weight=1)
         output_frame.grid_rowconfigure(0, weight=1)
 
@@ -194,13 +226,13 @@ class FacebeakGUI:
 
     def _process_videos(self, videos: List[str], output_dir: str, params: dict):
         try:
+            python_exe = get_venv_python()
             for video in videos:
                 # Generate output filename based on input video name
-                import os
                 video_name = os.path.splitext(os.path.basename(video))[0]
                 output = os.path.join(output_dir, f"{video_name}_output.mp4")
                 
-                cmd = ["python", "main.py", 
+                cmd = [python_exe, "main.py", 
                        "--video", video, 
                        "--output", output, 
                        "--detection-threshold", params['det_thresh'],
@@ -234,7 +266,68 @@ class FacebeakGUI:
             # Re-enable run button
             self.root.after(0, lambda: self.run_button.configure(state='normal'))
 
+    def clear_db(self):
+        """Clear all data from the database with two-step confirmation."""
+        # First confirmation
+        if not messagebox.askyesno("Clear Database", 
+                                 "Are you sure you want to clear the database?\n\n"
+                                 "This will delete ALL crow data including:\n"
+                                 "- All crow identities\n"
+                                 "- All embeddings\n"
+                                 "- All sighting history\n\n"
+                                 "This action CANNOT be undone."):
+            return
+            
+        # Second confirmation with different wording
+        if not messagebox.askyesno("Final Confirmation", 
+                                 "WARNING: You are about to delete ALL data from the database.\n\n"
+                                 "Type 'DELETE' to confirm:"):
+            return
+            
+        # Show a text input dialog for the final confirmation
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Final Confirmation")
+        dialog.geometry("300x150")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text="Type 'DELETE' to confirm:").pack(pady=10)
+        entry = ttk.Entry(dialog)
+        entry.pack(pady=5)
+        
+        def on_confirm():
+            if entry.get().strip().upper() == 'DELETE':
+                dialog.destroy()
+                if clear_database():
+                    messagebox.showinfo("Success", "Database cleared successfully")
+                else:
+                    messagebox.showerror("Error", "Failed to clear database")
+            else:
+                messagebox.showerror("Error", "Confirmation text does not match")
+                dialog.destroy()
+        
+        def on_cancel():
+            dialog.destroy()
+            
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(pady=10)
+        ttk.Button(button_frame, text="Confirm", command=on_confirm).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=5)
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
+        
+        # Set focus to entry and wait for dialog
+        entry.focus_set()
+        self.root.wait_window(dialog)
+
 if __name__ == "__main__":
+    # Ensure all requirements are installed before starting the GUI
+    ensure_requirements()
+    
     root = tk.Tk()
     app = FacebeakGUI(root)
     root.mainloop() 

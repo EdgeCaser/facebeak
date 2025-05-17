@@ -2,8 +2,8 @@
 REM Batch script to run facebeak with one click
 
 REM Set these paths as needed
-set VENV_PATH=C:\Users\ianfe\venv\Scripts\activate
-set REPO_PATH=C:\Users\ianfe\OneDrive\Documents\GitHub\birbTagger
+set VENV_PATH=%~dp0venv\Scripts\activate
+set REPO_PATH=%~dp0
 
 call %VENV_PATH%
 cd /d %REPO_PATH%
