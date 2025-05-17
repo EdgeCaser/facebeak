@@ -57,6 +57,8 @@ facebeak is an AI-powered tool for identifying and tracking individual crows (an
   3. Type `python gui_launcher.py` and press Enter
 - For other issues, check the output box for error messages
 
+If you see a warning about ffmpeg not being installed or your output videos are missing audio, see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for step-by-step instructions to resolve ffmpeg PATH issues.
+
 ## Technical Details (For Developers)
 
 ## Requirements
