@@ -2,6 +2,37 @@
 
 facebeak is an AI-powered tool for identifying and tracking individual crows (and other birds) in video footage. It uses computer vision models to detect birds, assign persistent visual IDs, and optionally build a database of known individuals for long-term study.
 
+## System Overview
+
+The facebeak system consists of three main steps that work together to identify and track individual crows:
+
+1. **Data Extraction** (`extract_training_data.py`)
+   - Processes input videos to detect and extract individual crow images
+   - Uses Faster R-CNN and YOLOv8 models to identify birds in each frame
+   - Saves high-quality crow crops to the `crow_crops` directory
+   - Each crow gets its own subdirectory with multiple images from different frames
+   - This step is essential for building a diverse training dataset
+
+2. **Model Training** (`train_triplet_resnet.py`)
+   - Trains a ResNet-18 model using triplet loss to learn crow visual identities
+   - Uses the extracted crow crops to teach the model to recognize individual crows
+   - Learns to make similar crows look similar and different crows look different in the embedding space
+   - Outputs a trained model file (`crow_resnet_triplet.pth`) that can identify individual crows
+   - The model can be retrained with new data to improve recognition accuracy
+
+3. **Video Processing** (`main.py` and `tracking.py`)
+   - Processes new videos to detect, track, and identify individual crows
+   - Uses the trained model to assign consistent IDs to crows across frames
+   - Maintains a database of known crows and their sighting history
+   - Outputs annotated videos with crow IDs and tracking information
+   - Can be run through the GUI (`gui_launcher.py`) or command line
+
+To improve the system's accuracy:
+1. Add new videos to your collection
+2. Run the extraction script to gather more crow images
+3. Retrain the model with the expanded dataset
+4. Process new videos with the improved model
+
 ## Features
 - Detects crows and other birds in outdoor videos using pretrained computer vision models (Faster R-CNN, ResNet18)
 - Assigns visual embeddings and matches individuals over time
@@ -100,16 +131,15 @@ The database is automatically encrypted for security:
 ### Data Protection
 
 To protect your crow data:
-- Never share the `.env` file or database file
+- Be careful when sharing the `.env` file or database file - some data could be private
 - Keep backups of both the database and `.env` file
-- The database and its backups are excluded from version control
-- If you need to share data, export it through the program's export features
+- The database and its backups are excluded from version control 
 
 ### Publishing Data
 
 When publishing data or results:
 - Ensure you have necessary permits for wildlife observation
-- Consider privacy implications for the crows
+- Consider privacy implications
 - Use aggregated data when possible
 - Remove or anonymize sensitive location data
 - Follow local wildlife protection guidelines
