@@ -39,7 +39,21 @@ def initialize_database():
             frame_number INTEGER,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             confidence FLOAT,
+            segment_id INTEGER,
             FOREIGN KEY (crow_id) REFERENCES crows(id)
+        )
+        ''')
+        
+        c.execute('''
+        CREATE TABLE IF NOT EXISTS behavioral_markers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            segment_id INTEGER NOT NULL,
+            frame_number INTEGER,
+            marker_type TEXT NOT NULL,
+            confidence FLOAT,
+            details TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (segment_id) REFERENCES crow_embeddings(id)
         )
         ''')
         
@@ -241,23 +255,69 @@ def get_crow_embeddings(crow_id):
     conn = get_connection()
     c = conn.cursor()
     
-    c.execute('''
-        SELECT embedding, video_path, frame_number, timestamp, confidence
-        FROM crow_embeddings
-        WHERE crow_id = ?
-        ORDER BY timestamp DESC
-    ''', (crow_id,))
+    try:
+        c.execute('''
+            SELECT e.embedding, e.video_path, e.frame_number, e.timestamp, e.confidence,
+                   e.segment_id, e.id as embedding_id
+            FROM crow_embeddings e
+            WHERE e.crow_id = ?
+            ORDER BY e.timestamp DESC
+        ''', (crow_id,))
+        
+        rows = c.fetchall()
+        return [{
+            'embedding': np.frombuffer(row[0], dtype=np.float32),
+            'video_path': row[1],
+            'frame_number': row[2],
+            'timestamp': row[3],
+            'confidence': row[4],
+            'segment_id': row[5],
+            'embedding_id': row[6],
+            'markers': get_segment_markers(row[5])  # Include behavioral markers
+        } for row in rows]
+    finally:
+        conn.close()
+
+def add_behavioral_marker(segment_id, marker_type, details, confidence=1.0, frame_number=None):
+    """Add a behavioral marker for a crow segment."""
+    conn = get_connection()
+    c = conn.cursor()
     
-    rows = c.fetchall()
-    conn.close()
+    try:
+        c.execute('''
+            INSERT INTO behavioral_markers 
+            (segment_id, frame_number, marker_type, confidence, details)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (segment_id, frame_number, marker_type, confidence, details))
+        
+        conn.commit()
+        return c.lastrowid
+    finally:
+        conn.close()
+
+def get_segment_markers(segment_id):
+    """Get all behavioral markers for a segment."""
+    conn = get_connection()
+    c = conn.cursor()
     
-    return [{
-        'embedding': np.frombuffer(row[0], dtype=np.float32),
-        'video_path': row[1],
-        'frame_number': row[2],
-        'timestamp': row[3],
-        'confidence': row[4]
-    } for row in rows]
+    try:
+        c.execute('''
+            SELECT marker_type, details, confidence, frame_number, timestamp
+            FROM behavioral_markers 
+            WHERE segment_id = ?
+            ORDER BY frame_number ASC
+        ''', (segment_id,))
+        
+        rows = c.fetchall()
+        return [{
+            'type': row[0],
+            'value': row[1],
+            'confidence': row[2],
+            'frame_number': row[3],
+            'timestamp': row[4]
+        } for row in rows]
+    finally:
+        conn.close()
 
 def backup_database():
     """Create a backup of the database."""

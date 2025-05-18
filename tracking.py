@@ -1,26 +1,43 @@
 import cv2
 import numpy as np
-import torchvision
-from torchvision.models import resnet18
 import torch
 from tqdm import tqdm
 from collections import defaultdict
-from db import save_crow_embedding, get_all_crows, get_crow_history
+from db import save_crow_embedding, get_all_crows, get_crow_history, add_behavioral_marker
 from sort import Sort
 from scipy.spatial.distance import cdist
+from models import CrowResNetEmbedder
+from ultralytics import YOLO
 
-# Load model once at module level
-model = resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT)
-model = torch.nn.Sequential(*list(model.children())[:-1])  # Remove classification layer
+# Load models
+print("[INFO] Loading models...")
+# Crow embedding model
+model = CrowResNetEmbedder(embedding_dim=512)
+try:
+    model.load_state_dict(torch.load('crow_resnet_triplet.pth'))
+    print("[INFO] Loaded trained crow embedding model")
+except:
+    print("[WARNING] Could not load trained model, using untrained model")
 model.eval()
+
+# Toy detection model
+try:
+    toy_model = YOLO('yolov8n_toys.pt')
+    print("[INFO] Loaded toy detection model")
+except:
+    print("[WARNING] Could not load toy detection model, toy detection disabled")
+    toy_model = None
+
 if torch.cuda.is_available():
     model = model.cuda()
-    print("[INFO] Tracking model loaded on GPU")
+    if toy_model:
+        toy_model.to('cuda')
+    print("[INFO] Models loaded on GPU")
 else:
-    print("[INFO] Tracking model loaded on CPU")
+    print("[INFO] Models loaded on CPU")
 
 def compute_embedding(img_tensor):
-    """Compute feature embedding for an image tensor."""
+    """Compute feature embedding for an image tensor using our trained model."""
     with torch.no_grad():
         if torch.cuda.is_available():
             img_tensor = img_tensor.cuda()
@@ -72,7 +89,7 @@ def extract_crow_image(frame, box, padding=0.3):
 class EnhancedTracker:
     def __init__(self, max_age=10, min_hits=2, iou_threshold=0.15, embedding_threshold=0.6):
         """
-        Enhanced tracker combining SORT with visual embeddings.
+        Enhanced tracker combining SORT with visual embeddings and behavioral markers.
         Args:
             max_age: Maximum number of frames to keep a track alive without detection
             min_hits: Minimum number of detections before a track is confirmed
@@ -85,10 +102,22 @@ class EnhancedTracker:
         self.track_history = defaultdict(list)  # track_id -> list of boxes
         self.frame_count = 0
         self.track_ages = defaultdict(int)  # Track how long each ID has been active
+        self.segment_ids = {}  # track_id -> current segment_id
     
     def update(self, frame, detections):
         """Update tracks with new detections using both IOU and embeddings."""
         self.frame_count += 1
+        
+        # Detect toys if model is available
+        toy_detections = []
+        if toy_model:
+            toy_results = toy_model(frame)[0]
+            for box in toy_results.boxes.xyxy:
+                toy_detections.append({
+                    'box': box.cpu().numpy(),
+                    'type': toy_results.names[int(toy_results.boxes.cls[0])],
+                    'confidence': float(toy_results.boxes.conf[0])
+                })
         
         # Prepare detections for SORT
         dets = []
@@ -130,14 +159,36 @@ class EnhancedTracker:
                 # Update track embedding
                 if track_id not in self.track_embeddings:
                     self.track_embeddings[track_id] = []
-                self.track_embeddings[track_id].append(det_embeddings[det_idx])
+                embedding = det_embeddings[det_idx]
+                self.track_embeddings[track_id].append(embedding)
+                
                 # Keep more embeddings for older tracks
-                max_embeddings = min(10, 5 + self.track_ages[track_id] // 30)  # Increase history for stable tracks
+                max_embeddings = min(10, 5 + self.track_ages[track_id] // 30)
                 self.track_embeddings[track_id] = self.track_embeddings[track_id][-max_embeddings:]
+                
+                # Save embedding and get segment_id
+                segment_id = save_crow_embedding(
+                    embedding,
+                    video_path=None,  # Will be set in assign_crow_ids
+                    frame_number=self.frame_count,
+                    confidence=track[4]
+                )
+                self.segment_ids[track_id] = segment_id
+                
+                # Check for toy interactions
+                if toy_model and toy_detections:
+                    for toy in toy_detections:
+                        if compute_iou(track[:4], toy['box']) > 0.5:
+                            add_behavioral_marker(
+                                segment_id,
+                                'toy_interaction',
+                                toy['type'],
+                                toy['confidence'],
+                                self.frame_count
+                            )
             
             # Update track history
             self.track_history[track_id].append(track[:4])
-            # Keep more history for older tracks
             max_history = min(20, 10 + self.track_ages[track_id] // 30)
             self.track_history[track_id] = self.track_history[track_id][-max_history:]
             
