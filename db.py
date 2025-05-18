@@ -75,6 +75,9 @@ def save_crow_embedding(embedding, video_path=None, frame_number=None, confidenc
     c = conn.cursor()
     
     try:
+        # Start transaction
+        conn.execute("BEGIN TRANSACTION")
+        
         # Try to find matching crow
         crow_id = find_matching_crow(
             embedding,
@@ -83,18 +86,32 @@ def save_crow_embedding(embedding, video_path=None, frame_number=None, confidenc
             frame_number=frame_number
         )
         
+        # Verify if crow exists if we got an ID
+        if crow_id is not None:
+            c.execute('SELECT id FROM crows WHERE id = ?', (crow_id,))
+            if not c.fetchone():
+                logger.warning(f"Crow ID {crow_id} returned by find_matching_crow but not found in database. Creating new crow.")
+                crow_id = None
+        
         if crow_id is None:
             # Create new crow entry
-            c.execute('INSERT INTO crows (first_seen) VALUES (CURRENT_TIMESTAMP)')
+            c.execute('INSERT INTO crows (first_seen, last_seen, total_sightings) VALUES (CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)')
             crow_id = c.lastrowid
+            logger.info(f"Created new crow with ID {crow_id}")
+        else:
+            # Update crow's last seen time and increment sightings
+            c.execute('''
+                UPDATE crows 
+                SET last_seen = CURRENT_TIMESTAMP,
+                    total_sightings = total_sightings + 1
+                WHERE id = ?
+            ''', (crow_id,))
+            logger.info(f"Updated existing crow {crow_id}")
         
-        # Update crow's last seen time and increment sightings
-        c.execute('''
-            UPDATE crows 
-            SET last_seen = CURRENT_TIMESTAMP,
-                total_sightings = total_sightings + 1
-            WHERE id = ?
-        ''', (crow_id,))
+        # Double-check crow exists before inserting embedding
+        c.execute('SELECT id FROM crows WHERE id = ?', (crow_id,))
+        if not c.fetchone():
+            raise ValueError(f"Crow ID {crow_id} does not exist in database after creation/update")
         
         # Save the embedding
         embedding_blob = embedding.astype(np.float32).tobytes()
@@ -104,13 +121,20 @@ def save_crow_embedding(embedding, video_path=None, frame_number=None, confidenc
             VALUES (?, ?, ?, ?, ?)
         ''', (crow_id, embedding_blob, video_path, frame_number, confidence))
         
+        # Commit transaction
         conn.commit()
+        logger.info(f"Successfully saved embedding for crow {crow_id}")
         return crow_id
         
+    except Exception as e:
+        # Rollback transaction on error
+        conn.rollback()
+        logger.error(f"Error saving crow embedding: {str(e)}")
+        raise
     finally:
         conn.close()
 
-def find_matching_crow(embedding, threshold=0.6, video_path=None, frame_number=None):  # Lowered threshold
+def find_matching_crow(embedding, threshold=0.6, video_path=None, frame_number=None):
     """
     Find a matching crow in the database based on embedding similarity and temporal consistency.
     Returns crow_id if match found, None otherwise.
@@ -118,73 +142,79 @@ def find_matching_crow(embedding, threshold=0.6, video_path=None, frame_number=N
     conn = get_connection()
     c = conn.cursor()
     
-    # Get recent embeddings from the same video first
-    if video_path:
+    try:
+        # Ensure input embedding is 1-D
+        embedding = embedding.reshape(-1)
+        
+        # Get recent embeddings from the same video first
+        if video_path:
+            c.execute('''
+                WITH recent_embeddings AS (
+                    SELECT ce.crow_id, ce.embedding, ce.frame_number,
+                           ROW_NUMBER() OVER (PARTITION BY ce.crow_id ORDER BY ce.frame_number DESC) as rn
+                    FROM crow_embeddings ce
+                    JOIN crows c ON ce.crow_id = c.id
+                    WHERE ce.video_path = ? AND ce.frame_number < ?
+                    ORDER BY ce.frame_number DESC
+                    LIMIT 100
+                )
+                SELECT crow_id, embedding, frame_number
+                FROM recent_embeddings
+                WHERE rn = 1
+            ''', (video_path, frame_number))
+            recent_rows = c.fetchall()
+            
+            # Check recent embeddings first with a stricter threshold
+            for crow_id, emb_blob, frame_num in recent_rows:
+                known_emb = np.frombuffer(emb_blob, dtype=np.float32).reshape(-1)
+                similarity = 1 - cosine(embedding, known_emb)
+                # Use stricter threshold for same-video matches
+                if similarity > 0.7:  # Higher threshold for same video
+                    return crow_id
+        
+        # If no match in same video, check all known crows
         c.execute('''
-            WITH recent_embeddings AS (
-                SELECT crow_id, embedding, frame_number,
-                       ROW_NUMBER() OVER (PARTITION BY crow_id ORDER BY frame_number DESC) as rn
-                FROM crow_embeddings
-                WHERE video_path = ? AND frame_number < ?
-                ORDER BY frame_number DESC
-                LIMIT 100
+            WITH latest_embeddings AS (
+                SELECT ce.crow_id, ce.embedding, ce.timestamp,
+                       ROW_NUMBER() OVER (PARTITION BY ce.crow_id ORDER BY ce.timestamp DESC) as rn
+                FROM crow_embeddings ce
+                JOIN crows c ON ce.crow_id = c.id
             )
-            SELECT crow_id, embedding, frame_number
-            FROM recent_embeddings
+            SELECT crow_id, embedding, timestamp
+            FROM latest_embeddings 
             WHERE rn = 1
-        ''', (video_path, frame_number))
-        recent_rows = c.fetchall()
+        ''')
         
-        # Check recent embeddings first with a stricter threshold
-        for crow_id, emb_blob, frame_num in recent_rows:
-            known_emb = np.frombuffer(emb_blob, dtype=np.float32)
+        rows = c.fetchall()
+        
+        if not rows:
+            return None
+        
+        # Compare with all known crows
+        best_match = None
+        best_score = 0
+        
+        for crow_id, emb_blob, timestamp in rows:
+            known_emb = np.frombuffer(emb_blob, dtype=np.float32).reshape(-1)
+            # Use cosine similarity (1 - cosine distance)
             similarity = 1 - cosine(embedding, known_emb)
-            # Use stricter threshold for same-video matches
-            if similarity > 0.7:  # Higher threshold for same video
-                conn.close()
-                return crow_id
-    
-    # If no match in same video, check all known crows
-    c.execute('''
-        WITH latest_embeddings AS (
-            SELECT crow_id, embedding, timestamp,
-                   ROW_NUMBER() OVER (PARTITION BY crow_id ORDER BY timestamp DESC) as rn
-            FROM crow_embeddings
-        )
-        SELECT crow_id, embedding, timestamp
-        FROM latest_embeddings 
-        WHERE rn = 1
-    ''')
-    
-    rows = c.fetchall()
-    conn.close()
-    
-    if not rows:
-        return None
-    
-    # Compare with all known crows
-    best_match = None
-    best_score = 0
-    
-    for crow_id, emb_blob, timestamp in rows:
-        known_emb = np.frombuffer(emb_blob, dtype=np.float32)
-        # Use cosine similarity (1 - cosine distance)
-        similarity = 1 - cosine(embedding, known_emb)
+            
+            # Adjust threshold based on crow's history
+            crow_history = get_crow_history(crow_id)
+            if crow_history:
+                # More lenient threshold for crows with more sightings
+                adjusted_threshold = threshold - (min(crow_history['total_sightings'], 50) * 0.002)
+                adjusted_threshold = max(0.5, adjusted_threshold)  # Don't go below 0.5
+            else:
+                adjusted_threshold = threshold
+            
+            if similarity > adjusted_threshold and similarity > best_score:
+                best_score = similarity
+                best_match = crow_id
         
-        # Adjust threshold based on crow's history
-        crow_history = get_crow_history(crow_id)
-        if crow_history:
-            # More lenient threshold for crows with more sightings
-            adjusted_threshold = threshold - (min(crow_history['total_sightings'], 50) * 0.002)
-            adjusted_threshold = max(0.5, adjusted_threshold)  # Don't go below 0.5
-        else:
-            adjusted_threshold = threshold
-        
-        if similarity > adjusted_threshold and similarity > best_score:
-            best_score = similarity
-            best_match = crow_id
-    
-    return best_match
+        return best_match
+    finally:
+        conn.close()
 
 def get_crow_history(crow_id):
     """Get the sighting history for a specific crow."""

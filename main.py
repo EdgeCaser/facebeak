@@ -2,13 +2,15 @@ import os
 import argparse
 import sys
 from detection import detect_crows, detect_crows_cascade, detect_crows_parallel
-from tracking import assign_crow_ids
+from tracking import assign_crow_ids, Sort
 from utils import extract_frames, save_video_with_labels
 from db import get_all_crows
 import cv2
 from tqdm import tqdm
 from datetime import datetime
 import subprocess
+import numpy as np
+from typing import List
 
 class TeeLogger:
     def __init__(self, log_path):
@@ -89,13 +91,20 @@ def add_audio_to_video(processed_video, original_video, output_video):
             '-shortest',
             temp_output
         ]
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        # Use Popen to capture and log output in real-time
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        for line in process.stdout:
+            print(line.strip())  # This will be captured by TeeLogger
+        process.wait()
+        
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, cmd)
         
         # If successful, move temp file to final output
         if os.path.exists(temp_output):
             os.replace(temp_output, output_video)
     except subprocess.CalledProcessError as e:
-        print(f"[WARNING] Could not add audio: {e.stderr}")
+        print(f"[WARNING] Could not add audio: {str(e)}")
         # If audio transfer fails, just copy the processed video to output
         import shutil
         shutil.copy2(processed_video, output_video)
@@ -123,13 +132,20 @@ def compress_video(input_path, output_path, crf=23):
             '-acodec', 'copy',
             temp_output
         ]
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        # Use Popen to capture and log output in real-time
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        for line in process.stdout:
+            print(line.strip())  # This will be captured by TeeLogger
+        process.wait()
+        
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, cmd)
         
         # If successful, move temp file to final output
         if os.path.exists(temp_output):
             os.replace(temp_output, output_path)
     except subprocess.CalledProcessError as e:
-        print(f"[WARNING] Could not compress video: {e.stderr}")
+        print(f"[WARNING] Could not compress video: {str(e)}")
         # If compression fails, just copy the input to output
         import shutil
         shutil.copy2(input_path, output_path)
@@ -139,163 +155,403 @@ def compress_video(input_path, output_path, crf=23):
         import shutil
         shutil.copy2(input_path, output_path)
 
-def process_video(video_path, output_path, detection_threshold=0.3, yolo_threshold=0.2, similarity_threshold=0.7, skip_frames=0, max_age=5, min_hits=2, iou_threshold=0.2):
-    """
-    Process a video file to detect and track crows.
-    """
-    # Initialize logger
-    logger = TeeLogger('facebeak_session.log')
-    try:
-        print(f"[LOG] Starting facebeak session. Video: {video_path}, Output: {output_path}")
-        print("[LOG] Parameters:")
-        print(f"  - Frame skip: {skip_frames}")
-        print(f"  - Detection threshold: {detection_threshold}")
-        print(f"  - YOLO threshold: {yolo_threshold}")
-        print(f"  - Max age: {max_age}")
-        print(f"  - Min hits: {min_hits}")
-        print(f"  - IOU threshold: {iou_threshold}")
-        print(f"  - Embedding threshold: {similarity_threshold}")
-
-        print(f"[INFO] Processing video: {video_path}")
-        print(f"[INFO] Output will be saved to: {output_path}")
-        print(f"[INFO] Using detection threshold: {detection_threshold}")
-        print(f"[INFO] Using YOLO threshold: {yolo_threshold}")
-        print(f"[INFO] Using similarity threshold: {similarity_threshold}")
-        print(f"[INFO] Frame skip: {skip_frames} (processing every {skip_frames + 1} frame)")
-
-        # Load video
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            print(f"[ERROR] Could not open video file: {video_path}")
-            return
-
-        # Get video orientation
-        rotation = get_video_orientation(cap)
-        print(f"[INFO] Detected video rotation: {rotation} degrees")
-
-        # Get video properties
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+def interpolate_frames(processed_frames, total_frames, track_history_per_frame=None):
+    """Interpolate between processed frames to reconstruct a full-frame video."""
+    if len(processed_frames) == 0:
+        return []
+    
+    # Calculate frames per segment (including skipped frames)
+    frames_per_segment = total_frames // (len(processed_frames) - 1) if len(processed_frames) > 1 else total_frames
+    
+    interp_frames = []
+    for i in range(len(processed_frames) - 1):
+        # Add the current processed frame
+        interp_frames.append(processed_frames[i])
         
-        # Adjust dimensions if video is rotated
-        if rotation in [90, 270]:
-            frame_width, frame_height = frame_height, frame_width
+        # Get current and next frame's track information
+        current_tracks = track_history_per_frame[i] if track_history_per_frame else {}
+        next_tracks = track_history_per_frame[i + 1] if track_history_per_frame else {}
+        
+        # Interpolate frames between current and next
+        for g in range(1, frames_per_segment):
+            alpha = g / frames_per_segment
+            interp_frame = processed_frames[i].copy()
             
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        print(f"[INFO] Total frames in video: {total_frames}")
-        
-        # Calculate expected number of frames to process
-        frames_to_process = total_frames // (skip_frames + 1)
-        print(f"[INFO] Will process approximately {frames_to_process} frames")
+            # Interpolate each track's bounding box
+            for track_id in set(current_tracks.keys()) | set(next_tracks.keys()):
+                if track_id in current_tracks and track_id in next_tracks:
+                    # Both frames have this track, interpolate position
+                    curr_box = current_tracks[track_id]
+                    next_box = next_tracks[track_id]
+                    
+                    # Linear interpolation of box coordinates
+                    interp_box = [
+                        int(curr_box[0] * (1 - alpha) + next_box[0] * alpha),
+                        int(curr_box[1] * (1 - alpha) + next_box[1] * alpha),
+                        int(curr_box[2] * (1 - alpha) + next_box[2] * alpha),
+                        int(curr_box[3] * (1 - alpha) + next_box[3] * alpha)
+                    ]
+                    
+                    # Draw interpolated box
+                    cv2.rectangle(interp_frame, (interp_box[0], interp_box[1]), 
+                                (interp_box[2], interp_box[3]), (0, 255, 255), 2)
+                    label = f"Crow {track_id}"
+                    cv2.putText(interp_frame, label, (interp_box[0], interp_box[1]-10),
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 2)
+                elif track_id in current_tracks:
+                    # Track only in current frame, fade out
+                    if alpha < 0.5:  # Only show in first half of interpolation
+                        box = current_tracks[track_id]
+                        opacity = 1 - (alpha * 2)  # Fade from 1 to 0
+                        cv2.rectangle(interp_frame, (box[0], box[1]), (box[2], box[3]), 
+                                    (0, int(255 * opacity), int(255 * opacity)), 2)
+                        cv2.putText(interp_frame, f"Crow {track_id}", (box[0], box[1]-10),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.9, 
+                                  (0, int(255 * opacity), int(255 * opacity)), 2)
+                elif track_id in next_tracks:
+                    # Track only in next frame, fade in
+                    if alpha >= 0.5:  # Only show in second half of interpolation
+                        box = next_tracks[track_id]
+                        opacity = (alpha - 0.5) * 2  # Fade from 0 to 1
+                        cv2.rectangle(interp_frame, (box[0], box[1]), (box[2], box[3]), 
+                                    (0, int(255 * opacity), int(255 * opacity)), 2)
+                        cv2.putText(interp_frame, f"Crow {track_id}", (box[0], box[1]-10),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.9, 
+                                  (0, int(255 * opacity), int(255 * opacity)), 2)
+            
+            interp_frames.append(interp_frame)
+    
+    # Add the last processed frame
+    interp_frames.append(processed_frames[-1])
+    
+    # Ensure we have exactly total_frames
+    if len(interp_frames) > total_frames:
+        interp_frames = interp_frames[:total_frames]
+    elif len(interp_frames) < total_frames:
+        # Pad with the last frame if needed
+        interp_frames.extend([processed_frames[-1]] * (total_frames - len(interp_frames)))
+    
+    return interp_frames
 
-        # Initialize video writer with adjusted dimensions
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+def parse_args():
+    parser = argparse.ArgumentParser(description="Process video for crow detection and tracking")
+    parser.add_argument("--video", required=True, help="Input video file")
+    parser.add_argument("--skip-output", required=True, help="Output video file for frame-skipped detection")
+    parser.add_argument("--full-output", required=True, help="Output video file for full-frame interpolated tracking")
+    parser.add_argument("--detection-threshold", type=float, default=0.3, help="Detection confidence threshold")
+    parser.add_argument("--yolo-threshold", type=float, default=0.2, help="YOLO confidence threshold")
+    parser.add_argument("--max-age", type=int, default=5, help="Maximum age of a track")
+    parser.add_argument("--min-hits", type=int, default=2, help="Minimum hits to start tracking")
+    parser.add_argument("--iou-threshold", type=float, default=0.2, help="IOU threshold for tracking")
+    parser.add_argument("--embedding-threshold", type=float, default=0.7, help="Embedding similarity threshold")
+    parser.add_argument("--skip", type=int, default=5, help="Number of frames to skip")
+    parser.add_argument("--multi-view-stride", type=int, default=1, help="Stride for multi-view extraction")
+    parser.add_argument("--preserve-audio", action="store_true", help="Preserve audio in output videos")
+    return parser.parse_args()
 
-        frames = []
-        frame_count = 0
-        processed_frames = 0
+def calculate_iou(box1, box2):
+    """Calculate Intersection over Union between two bounding boxes."""
+    x1 = max(box1[0], box2[0])
+    y1 = max(box1[1], box2[1])
+    x2 = min(box1[2], box2[2])
+    y2 = min(box1[3], box2[3])
+    
+    intersection = max(0, x2 - x1) * max(0, y2 - y1)
+    box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    union = box1_area + box2_area - intersection
+    
+    return intersection / union if union > 0 else 0
 
-        print("[INFO] Reading video frames...")
-        with tqdm(total=total_frames, desc="Extracting frames") as pbar:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
+def draw_detections_and_tracks(frame, detections, tracks):
+    """Draw detections and tracks on the frame."""
+    # Draw detections if provided
+    if detections:
+        for det in detections:
+            box = det['box']
+            score = det['score']
+            label = f"{det['class']} {score:.2f}"
+            
+            # Draw box
+            cv2.rectangle(frame, 
+                        (int(box[0]), int(box[1])), 
+                        (int(box[2]), int(box[3])), 
+                        (0, 255, 0), 2)
+            
+            # Draw label
+            cv2.putText(frame, label, 
+                       (int(box[0]), int(box[1]-10)),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, 
+                       (0, 255, 0), 2)
+    
+    # Draw tracks if provided
+    if tracks is not None and len(tracks) > 0:
+        for track in tracks:
+            # Get box coordinates and track ID
+            x1, y1, x2, y2, track_id = track[:5]
+            
+            # Draw box
+            cv2.rectangle(frame, 
+                        (int(x1), int(y1)), 
+                        (int(x2), int(y2)), 
+                        (0, 255, 255), 2)
+            
+            # Draw track ID
+            label = f"Crow {int(track_id)}"
+            cv2.putText(frame, label, 
+                       (int(x1), int(y1-10)),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, 
+                       (0, 255, 255), 2)
+    
+    return frame
 
-                if frame_count % (skip_frames + 1) == 0:
-                    # Rotate frame if needed
-                    frame = rotate_frame(frame, rotation)
-                    frames.append(frame)
-                    processed_frames += 1
-                frame_count += 1
-                pbar.update(1)
-
-        cap.release()
-        print(f"[INFO] Read {len(frames)} frames for processing")
-        print(f"[LOG] Extracted {len(frames)} frames.")
-
-        # Detect crows in frames
-        print("[INFO] Detecting crows...")
-        detections_list = detect_crows_parallel(frames, score_threshold=detection_threshold, yolo_threshold=yolo_threshold)
-
-        # Track crows across frames
-        print("[INFO] Tracking crows...")
-        labeled_frames = assign_crow_ids(
-            frames, 
-            detections_list,
-            video_path=video_path,  # Pass video path for database tracking
-            max_age=max_age,
-            min_hits=min_hits,
-            iou_threshold=iou_threshold,
-            embedding_threshold=similarity_threshold
+def process_video(video_path: str, skip_output: str, full_output: str, args):
+    """Process video for crow detection and tracking."""
+    # Open video
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video: {video_path}")
+    
+    # Get video properties
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    # Calculate effective FPS for skip-frame video
+    skip_fps = fps / args.skip if args.skip > 1 else fps
+    
+    # Initialize video writers
+    skip_writer = cv2.VideoWriter(
+        skip_output,
+        cv2.VideoWriter_fourcc(*'mp4v'),
+        skip_fps,
+        (width, height)
+    )
+    
+    full_writer = cv2.VideoWriter(
+        full_output,
+        cv2.VideoWriter_fourcc(*'mp4v'),
+        fps,  # Use original FPS for full-frame video
+        (width, height)
+    )
+    
+    # Initialize tracker
+    tracker = Sort(max_age=args.max_age, min_hits=args.min_hits, iou_threshold=args.iou_threshold)
+    
+    # Process frames
+    frame_count = 0
+    processed_frames = []
+    processed_tracks = []
+    frames_to_process = []
+    frame_indices = []
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        if frame_count % args.skip == 0:
+            frames_to_process.append(frame)
+            frame_indices.append(frame_count)
+            
+        frame_count += 1
+    
+    # Process frames in batches
+    if frames_to_process:
+        detections_list = detect_crows_parallel(
+            frames_to_process,
+            score_threshold=args.detection_threshold,
+            yolo_threshold=args.yolo_threshold
         )
-
-        # Write output video
-        print("[INFO] Writing output video...")
-        temp_output = os.path.join(os.path.dirname(output_path), 'temp_processed.mp4')
-        out = cv2.VideoWriter(temp_output, fourcc, fps, (frame_width, frame_height))
         
-        for frame in tqdm(labeled_frames, desc="Saving video"):
-            out.write(frame)
-        out.release()
-        
-        # Add audio and compress
-        print("[INFO] Adding audio to output video...")
-        add_audio_to_video(temp_output, video_path, output_path)
-        
-        # Clean up temporary file
-        if os.path.exists(temp_output):
-            os.remove(temp_output)
+        # Process each frame's detections
+        for frame, detections, frame_idx in zip(frames_to_process, detections_list, frame_indices):
+            # Convert detections to format expected by tracker
+            dets = np.array([[d['box'][0], d['box'][1], d['box'][2], d['box'][3], d['score']] 
+                            for d in detections]) if detections else np.empty((0, 5))
             
-        print(f"[INFO] Processing complete. Output saved to: {output_path}")
+            # Update tracker
+            tracks = tracker.update(dets)
+            
+            # Draw detections and tracks
+            processed_frame = draw_detections_and_tracks(frame.copy(), detections, tracks)
+            skip_writer.write(processed_frame)
+            
+            # Store for interpolation
+            processed_frames.append(frame_idx)
+            processed_tracks.append(tracks)
+    
+    # Release video capture and skip-frame writer
+    cap.release()
+    skip_writer.release()
+    
+    # Generate full-frame video with interpolated tracks
+    interpolate_frames(
+        video_path,
+        full_output,
+        processed_frames,
+        processed_tracks,
+        fps,
+        args.preserve_audio
+    )
+    
+    return frame_count
 
-        # Print crow summary
-        print("\n[INFO] Crow Summary:")
-        crows = get_all_crows()
-        for crow in crows:
-            print(f"Crow {crow['id']} ({crow['name']}):")
-            print(f"  - First seen: {crow['first_seen']}")
-            print(f"  - Last seen: {crow['last_seen']}")
-            print(f"  - Total sightings: {crow['total_sightings']}")
-            print(f"  - Seen in {crow['video_count']} videos")
-            print()
+def interpolate_frames(video_path: str, output_path: str, processed_frames: List[int], 
+                      processed_tracks: List[np.ndarray], fps: float, preserve_audio: bool):
+    """Generate full-frame video with interpolated tracks."""
+    if not processed_frames or not processed_tracks:
+        print("[WARNING] No processed frames or tracks available for interpolation")
+        # Just copy the original video if no tracks to interpolate
+        import shutil
+        shutil.copy2(video_path, output_path)
+        return
 
-    except Exception as e:
-        print(f"[ERROR] An error occurred during processing: {str(e)}")
-        print(f"[LOG] Session failed with error: {str(e)}")
-        # Clean up any temporary files
-        if 'temp_output' in locals() and os.path.exists(temp_output):
-            try:
-                os.remove(temp_output)
-            except:
-                pass
-        raise
-    finally:
-        logger.close()
+    cap = cv2.VideoCapture(video_path)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    # Create temporary video without audio
+    temp_output = output_path + ".temp.mp4"
+    writer = cv2.VideoWriter(
+        temp_output,
+        cv2.VideoWriter_fourcc(*'mp4v'),
+        fps,
+        (width, height)
+    )
+    
+    frame_count = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        try:
+            # Find nearest processed frames
+            prev_frames = [i for i, f in enumerate(processed_frames) if f <= frame_count]
+            next_frames = [i for i, f in enumerate(processed_frames) if f >= frame_count]
+            
+            if not prev_frames and not next_frames:
+                # No processed frames available, use original frame
+                writer.write(frame)
+                frame_count += 1
+                continue
+                
+            if not prev_frames:
+                # Only future frames available, use the first one
+                next_idx = next_frames[0]
+                tracks = processed_tracks[next_idx]
+            elif not next_frames:
+                # Only past frames available, use the last one
+                prev_idx = prev_frames[-1]
+                tracks = processed_tracks[prev_idx]
+            else:
+                # Both past and future frames available
+                prev_idx = prev_frames[-1]
+                next_idx = next_frames[0]
+                
+                if prev_idx == next_idx:
+                    # Use exact track
+                    tracks = processed_tracks[prev_idx]
+                else:
+                    # Interpolate between tracks
+                    prev_tracks = processed_tracks[prev_idx]
+                    next_tracks = processed_tracks[next_idx]
+                    prev_frame = processed_frames[prev_idx]
+                    next_frame = processed_frames[next_idx]
+                    
+                    # Interpolate tracks
+                    alpha = (frame_count - prev_frame) / (next_frame - prev_frame)
+                    tracks = interpolate_tracks(prev_tracks, next_tracks, alpha)
+            
+            # Draw interpolated tracks
+            frame = draw_detections_and_tracks(frame, None, tracks)
+            writer.write(frame)
+            
+        except Exception as e:
+            print(f"[WARNING] Error processing frame {frame_count}: {str(e)}")
+            # Write original frame if there's an error
+            writer.write(frame)
+            
+        frame_count += 1
+    
+    # Release resources
+    cap.release()
+    writer.release()
+    
+    if preserve_audio:
+        # Use ffmpeg to combine video with original audio
+        try:
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', temp_output,
+                '-i', video_path,
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-map', '0:v:0',
+                '-map', '1:a:0',
+                output_path
+            ]
+            # Use Popen to capture and log output in real-time
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            for line in process.stdout:
+                print(line.strip())  # This will be captured by TeeLogger
+            process.wait()
+            
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, cmd)
+                
+            os.remove(temp_output)
+        except Exception as e:
+            print(f"[WARNING] Could not add audio: {str(e)}")
+            os.rename(temp_output, output_path)
+    else:
+        os.rename(temp_output, output_path)
+
+def interpolate_tracks(prev_tracks: np.ndarray, next_tracks: np.ndarray, alpha: float) -> np.ndarray:
+    """Interpolate between two sets of tracks."""
+    if len(prev_tracks) == 0:
+        return next_tracks
+    if len(next_tracks) == 0:
+        return prev_tracks
+    
+    # Match tracks between frames
+    matched_tracks = []
+    for prev_track in prev_tracks:
+        best_iou = 0
+        best_next = None
+        for next_track in next_tracks:
+            iou = calculate_iou(prev_track[:4], next_track[:4])
+            if iou > best_iou:
+                best_iou = iou
+                best_next = next_track
+        
+        if best_next is not None and best_iou > 0.3:  # Minimum IOU threshold
+            # Interpolate bounding box
+            interp_box = prev_track[:4] * (1 - alpha) + best_next[:4] * alpha
+            # Keep ID from previous track
+            interp_track = np.concatenate([interp_box, prev_track[4:]])
+            matched_tracks.append(interp_track)
+    
+    return np.array(matched_tracks) if matched_tracks else np.array([])
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Detect and track crows in video")
-    parser.add_argument("--video", required=True, help="Path to input video file")
-    parser.add_argument("--output", required=True, help="Path to output video file")
-    parser.add_argument("--detection-threshold", type=float, default=0.3, help="Detection confidence threshold")
-    parser.add_argument("--yolo-threshold", type=float, default=0.2, help="YOLO detection threshold")
-    parser.add_argument("--max-age", type=int, default=5, help="Maximum number of frames to keep alive a track without associated detections")
-    parser.add_argument("--min-hits", type=int, default=2, help="Minimum number of associated detections before track is initialised")
-    parser.add_argument("--iou-threshold", type=float, default=0.2, help="Minimum IOU for match")
-    parser.add_argument("--embedding-threshold", type=float, default=0.7, help="Similarity threshold for crow matching")
-    parser.add_argument("--skip", type=int, default=0, help="Number of frames to skip between detections")
-    args = parser.parse_args()
-
-    process_video(
-        args.video,
-        args.output,
-        args.detection_threshold,
-        args.yolo_threshold,
-        args.embedding_threshold,  # Using embedding_threshold as similarity_threshold
-        args.skip,
-        max_age=args.max_age,
-        min_hits=args.min_hits,
-        iou_threshold=args.iou_threshold
-    )
+    # Initialize logger
+    log_path = "facebeak_Session.log"
+    logger = TeeLogger(log_path)
+    
+    try:
+        args = parse_args()
+        process_video(
+            args.video,
+            args.skip_output,
+            args.full_output,
+            args
+        )
+    except Exception as e:
+        print(f"[ERROR] An error occurred: {str(e)}")
+        raise
+    finally:
+        # Ensure logger is properly closed
+        logger.close()
