@@ -15,7 +15,7 @@ def test_dataset_initialization(test_data_dir):
     
     # Check that we have samples for each crow
     crow_ids = set()
-    for img_path, video_path, crow_id in dataset.samples:
+    for img_path, video_path, audio_path, crow_id in dataset.samples:
         crow_ids.add(crow_id)
     assert len(crow_ids) == 3, "Should have samples from all 3 crows"
     
@@ -59,7 +59,7 @@ def test_dataset_getitem(test_data_dir):
     
     # Select one sample from each crow
     crow_indices = {}
-    for i, (_, _, crow_id) in enumerate(dataset.samples):
+    for i, (_, _, _, crow_id) in enumerate(dataset.samples):
         if crow_id not in crow_indices:
             crow_indices[crow_id] = i
     indices = list(crow_indices.values())
@@ -122,7 +122,7 @@ def test_dataset_temporal_consistency(test_data_dir):
     
     # Group samples by crow
     crow_samples = {}
-    for img_path, video_path, crow_id in dataset.samples:
+    for img_path, video_path, audio_path, crow_id in dataset.samples:
         if crow_id not in crow_samples:
             crow_samples[crow_id] = []
         crow_samples[crow_id].append((img_path, video_path))

@@ -532,7 +532,7 @@ class CrowExtractorGUI:
         for det in detections:
             if det['score'] < self.min_confidence_var.get():
                 continue
-            box = det['box']
+            box = det['bbox']
             cv2.rectangle(preview, 
                         (int(box[0]), int(box[1])),
                         (int(box[2]), int(box[3])),

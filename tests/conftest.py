@@ -73,11 +73,19 @@ def test_data_dir(tmp_path_factory):
         img_dir = test_dir / crow_id / "images"
         img_dir.mkdir(parents=True)
         
+        # Create video directory
+        video_dir = test_dir / crow_id / "videos"
+        video_dir.mkdir(parents=True)
+        
         # Create 5 images for each crow
         for i in range(5):
             img_path = img_dir / f"{crow_id}_img_{i}.jpg"
             img = create_dummy_image()
             img.save(img_path)
+            
+            # Create corresponding video file
+            video_path = video_dir / f"{crow_id}_img_{i}.mp4"
+            create_dummy_video(video_path, num_frames=30, fps=30)
     
     # Create a metadata file with timestamps
     metadata = {
@@ -105,6 +113,36 @@ def test_data_dir(tmp_path_factory):
         json.dump(metadata, f)
     
     return test_dir
+
+def create_dummy_video(path, num_frames=30, fps=30):
+    """Create a dummy video file for testing."""
+    # Create video writer
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(str(path), fourcc, fps, (640, 480))
+    
+    # Write frames with a crow-like shape
+    for i in range(num_frames):
+        # Create frame with a crow-like shape
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        
+        # Add a dark silhouette (crow-like shape)
+        center_x, center_y = 320, 240
+        radius = 100
+        
+        # Create a dark oval for the body
+        cv2.ellipse(frame, (center_x, center_y), (radius, radius//2), 0, 0, 360, (50, 50, 50), -1)
+        
+        # Add a smaller circle for the head
+        head_radius = radius // 2
+        cv2.circle(frame, (center_x + radius//2, center_y - radius//4), head_radius, (50, 50, 50), -1)
+        
+        # Add some noise to make it more realistic
+        noise = np.random.normal(0, 10, frame.shape).astype(np.uint8)
+        frame = cv2.add(frame, noise)
+        
+        out.write(frame)
+    
+    out.release()
 
 @pytest.fixture(scope="session")
 def device():

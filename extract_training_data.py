@@ -66,7 +66,7 @@ def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detect
                 if frame_dets:
                     logger.info(f"Frame {frame_num}: Found {len(frame_dets)} detections")
                     for det in frame_dets:
-                        logger.info(f"  Detection: class={det.get('class', 'unknown')}, score={det['score']:.3f}, box={det['box']}")
+                        logger.info(f"  Detection: class={det.get('class', 'unknown')}, score={det['score']:.3f}, bbox={det['bbox']}")
                 
                 for det in frame_dets:
                     if det['score'] < min_confidence:

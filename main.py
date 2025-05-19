@@ -233,7 +233,7 @@ def interpolate_frames(processed_frames, total_frames, track_history_per_frame=N
     
     return interp_frames
 
-def parse_args():
+def parse_args(args=None):
     parser = argparse.ArgumentParser(description="Process video for crow detection and tracking")
     parser.add_argument("--video", required=True, help="Input video file")
     parser.add_argument("--skip-output", required=True, help="Output video file for frame-skipped detection")
@@ -247,7 +247,7 @@ def parse_args():
     parser.add_argument("--skip", type=int, default=5, help="Number of frames to skip")
     parser.add_argument("--multi-view-stride", type=int, default=1, help="Stride for multi-view extraction")
     parser.add_argument("--preserve-audio", action="store_true", help="Preserve audio in output videos")
-    return parser.parse_args()
+    return parser.parse_args(args)
 
 def calculate_iou(box1, box2):
     """Calculate Intersection over Union between two bounding boxes."""
@@ -268,7 +268,7 @@ def draw_detections_and_tracks(frame, detections, tracks):
     # Draw detections if provided
     if detections:
         for det in detections:
-            box = det['box']
+            box = det['bbox']
             score = det['score']
             label = f"{det['class']} {score:.2f}"
             
@@ -368,7 +368,7 @@ def process_video(video_path: str, skip_output: str, full_output: str, args):
         # Process each frame's detections
         for frame, detections, frame_idx in zip(frames_to_process, detections_list, frame_indices):
             # Convert detections to format expected by tracker
-            dets = np.array([[d['box'][0], d['box'][1], d['box'][2], d['box'][3], d['score']] 
+            dets = np.array([[d['bbox'][0], d['bbox'][1], d['bbox'][2], d['bbox'][3], d['score']] 
                             for d in detections]) if detections else np.empty((0, 5))
             
             # Update tracker
@@ -535,6 +535,20 @@ def interpolate_tracks(prev_tracks: np.ndarray, next_tracks: np.ndarray, alpha: 
             matched_tracks.append(interp_track)
     
     return np.array(matched_tracks) if matched_tracks else np.array([])
+
+def process_frame(frame, detections, tracker):
+    """
+    Process a single frame: update tracker, draw detections and tracks.
+    Returns (processed_frame, tracks)
+    """
+    # Convert detections to format expected by tracker
+    dets = np.array([[d['bbox'][0], d['bbox'][1], d['bbox'][2], d['bbox'][3], d['score']] 
+                    for d in detections]) if detections else np.empty((0, 5))
+    # Update tracker
+    tracks = tracker.update(dets)
+    # Draw detections and tracks
+    processed_frame = draw_detections_and_tracks(frame.copy(), detections, tracks)
+    return processed_frame, tracks
 
 if __name__ == "__main__":
     # Initialize logger

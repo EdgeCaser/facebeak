@@ -41,7 +41,8 @@ class CrowTripletDataset(Dataset):
         # Initialize data structures
         self.crow_to_images = {}  # crow_id -> list of image paths
         self.crow_to_audio = {}   # crow_id -> list of audio paths
-        self.samples = []         # list of (image_path, audio_path, crow_id) tuples
+        self.crow_to_videos = {}  # crow_id -> list of video paths
+        self.samples = []         # list of (image_path, video_path, audio_path, crow_id) tuples
         
         # Load data
         for crow_dir in self.crow_dirs:
@@ -58,6 +59,17 @@ class CrowTripletDataset(Dataset):
             else:
                 logger.warning(f"No images found for crow {crow_id}")
             
+            # Find video files
+            video_dir = crow_dir / 'videos'
+            if video_dir.exists():
+                video_paths = sorted(video_dir.glob('*.mp4'))
+                if video_paths:
+                    self.crow_to_videos[crow_id] = video_paths
+                else:
+                    logger.warning(f"No video files found for crow {crow_id}")
+            else:
+                logger.warning(f"No video files found for crow {crow_id}")
+            
             # Find audio files
             audio_dir = crow_dir / 'audio'
             if audio_dir.exists():
@@ -72,6 +84,18 @@ class CrowTripletDataset(Dataset):
             # Create samples
             if crow_id in self.crow_to_images:
                 for img_path in self.crow_to_images[crow_id]:
+                    # Find matching video file if available
+                    video_path = None
+                    if crow_id in self.crow_to_videos:
+                        # Try to find video file with same name
+                        video_name = img_path.stem + '.mp4'
+                        matching_video = [p for p in self.crow_to_videos[crow_id] if p.name == video_name]
+                        if matching_video:
+                            video_path = matching_video[0]
+                        else:
+                            # If no matching video, use first available
+                            video_path = self.crow_to_videos[crow_id][0]
+                    
                     # Find matching audio file if available
                     audio_path = None
                     if crow_id in self.crow_to_audio:
@@ -84,7 +108,7 @@ class CrowTripletDataset(Dataset):
                             # If no matching audio, use first available
                             audio_path = self.crow_to_audio[crow_id][0]
                     
-                    self.samples.append((img_path, audio_path, crow_id))
+                    self.samples.append((img_path, video_path, audio_path, crow_id))
         
         if not self.samples:
             raise ValueError("No valid samples found in dataset")
@@ -103,12 +127,13 @@ class CrowTripletDataset(Dataset):
         Returns:
             dict: Sample containing:
                 - image: torch.Tensor of shape (3, 224, 224)
+                - video_path: Path to video file (or None)
                 - audio: dict containing:
                     - mel_spec: torch.Tensor of shape (128, time)
                     - chroma: torch.Tensor of shape (12, time)
                 - crow_id: str
         """
-        img_path, audio_path, crow_id = self.samples[idx]
+        img_path, video_path, audio_path, crow_id = self.samples[idx]
         
         # Load and transform image
         image = Image.open(img_path).convert('RGB')
@@ -129,6 +154,7 @@ class CrowTripletDataset(Dataset):
         
         return {
             'image': image,
+            'video_path': video_path,
             'audio': audio,
             'crow_id': crow_id
         }
@@ -142,6 +168,7 @@ class CrowTripletDataset(Dataset):
         Returns:
             dict: Batched samples containing:
                 - image: torch.Tensor of shape (batch_size, 3, 224, 224)
+                - video_paths: list of Path objects
                 - audio: dict containing:
                     - mel_spec: torch.Tensor of shape (batch_size, 128, max_time)
                     - chroma: torch.Tensor of shape (batch_size, 12, max_time)
@@ -149,6 +176,7 @@ class CrowTripletDataset(Dataset):
         """
         # Separate images, audio, and labels
         images = [sample['image'] for sample in batch]
+        video_paths = [sample['video_path'] for sample in batch]
         audio_dicts = [sample['audio'] for sample in batch]
         crow_ids = [sample['crow_id'] for sample in batch]
         
@@ -196,6 +224,7 @@ class CrowTripletDataset(Dataset):
         
         return {
             'image': images,
+            'video_paths': video_paths,
             'audio': audio,
             'crow_id': crow_ids
         }
@@ -203,4 +232,4 @@ class CrowTripletDataset(Dataset):
     @property
     def crow_ids(self):
         """Get list of unique crow IDs."""
-        return sorted(set(crow_id for _, _, crow_id in self.samples)) 
+        return sorted(set(crow_id for _, _, _, crow_id in self.samples)) 

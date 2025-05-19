@@ -142,12 +142,11 @@ class CrowTracker:
         """Process a detection and either create a new crow or update an existing one."""
         try:
             # Validate detection
-            if not isinstance(detection, dict) or 'box' not in detection or 'score' not in detection:
-                logger.warning(f"Invalid detection format: {detection}")
-                return None
+            if not isinstance(detection, dict) or 'bbox' not in detection or 'score' not in detection:
+                raise ValueError("Invalid detection format. Expected dict with 'bbox' and 'score' keys")
             
             # Validate box coordinates
-            box = detection['box']
+            box = detection['bbox']
             if not isinstance(box, (list, tuple, np.ndarray)) or len(box) != 4:
                 logger.warning(f"Invalid box format: {box}")
                 return None

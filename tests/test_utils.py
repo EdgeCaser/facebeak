@@ -54,8 +54,8 @@ class TestUtils(unittest.TestCase):
         # Extract frames
         frames = list(extract_frames(self.video_path, progress_callback=None))
         
-        # Verify frame count
-        self.assertEqual(len(frames), 30)  # Should match num_frames in test video
+        # Verify frame count (30 frames total, extracting every 5th frame = 6 frames)
+        self.assertEqual(len(frames), 6)  # Should match num_frames/5 in test video
         
         # Verify frame properties
         for frame in frames:
