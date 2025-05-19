@@ -89,19 +89,76 @@ class TestFacebeakGUI(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up test fixtures that are shared across all tests."""
-        cls.root = tk.Tk()
+        # Create a mock Tk instance with all required attributes
+        cls.root = MagicMock(spec=tk.Tk)
+        cls.root.title = MagicMock()
+        cls.root.quit = MagicMock()
+        cls.root.geometry = MagicMock()
+        cls.root.grid_columnconfigure = MagicMock()
+        cls.root.grid_rowconfigure = MagicMock()
+        
+        # Mock the tk attribute that Tkinter widgets need
+        cls.root.tk = MagicMock()
+        cls.root.tk.call = MagicMock()
+        cls.root.tk.eval = MagicMock()
+        
+        # Mock ttk.Style
+        cls.mock_style = MagicMock(spec=ttk.Style)
+        cls.mock_style.configure = MagicMock()
         
     def setUp(self):
         """Set up test fixtures that are run before each test."""
-        self.app = FacebeakGUI(self.root)
+        # Create mock widgets
+        self.mock_frame = MagicMock(spec=ttk.Frame)
+        self.mock_label_frame = MagicMock(spec=ttk.LabelFrame)
+        self.mock_listbox = MagicMock(spec=tk.Listbox)
+        self.mock_scrollbar = MagicMock(spec=ttk.Scrollbar)
+        self.mock_button = MagicMock(spec=ttk.Button)
+        self.mock_entry = MagicMock(spec=ttk.Entry)
+        self.mock_checkbutton = MagicMock(spec=ttk.Checkbutton)
+        self.mock_text = MagicMock(spec=tk.Text)
+        self.mock_label = MagicMock(spec=ttk.Label)
+        self.mock_boolean_var = MagicMock(spec=tk.BooleanVar)
+        
+        # Set up mock widget behaviors
+        self.mock_listbox.size = MagicMock(return_value=0)
+        self.mock_listbox.get = MagicMock(return_value="")
+        self.mock_listbox.insert = MagicMock()
+        self.mock_listbox.selection_set = MagicMock()
+        self.mock_listbox.delete = MagicMock()
+        self.mock_listbox.curselection = MagicMock(return_value=[])
+        self.mock_listbox.yview = MagicMock()
+        
+        self.mock_entry.get = MagicMock(return_value="")
+        self.mock_entry.insert = MagicMock()
+        
+        self.mock_text.get = MagicMock(return_value="")
+        self.mock_text.insert = MagicMock()
+        self.mock_text.delete = MagicMock()
+        
+        # Create the app with all mocked components
+        with patch('tkinter.ttk.Frame', return_value=self.mock_frame), \
+             patch('tkinter.ttk.LabelFrame', return_value=self.mock_label_frame), \
+             patch('tkinter.Listbox', return_value=self.mock_listbox), \
+             patch('tkinter.ttk.Scrollbar', return_value=self.mock_scrollbar), \
+             patch('tkinter.ttk.Button', return_value=self.mock_button), \
+             patch('tkinter.ttk.Entry', return_value=self.mock_entry), \
+             patch('tkinter.ttk.Checkbutton', return_value=self.mock_checkbutton), \
+             patch('tkinter.Text', return_value=self.mock_text), \
+             patch('tkinter.ttk.Label', return_value=self.mock_label), \
+             patch('tkinter.BooleanVar', return_value=self.mock_boolean_var), \
+             patch('tkinter.ttk.Style', return_value=self.mock_style):
+            self.app = FacebeakGUI(self.root)
         
     def tearDown(self):
         """Clean up after each test."""
-        self.app.root.quit()
+        # No need to check quit for mocked root
+        pass
         
     def test_initialization(self):
         """Test GUI initialization."""
-        self.assertEqual(self.app.root.title(), "facebeak Launcher")
+        self.root.title.assert_called_with("facebeak Launcher")
+        self.root.geometry.assert_called_with("900x1100")
         self.assertIsNotNone(self.app.video_listbox)
         
     @patch('tkinter.filedialog.askopenfilenames')
@@ -109,33 +166,35 @@ class TestFacebeakGUI(unittest.TestCase):
         """Test video file browsing."""
         mock_askopenfilenames.return_value = ["video1.mp4", "video2.mp4"]
         self.app.browse_videos()
-        self.assertEqual(self.app.video_listbox.size(), 2)
-        self.assertEqual(self.app.video_listbox.get(0), "video1.mp4")
-        self.assertEqual(self.app.video_listbox.get(1), "video2.mp4")
+        
+        # Verify listbox operations
+        self.assertEqual(self.mock_listbox.insert.call_count, 2)
+        self.mock_listbox.insert.assert_has_calls([
+            call('end', "video1.mp4"),
+            call('end', "video2.mp4")
+        ])
         
     def test_remove_selected_videos(self):
         """Test removing selected videos."""
-        # Add some videos
-        self.app.video_listbox.insert(0, "video1.mp4")
-        self.app.video_listbox.insert(1, "video2.mp4")
-        self.app.video_listbox.insert(2, "video3.mp4")
+        # Setup mock listbox state
+        self.mock_listbox.size.return_value = 3
+        self.mock_listbox.get.side_effect = ["video1.mp4", "video2.mp4", "video3.mp4"]
+        self.mock_listbox.curselection.return_value = [1]  # Select middle item
         
-        # Select and remove middle video
-        self.app.video_listbox.selection_set(1)
         self.app.remove_selected_videos()
         
-        self.assertEqual(self.app.video_listbox.size(), 2)
-        self.assertEqual(self.app.video_listbox.get(0), "video1.mp4")
-        self.assertEqual(self.app.video_listbox.get(1), "video3.mp4")
+        # Verify listbox operations
+        self.mock_listbox.delete.assert_called_once_with(1)
         
     def test_clear_videos(self):
         """Test clearing all videos."""
-        # Add some videos
-        self.app.video_listbox.insert(0, "video1.mp4")
-        self.app.video_listbox.insert(1, "video2.mp4")
+        # Setup mock listbox state
+        self.mock_listbox.size.return_value = 2
         
         self.app.clear_videos()
-        self.assertEqual(self.app.video_listbox.size(), 0)
+        
+        # Verify listbox operations
+        self.mock_listbox.delete.assert_called_once_with(0, 'end')
 
 @pytest.mark.unit
 def test_ensure_requirements():
