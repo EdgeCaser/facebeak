@@ -13,7 +13,7 @@ import torch.optim as optim
 from tqdm import tqdm
 import cv2
 import numpy as np
-from models import CrowResNetEmbedder
+from models import CrowResNetEmbedder, CrowMultiModalEmbedder
 from train_triplet_resnet import CrowTripletDataset, TripletLoss, compute_metrics
 from torchvision import transforms
 import json
@@ -88,11 +88,17 @@ class TrainingGUI:
         ttk.Entry(dir_frame, textvariable=self.crop_dir_var, width=40).grid(row=0, column=1, padx=5)
         ttk.Button(dir_frame, text="Browse", command=self._select_crop_dir).grid(row=0, column=2)
         
+        # Audio directory
+        ttk.Label(dir_frame, text="Audio Directory:").grid(row=1, column=0, sticky=tk.W)
+        self.audio_dir_var = tk.StringVar(value="crow_audio")
+        ttk.Entry(dir_frame, textvariable=self.audio_dir_var, width=40).grid(row=1, column=1, padx=5)
+        ttk.Button(dir_frame, text="Browse", command=self._select_audio_dir).grid(row=1, column=2)
+        
         # Output directory
-        ttk.Label(dir_frame, text="Output Directory:").grid(row=1, column=0, sticky=tk.W)
+        ttk.Label(dir_frame, text="Output Directory:").grid(row=2, column=0, sticky=tk.W)
         self.output_dir_var = tk.StringVar(value="training_output")
-        ttk.Entry(dir_frame, textvariable=self.output_dir_var, width=40).grid(row=1, column=1, padx=5)
-        ttk.Button(dir_frame, text="Browse", command=self._select_output_dir).grid(row=1, column=2)
+        ttk.Entry(dir_frame, textvariable=self.output_dir_var, width=40).grid(row=2, column=1, padx=5)
+        ttk.Button(dir_frame, text="Browse", command=self._select_output_dir).grid(row=2, column=2)
         
         # Training parameters
         params_frame = ttk.LabelFrame(self.left_panel, text="Training Parameters", padding="5")
@@ -228,6 +234,12 @@ class TrainingGUI:
         if directory:
             self.crop_dir_var.set(directory)
     
+    def _select_audio_dir(self):
+        """Select audio directory."""
+        directory = filedialog.askdirectory()
+        if directory:
+            self.audio_dir_var.set(directory)
+    
     def _select_output_dir(self):
         directory = filedialog.askdirectory()
         if directory:
@@ -255,6 +267,7 @@ class TrainingGUI:
         # Save training config
         config = {
             'crop_dir': self.crop_dir_var.get(),
+            'audio_dir': self.audio_dir_var.get(),
             'output_dir': output_dir,
             'batch_size': self.batch_size_var.get(),
             'learning_rate': self.lr_var.get(),
@@ -305,8 +318,13 @@ class TrainingGUI:
             
             # Create datasets
             self.logger.info(f"Loading dataset from: {config['crop_dir']}")
-            full_dataset = CrowTripletDataset(config['crop_dir'])
+            full_dataset = CrowTripletDataset(
+                config['crop_dir'],
+                audio_dir=config['audio_dir'] if config['audio_dir'] else None
+            )
             self.logger.info(f"Total dataset size: {len(full_dataset)}")
+            if config['audio_dir']:
+                self.logger.info(f"Crows with audio: {len(full_dataset.crow_to_audio)}")
             
             val_size = int(len(full_dataset) * config['val_split'])
             train_size = len(full_dataset) - val_size
@@ -340,7 +358,11 @@ class TrainingGUI:
             self.logger.info(f"Using device: {device}")
             
             self.logger.info("Initializing model")
-            model = CrowResNetEmbedder(embedding_dim=config['embed_dim']).to(device)
+            model = CrowMultiModalEmbedder(
+                visual_embed_dim=config['embed_dim'] // 2,  # Split embedding dimension between modalities
+                audio_embed_dim=config['embed_dim'] // 2,
+                final_embed_dim=config['embed_dim']
+            ).to(device)
             self.logger.info(f"Model architecture:\n{model}")
             
             self.logger.info("Initializing optimizer and loss function")
@@ -362,7 +384,7 @@ class TrainingGUI:
                 batch_count = 0
                 self.logger.info(f"Epoch {epoch+1}: Training loop start")
                 self.logger.info("About to enter training batch loop")
-                for batch_idx, (anchor, positive, negative, _) in enumerate(train_loader):
+                for batch_idx, (imgs, audio, _) in enumerate(train_loader):
                     self.logger.info(f"Batch {batch_idx} start")
                     # Check for pause/stop after every batch
                     while self.paused:
@@ -376,17 +398,28 @@ class TrainingGUI:
                         break
                     try:
                         self.logger.debug(f"Epoch {epoch+1} Batch {batch_idx}: Data loaded, running forward pass")
-                        anchor = anchor.to(device)
-                        positive = positive.to(device)
-                        negative = negative.to(device)
+                        # Unpack triplet data
+                        anchor_imgs, pos_imgs, neg_imgs = imgs
+                        anchor_audio, pos_audio, neg_audio = audio
+                        
+                        # Move to device
+                        anchor_imgs = anchor_imgs.to(device)
+                        pos_imgs = pos_imgs.to(device)
+                        neg_imgs = neg_imgs.to(device)
+                        
+                        if anchor_audio is not None:
+                            anchor_audio = anchor_audio.to(device)
+                            pos_audio = pos_audio.to(device)
+                            neg_audio = neg_audio.to(device)
+                        
                         optimizer.zero_grad()
-                        anchor_emb = model(anchor)
-                        pos_emb = model(positive)
-                        neg_emb = model(negative)
+                        anchor_emb = model(anchor_imgs, anchor_audio)
+                        pos_emb = model(pos_imgs, pos_audio)
+                        neg_emb = model(neg_imgs, neg_audio)
                         loss = criterion(anchor_emb, pos_emb, neg_emb)
                         loss.backward()
                         optimizer.step()
-                        total_loss += loss.item() * anchor.size(0)
+                        total_loss += loss.item() * anchor_imgs.size(0)
                         batch_count += 1
                         if batch_idx % 10 == 0:
                             self.logger.debug(f"Epoch {epoch + 1}, Batch {batch_idx}, Loss: {loss.item():.4f}")
@@ -408,16 +441,27 @@ class TrainingGUI:
                 val_loss = 0
                 val_batch_count = 0
                 with torch.no_grad():
-                    for batch_idx, (anchor, positive, negative, _) in enumerate(val_loader):
+                    for batch_idx, (imgs, audio, _) in enumerate(val_loader):
                         try:
-                            anchor = anchor.to(device)
-                            positive = positive.to(device)
-                            negative = negative.to(device)
-                            anchor_emb = model(anchor)
-                            pos_emb = model(positive)
-                            neg_emb = model(negative)
+                            # Unpack triplet data
+                            anchor_imgs, pos_imgs, neg_imgs = imgs
+                            anchor_audio, pos_audio, neg_audio = audio
+                            
+                            # Move to device
+                            anchor_imgs = anchor_imgs.to(device)
+                            pos_imgs = pos_imgs.to(device)
+                            neg_imgs = neg_imgs.to(device)
+                            
+                            if anchor_audio is not None:
+                                anchor_audio = anchor_audio.to(device)
+                                pos_audio = pos_audio.to(device)
+                                neg_audio = neg_audio.to(device)
+                            
+                            anchor_emb = model(anchor_imgs, anchor_audio)
+                            pos_emb = model(pos_imgs, pos_audio)
+                            neg_emb = model(neg_imgs, neg_audio)
                             loss = criterion(anchor_emb, pos_emb, neg_emb)
-                            val_loss += loss.item() * anchor.size(0)
+                            val_loss += loss.item() * anchor_imgs.size(0)
                             val_batch_count += 1
                             if batch_idx % 10 == 0:
                                 self.logger.debug(f"Validation batch {batch_idx}, Loss: {loss.item():.4f}")
