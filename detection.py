@@ -64,7 +64,7 @@ def compute_iou(box1, box2):
 
 def merge_overlapping_detections(detections, iou_threshold=0.4):
     """
-    Merge overlapping detections from different models.
+    Merge overlapping detections from different models and views.
     Args:
         detections: List of detection dictionaries
         iou_threshold: IOU threshold for merging
@@ -85,32 +85,36 @@ def merge_overlapping_detections(detections, iou_threshold=0.4):
             
         current_group = [det1]
         used.add(i)
+        scores = [det1['score']]
+        views = [det1.get('view', 'single')]
         
-        # Find overlapping detections
-        for j, det2 in enumerate(sorted_dets):
+        for j, det2 in enumerate(sorted_dets[i+1:], start=i+1):
             if j in used:
                 continue
-                
-            iou = compute_iou(det1['box'], det2['box'])
+            iou = compute_iou(det1['bbox'], det2['bbox'])
             if iou > iou_threshold:
                 current_group.append(det2)
                 used.add(j)
+                scores.append(det2['score'])
+                views.append(det2.get('view', 'single'))
         
         if len(current_group) > 1:
-            # Merge overlapping detections
-            boxes = np.array([d['box'] for d in current_group])
-            scores = [d['score'] for d in current_group]
+            # Calculate view diversity bonus
+            unique_views = len(set(views))
+            view_bonus = 0.1 * (unique_views - 1) if unique_views > 1 else 0
             
+            boxes = np.array([d['bbox'] for d in current_group])
             # Use weighted average of boxes based on scores
             weights = np.array(scores) / sum(scores)
             merged_box = np.average(boxes, weights=weights, axis=0)
             
             merged.append({
-                'box': merged_box,
-                'score': max(scores),  # Use highest confidence
+                'bbox': merged_box,
+                'score': max(scores) + view_bonus,  # Boost score with view diversity
                 'class': 'crow' if any(d['class'] == 'crow' for d in current_group) else 'bird',
                 'model': 'merged',
-                'merged_scores': scores  # Keep track of original scores
+                'merged_scores': scores,  # Keep track of original scores
+                'views': views  # Track views used in merge
             })
         else:
             merged.append(det1)

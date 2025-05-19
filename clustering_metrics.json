@@ -1,0 +1,22 @@
+{
+  "final_clustering": {
+    "n_clusters": 1,
+    "n_noise": 1,
+    "eps": 0.25,
+    "min_samples": 2,
+    "validation_metrics": {
+      "total_clusters": 1,
+      "valid_clusters": 1,
+      "invalid_clusters": 0,
+      "cluster_details": {
+        "cluster_0": {
+          "size": 19,
+          "mean_similarity": 121.62539557799775,
+          "std_similarity": 28.995932301542986,
+          "is_valid": "True"
+        }
+      },
+      "valid_cluster_ratio": 1.0
+    }
+  }
+}

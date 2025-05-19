@@ -12,6 +12,8 @@ from typing import Dict, List, Tuple, Optional
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 import seaborn as sns
+from sklearn.metrics.pairwise import pairwise_distances
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(
@@ -24,8 +26,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Helper to convert all bools to int for JSON serialization
+def convert_bools(obj):
+    if isinstance(obj, dict):
+        return {k: convert_bools(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_bools(v) for v in obj]
+    elif isinstance(obj, bool):
+        return int(obj)
+    else:
+        return obj
+
 class CrowClusterAnalyzer:
-    def __init__(self, eps_range=(0.2, 0.5), min_samples_range=(2, 5), similarity_threshold=0.7):
+    def __init__(self, eps_range=(0.2, 0.5), min_samples_range=(2, 5), similarity_threshold=0.7, temporal_weight=0.1):
         """
         Initialize the crow cluster analyzer.
         
@@ -33,10 +46,12 @@ class CrowClusterAnalyzer:
             eps_range: Tuple of (min, max) values to try for DBSCAN eps parameter
             min_samples_range: Tuple of (min, max) values to try for DBSCAN min_samples parameter
             similarity_threshold: Minimum average similarity for a valid cluster
+            temporal_weight: Weight for temporal proximity in distance calculation
         """
         self.eps_range = eps_range
         self.min_samples_range = min_samples_range
         self.similarity_threshold = similarity_threshold
+        self.temporal_weight = temporal_weight
         self.best_params = None
         self.cluster_metrics = {}
         
@@ -110,12 +125,13 @@ class CrowClusterAnalyzer:
         
         return valid_clusters, validation_metrics
 
-    def find_optimal_params(self, embeddings: np.ndarray) -> Tuple[float, int]:
+    def find_optimal_params(self, embeddings: np.ndarray, frame_numbers: Optional[List[int]] = None) -> Tuple[float, int]:
         """
         Find optimal DBSCAN parameters using grid search with validation.
         
         Args:
             embeddings: Array of crow embeddings
+            frame_numbers: List of frame numbers for temporal consistency
             
         Returns:
             Tuple of (best_eps, best_min_samples)
@@ -129,7 +145,11 @@ class CrowClusterAnalyzer:
             for min_samples in range(self.min_samples_range[0], self.min_samples_range[1] + 1):
                 try:
                     # Run DBSCAN
-                    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(embeddings)
+                    if frame_numbers is not None:
+                        dist_matrix = self.compute_distance_matrix_with_temporal(embeddings, frame_numbers)
+                        clustering = DBSCAN(eps=eps, min_samples=min_samples, metric='precomputed').fit(dist_matrix)
+                    else:
+                        clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(embeddings)
                     labels = clustering.labels_
                     
                     # Skip if all points are noise or only one cluster
@@ -179,7 +199,7 @@ class CrowClusterAnalyzer:
         
         # Save parameter search results
         if results:
-            self.cluster_metrics['parameter_search'] = results
+            self.cluster_metrics['parameter_search'] = convert_bools(results)
             self.best_params = best_params
             
             # Log best parameters and metrics
@@ -239,27 +259,33 @@ class CrowClusterAnalyzer:
         plt.savefig('clustering_parameter_search.png')
         plt.close()
     
-    def cluster_crows(self, embeddings: np.ndarray, eps: Optional[float] = None, 
-                     min_samples: Optional[int] = None) -> Tuple[np.ndarray, Dict]:
+    def cluster_crows(self, embeddings: np.ndarray, frame_numbers: Optional[List[int]] = None, 
+                     eps: Optional[float] = None, min_samples: Optional[int] = None, confidences: Optional[List[float]] = None) -> Tuple[np.ndarray, Dict]:
         """
         Cluster crow embeddings using DBSCAN with validation.
         
         Args:
             embeddings: Array of crow embeddings
+            frame_numbers: List of frame numbers for temporal consistency
             eps: DBSCAN eps parameter (if None, will use optimal value)
             min_samples: DBSCAN min_samples parameter (if None, will use optimal value)
+            confidences: List of confidence scores to weight embeddings
             
         Returns:
             Tuple of (cluster labels, metrics dictionary)
         """
         if eps is None or min_samples is None:
             if self.best_params is None:
-                eps, min_samples = self.find_optimal_params(embeddings)
+                eps, min_samples = self.find_optimal_params(embeddings, frame_numbers)
             else:
                 eps, min_samples = self.best_params
         
         # Run DBSCAN
-        clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(embeddings)
+        if frame_numbers is not None:
+            dist_matrix = self.compute_distance_matrix_with_temporal(embeddings, frame_numbers, confidences)
+            clustering = DBSCAN(eps=eps, min_samples=min_samples, metric='precomputed').fit(dist_matrix)
+        else:
+            clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(embeddings)
         labels = clustering.labels_
         
         # Validate clusters
@@ -296,68 +322,120 @@ class CrowClusterAnalyzer:
         
         # Save metrics
         self.cluster_metrics['final_clustering'] = metrics
+        # Only serialize primitive fields from the best parameter search result and final_clustering
+        def extract_primitives(obj):
+            if isinstance(obj, dict):
+                return {k: extract_primitives(v) for k, v in obj.items() if isinstance(k, (str, int, float))}
+            elif isinstance(obj, list):
+                return [extract_primitives(v) for v in obj]
+            elif isinstance(obj, (int, float, str)):
+                return obj
+            else:
+                return str(obj)  # fallback for any other type
+        results_to_save = {}
+        if 'parameter_search' in self.cluster_metrics and self.cluster_metrics['parameter_search']:
+            best_result = self.cluster_metrics['parameter_search'][-1]
+            results_to_save['best_parameter_search'] = extract_primitives(best_result)
+        if 'final_clustering' in self.cluster_metrics:
+            final_clustering = self.cluster_metrics['final_clustering']
+            results_to_save['final_clustering'] = extract_primitives(final_clustering)
         with open('clustering_metrics.json', 'w') as f:
-            json.dump(self.cluster_metrics, f, indent=2)
+            json.dump(results_to_save, f, indent=2)
         
         return labels, metrics
     
     def _visualize_clusters(self, embeddings: np.ndarray, labels: np.ndarray):
         """Visualize clusters using t-SNE."""
-        # Reduce dimensionality to 2D
-        tsne = TSNE(n_components=2, random_state=42)
-        embeddings_2d = tsne.fit_transform(embeddings)
+        # Skip visualization if we have too few samples
+        if len(embeddings) < 5:
+            logger.warning("Skipping cluster visualization: too few samples")
+            return
+            
+        try:
+            # Reduce dimensionality to 2D
+            perplexity = min(30, len(embeddings) - 1)  # Ensure perplexity is less than n_samples
+            tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity)
+            embeddings_2d = tsne.fit_transform(embeddings)
+            
+            # Plot
+            plt.figure(figsize=(10, 8))
+            scatter = plt.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1], 
+                                c=labels, cmap='viridis', alpha=0.6)
+            plt.colorbar(scatter, label='Cluster')
+            plt.title('t-SNE visualization of crow clusters')
+            plt.xlabel('t-SNE 1')
+            plt.ylabel('t-SNE 2')
+            
+            # Add legend for noise points
+            if -1 in labels:
+                plt.scatter([], [], c='gray', label='Noise')
+                plt.legend()
+            
+            plt.savefig('crow_clusters_visualization.png')
+            plt.close()
+        except Exception as e:
+            logger.warning(f"Failed to visualize clusters: {e}")
+
+    def compute_distance_matrix_with_temporal(self, embeddings, frame_numbers, confidences=None):
+        """
+        Compute distance matrix with temporal weighting.
         
-        # Plot
-        plt.figure(figsize=(10, 8))
-        scatter = plt.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1], 
-                            c=labels, cmap='viridis', alpha=0.6)
-        plt.colorbar(scatter, label='Cluster')
-        plt.title('t-SNE visualization of crow clusters')
-        plt.xlabel('t-SNE 1')
-        plt.ylabel('t-SNE 2')
+        Args:
+            embeddings: numpy array of shape (n_samples, n_features)
+            frame_numbers: list of frame numbers for temporal consistency
+            confidences: list of confidence scores to weight embeddings
         
-        # Add legend for noise points
-        if -1 in labels:
-            plt.scatter([], [], c='gray', label='Noise')
-            plt.legend()
+        Returns:
+            numpy array: distance matrix with temporal weighting
+        """
+        n = len(embeddings)
+        dist_matrix = pairwise_distances(embeddings, metric='cosine')
         
-        plt.savefig('crow_clusters_visualization.png')
-        plt.close()
+        # Normalize frame numbers for temporal distance
+        frame_numbers = np.array(frame_numbers)
+        frame_diff = np.abs(frame_numbers[:, None] - frame_numbers[None, :])
+        max_frame_diff = np.max(frame_diff) if np.max(frame_diff) > 0 else 1
+        temporal_dist = frame_diff / max_frame_diff
+        
+        # Adjust distance matrix based on confidences if provided
+        if confidences is not None and len(confidences) == len(embeddings):
+            confidences = np.array(confidences)
+            # Normalize confidences to range [0.5, 1.5] to avoid extreme scaling
+            weights = 0.5 + confidences / np.max(confidences)
+            # Scale distances inversely with confidence (higher confidence = lower distance)
+            for i in range(len(weights)):
+                for j in range(len(weights)):
+                    dist_matrix[i, j] *= (2 - weights[i]) * (2 - weights[j])
+        
+        # Combine distances
+        dist_matrix = (1 - self.temporal_weight) * dist_matrix + self.temporal_weight * temporal_dist
+        return dist_matrix
 
 def process_video_for_clustering(video_path: str, output_dir: str, 
                                eps: Optional[float] = None,
                                min_samples: Optional[int] = None) -> Dict:
-    """
-    Process a video to extract and cluster crow embeddings.
+    """Process a video to cluster crow embeddings."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    Args:
-        video_path: Path to input video
-        output_dir: Directory to save results
-        eps: Optional DBSCAN eps parameter
-        min_samples: Optional DBSCAN min_samples parameter
-        
-    Returns:
-        Dictionary containing clustering results and metrics
-    """
-    logger.info(f"Processing video for clustering: {video_path}")
-    
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Initialize analyzer
+    # Initialize analyzer with custom parameter ranges
     analyzer = CrowClusterAnalyzer()
     
-    # Get all crows and their embeddings
+    # Get embeddings from database
     crows = get_all_crows()
     all_embeddings = []
     crow_ids = []
+    frame_numbers = []
+    confidences = []
     
     logger.info("Extracting embeddings for all crows...")
     for crow in tqdm(crows):
-        embeddings = analyzer.extract_embeddings(crow['id'])
+        embeddings = crow.get('embeddings', [])
         if len(embeddings) > 0:
             all_embeddings.extend(embeddings)
             crow_ids.extend([crow['id']] * len(embeddings))
+            frame_numbers.extend([crow['frame_number']] * len(embeddings))
+            confidences.extend([crow.get('confidence', 0.5)] * len(embeddings))
     
     if not all_embeddings:
         logger.warning("No embeddings found for clustering")
@@ -365,44 +443,43 @@ def process_video_for_clustering(video_path: str, output_dir: str,
     
     all_embeddings = np.array(all_embeddings)
     crow_ids = np.array(crow_ids)
+    frame_numbers = np.array(frame_numbers)
+    confidences = np.array(confidences)
     
     # Find optimal parameters if not provided
     if eps is None or min_samples is None:
         logger.info("Finding optimal clustering parameters...")
-        eps, min_samples = analyzer.find_optimal_params(all_embeddings)
+        eps, min_samples = analyzer.find_optimal_params(all_embeddings, frame_numbers)
     
     # Perform clustering
     logger.info(f"Clustering with eps={eps:.3f}, min_samples={min_samples}")
-    labels, metrics = analyzer.cluster_crows(all_embeddings, eps, min_samples)
+    labels, metrics = analyzer.cluster_crows(all_embeddings, frame_numbers, eps, min_samples, confidences)
     
     # Save results
     results = {
-        'video_path': video_path,
-        'timestamp': datetime.now().isoformat(),
-        'parameters': {
-            'eps': eps,
-            'min_samples': min_samples
-        },
+        'parameters': {'eps': eps, 'min_samples': min_samples},
         'metrics': metrics,
         'clusters': {}
     }
     
-    # Group crows by cluster
-    for label in set(labels):
-        if label == -1:
-            continue
-        cluster_crow_ids = crow_ids[labels == label]
-        results['clusters'][f'cluster_{label}'] = {
-            'crow_ids': cluster_crow_ids.tolist(),
-            'size': len(cluster_crow_ids)
-        }
+    # Group embeddings by cluster
+    unique_labels = set(labels) - {-1}  # Exclude noise
+    for label in unique_labels:
+        cluster_mask = labels == label
+        cluster_crow_ids = crow_ids[cluster_mask].tolist()
+        results['clusters'][f'cluster_{label}'] = cluster_crow_ids
     
-    # Save results
-    output_file = os.path.join(output_dir, 'clustering_results.json')
+    # Save noise points
+    noise_mask = labels == -1
+    if np.any(noise_mask):
+        results['noise'] = crow_ids[noise_mask].tolist()
+    
+    # Save to file
+    output_file = output_dir / "clustering_results.json"
     with open(output_file, 'w') as f:
         json.dump(results, f, indent=2)
+    logger.info(f"Clustering results saved to {output_file}")
     
-    logger.info(f"Clustering complete. Results saved to {output_file}")
     return results
 
 if __name__ == "__main__":
