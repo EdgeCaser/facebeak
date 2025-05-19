@@ -3,9 +3,8 @@ import os
 import torch
 import numpy as np
 from pathlib import Path
-import random
-import librosa
 import pytest
+import subprocess
 from train_triplet_resnet import CrowTripletDataset
 from detection import merge_overlapping_detections
 from crow_clustering import CrowClusterAnalyzer
@@ -17,21 +16,38 @@ class TestFacebeak(unittest.TestCase):
         self.base_dir = video_test_data['base_dir']
         self.dataset = CrowTripletDataset(str(self.base_dir), split='train')
         
-        # Get a sample audio file from the video data
+        # Get a video file and extract its audio for testing
         for crow_dir in self.base_dir.iterdir():
             if not crow_dir.is_dir():
                 continue
-            audio_files = list((crow_dir / "audio").glob("*.wav"))
-            if audio_files:
-                self.sample_audio_path = str(audio_files[0])
-                break
+            video_files = list(crow_dir.glob("*.mp4"))
+            if video_files:
+                self.video_path = video_files[0]
+                # Extract audio for testing
+                audio_path = crow_dir / "audio" / f"{self.video_path.stem}.wav"
+                audio_path.parent.mkdir(exist_ok=True)
+                try:
+                    subprocess.run([
+                        "ffmpeg", "-i", str(self.video_path),
+                        "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1", "-y",
+                        str(audio_path)
+                    ], check=True, capture_output=True)
+                    self.audio_path = audio_path
+                    break
+                except subprocess.CalledProcessError:
+                    continue
         else:
-            pytest.skip("No audio files found in test data")
+            pytest.skip("No valid video files found in test data")
+
+    def tearDown(self):
+        """Clean up after each test."""
+        if hasattr(self, 'audio_path') and self.audio_path.exists():
+            self.audio_path.unlink()
 
     def test_audio_data_augmentation(self):
-        """Test audio data augmentation using real video audio."""
+        """Test audio data augmentation using video audio."""
         # Test augmentation
-        audio_features = self.dataset._load_and_preprocess_audio(self.sample_audio_path)
+        audio_features = self.dataset._load_and_preprocess_audio(str(self.audio_path))
         self.assertIsNotNone(audio_features)
         self.assertIsInstance(audio_features, dict)
         self.assertIn('mel_spec', audio_features)
@@ -46,8 +62,8 @@ class TestFacebeak(unittest.TestCase):
         self.assertTrue(chroma.shape[1] > 0)  # Time dimension
 
     def test_dynamic_padding_truncation(self):
-        """Test dynamic padding/truncation using real video audio."""
-        audio_features = self.dataset._load_and_preprocess_audio(self.sample_audio_path)
+        """Test dynamic padding/truncation using video audio."""
+        audio_features = self.dataset._load_and_preprocess_audio(str(self.audio_path))
         self.assertIsNotNone(audio_features)
         self.assertIsInstance(audio_features, dict)
         

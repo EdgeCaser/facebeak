@@ -141,118 +141,114 @@ def compute_embedding(img_tensors):
     ])
     return combined, embeddings
 
-def extract_crow_image(frame, box, padding=0.3, min_size=100):
+def extract_crow_image(frame, bbox, padding=0.3, min_size=100):
+    """Extract a cropped image of a crow from the frame."""
+    x1, y1, x2, y2 = map(int, bbox)
+    h, w = frame.shape[:2]
+    
+    # Validate bbox coordinates
+    if (x1 >= x2 or y1 >= y2 or x1 < 0 or y1 < 0 or x2 > w or y2 > h):
+        logger.warning(f"Invalid bbox coordinates: {bbox} for frame size {w}x{h}")
+        return None
+            
+    # Calculate padding
+    pad_w = int((x2 - x1) * padding)
+    pad_h = int((y2 - y1) * padding)
+    x1 = max(0, x1 - pad_w)
+    y1 = max(0, y1 - pad_h)
+    x2 = min(w, x2 + pad_w)
+    y2 = min(h, y2 + pad_h)
+    
+    # Extract and validate crops
     try:
-        x1, y1, x2, y2 = map(int, box)
-        h, w = frame.shape[:2]
-        
-        # Validate box coordinates
-        if x1 >= x2 or y1 >= y2 or x1 < 0 or y1 < 0 or x2 > w or y2 > h:
-            logger.warning(f"Invalid box coordinates: {box} for frame size {w}x{h}")
+        crow_img = frame[y1:y2, x1:x2].copy()  # Make a copy to ensure contiguous array
+        if not isinstance(crow_img, np.ndarray) or crow_img.size == 0 or crow_img.shape[0] == 0 or crow_img.shape[1] == 0:
+            logger.warning(f"Invalid crow crop extracted for bbox {bbox}")
             return None
             
-        # Calculate padding
-        pad_w = int((x2 - x1) * padding)
-        pad_h = int((y2 - y1) * padding)
-        x1 = max(0, x1 - pad_w)
-        y1 = max(0, y1 - pad_h)
-        x2 = min(w, x2 + pad_w)
-        y2 = min(h, y2 + pad_h)
-        
-        # Extract and validate crops
-        try:
-            crow_img = frame[y1:y2, x1:x2].copy()  # Make a copy to ensure contiguous array
-            if not isinstance(crow_img, np.ndarray) or crow_img.size == 0 or crow_img.shape[0] == 0 or crow_img.shape[1] == 0:
-                logger.warning(f"Invalid crow crop extracted for box {box}")
-                return None
-                
-            head_height = int((y2 - y1) * 0.33)
-            if head_height <= 0:
-                logger.warning(f"Invalid head height {head_height} for box {box}")
-                return None
-                
-            head_img = frame[y1:y1 + head_height, x1:x2].copy()  # Make a copy to ensure contiguous array
-            if not isinstance(head_img, np.ndarray) or head_img.size == 0 or head_img.shape[0] == 0 or head_img.shape[1] == 0:
-                logger.warning(f"Invalid head crop extracted for box {box}")
-                return None
-        except Exception as e:
-            logger.error(f"Error extracting crops: {str(e)}")
+        head_height = int((y2 - y1) * 0.33)
+        if head_height <= 0:
+            logger.warning(f"Invalid head height {head_height} for bbox {bbox}")
             return None
             
-        def enhance_image(img):
-            """Simple image enhancement using only normalization."""
-            try:
-                if not isinstance(img, np.ndarray) or img.size == 0:
-                    return None
-                    
-                # Basic validation
-                if len(img.shape) != 3 or img.shape[2] != 3:
-                    logger.warning(f"Invalid image shape: {img.shape}")
-                    return None
-                    
-                # Simple contrast enhancement using normalization only
-                img = img.astype(np.float32)
-                img = (img - img.min()) / (img.max() - img.min() + 1e-6)
-                img = (img * 255).astype(np.uint8)
-                return img
-                
-            except Exception as e:
-                logger.error(f"Error in enhance_image: {str(e)}")
-                return None
-                
-        # Enhance images
-        crow_img = enhance_image(crow_img)
-        head_img = enhance_image(head_img)
-        if crow_img is None or head_img is None:
-            logger.warning(f"Image enhancement failed for box {box}")
+        head_img = frame[y1:y1 + head_height, x1:x2].copy()  # Make a copy to ensure contiguous array
+        if not isinstance(head_img, np.ndarray) or head_img.size == 0 or head_img.shape[0] == 0 or head_img.shape[1] == 0:
+            logger.warning(f"Invalid head crop extracted for bbox {bbox}")
             return None
-            
-        def resize_with_aspect(img, target_size=224):
-            try:
-                if not isinstance(img, np.ndarray) or img.size == 0:
-                    return None
-                    
-                h, w = img.shape[:2]
-                if h == 0 or w == 0:
-                    return None
-                    
-                scale = target_size / max(h, w)
-                new_h, new_w = int(h * scale), int(w * scale)
-                if new_h == 0 or new_w == 0:
-                    return None
-                    
-                resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                square = np.zeros((target_size, target_size, 3), dtype=np.uint8)
-                y_offset = (target_size - new_h) // 2
-                x_offset = (target_size - new_w) // 2
-                square[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
-                return square
-                
-            except Exception as e:
-                logger.error(f"Error in resize_with_aspect: {str(e)}")
-                return None
-                
-        # Resize images
-        crow_square = resize_with_aspect(crow_img)
-        head_square = resize_with_aspect(head_img)
-        if crow_square is None or head_square is None:
-            logger.warning(f"Image resizing failed for box {box}")
-            return None
-            
-        # Convert to tensors
-        try:
-            crow_tensor = torch.from_numpy(crow_square).permute(2, 0, 1).float() / 255.0
-            head_tensor = torch.from_numpy(head_square).permute(2, 0, 1).float() / 255.0
-            return {
-                'full': crow_tensor.unsqueeze(0),
-                'head': head_tensor.unsqueeze(0)
-            }
-        except Exception as e:
-            logger.error(f"Error converting to tensor: {str(e)}")
-            return None
-            
     except Exception as e:
-        logger.error(f"Error in extract_crow_image: {str(e)}")
+        logger.error(f"Error extracting crops: {str(e)}")
+        return None
+            
+    def enhance_image(img):
+        """Simple image enhancement using only normalization."""
+        try:
+            if not isinstance(img, np.ndarray) or img.size == 0:
+                return None
+                
+            # Basic validation
+            if len(img.shape) != 3 or img.shape[2] != 3:
+                logger.warning(f"Invalid image shape: {img.shape}")
+                return None
+                
+            # Simple contrast enhancement using normalization only
+            img = img.astype(np.float32)
+            img = (img - img.min()) / (img.max() - img.min() + 1e-6)
+            img = (img * 255).astype(np.uint8)
+            return img
+            
+        except Exception as e:
+            logger.error(f"Error in enhance_image: {str(e)}")
+            return None
+            
+    # Enhance images
+    crow_img = enhance_image(crow_img)
+    head_img = enhance_image(head_img)
+    if crow_img is None or head_img is None:
+        logger.warning(f"Image enhancement failed for bbox {bbox}")
+        return None
+            
+    def resize_with_aspect(img, target_size=224):
+        try:
+            if not isinstance(img, np.ndarray) or img.size == 0:
+                return None
+                
+            h, w = img.shape[:2]
+            if h == 0 or w == 0:
+                return None
+                
+            scale = target_size / max(h, w)
+            new_h, new_w = int(h * scale), int(w * scale)
+            if new_h == 0 or new_w == 0:
+                return None
+                
+            resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            square = np.zeros((target_size, target_size, 3), dtype=np.uint8)
+            y_offset = (target_size - new_h) // 2
+            x_offset = (target_size - new_w) // 2
+            square[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+            return square
+            
+        except Exception as e:
+            logger.error(f"Error in resize_with_aspect: {str(e)}")
+            return None
+            
+    # Resize images
+    crow_square = resize_with_aspect(crow_img)
+    head_square = resize_with_aspect(head_img)
+    if crow_square is None or head_square is None:
+        logger.warning(f"Image resizing failed for bbox {bbox}")
+        return None
+            
+    # Convert to tensors
+    try:
+        crow_tensor = torch.from_numpy(crow_square).permute(2, 0, 1).float() / 255.0
+        head_tensor = torch.from_numpy(head_square).permute(2, 0, 1).float() / 255.0
+        return {
+            'full': crow_tensor,
+            'head': head_tensor
+        }
+    except Exception as e:
+        logger.error(f"Error converting to tensor: {str(e)}")
         return None
 
 class EnhancedTracker:
@@ -328,10 +324,10 @@ class EnhancedTracker:
             dets = []
             det_boxes = []
             for det in detections:
-                x1, y1, x2, y2 = det['box']
+                x1, y1, x2, y2 = det['bbox']
                 score = det['score']
                 dets.append([x1, y1, x2, y2, score])
-                det_boxes.append(det['box'])
+                det_boxes.append(det['bbox'])
             dets = np.array(dets) if dets else np.empty((0, 5))
             logger.info(f"Prepared {len(dets)} detections")
             det_embeddings = []
@@ -410,8 +406,8 @@ class EnhancedTracker:
             crow_tensor = torch.from_numpy(crow_img).permute(2, 0, 1).float() / 255.0
             head_tensor = torch.from_numpy(head_img).permute(2, 0, 1).float() / 255.0
             return {
-                'full': crow_tensor.unsqueeze(0),
-                'head': head_tensor.unsqueeze(0)
+                'full': crow_tensor,
+                'head': head_tensor
             }
         except Exception as e:
             logger.error(f"Error extracting crow image: {str(e)}")

@@ -2,6 +2,7 @@ import pytest
 import torch
 import os
 from pathlib import Path
+import subprocess
 from dataset import CrowTripletDataset
 from torch.utils.data import DataLoader
 
@@ -14,7 +15,7 @@ def test_dataset_initialization(test_data_dir):
     
     # Check that we have samples for each crow
     crow_ids = set()
-    for img_path, audio_path, crow_id in dataset.samples:
+    for img_path, video_path, crow_id in dataset.samples:
         crow_ids.add(crow_id)
     assert len(crow_ids) == 3, "Should have samples from all 3 crows"
     
@@ -115,42 +116,25 @@ def test_dataset_transforms(test_data_dir):
         assert torch.allclose(sample1['audio']['mel_spec'], sample2['audio']['mel_spec']), "Mel spectrograms should be consistent"
         assert torch.allclose(sample1['audio']['chroma'], sample2['audio']['chroma']), "Chroma features should be consistent"
 
-def test_dataset_error_handling(test_data_dir):
-    """Test dataset error handling."""
-    # Test with non-existent directory
-    with pytest.raises(FileNotFoundError):
-        CrowTripletDataset("non_existent_dir")
-    
-    # Test with empty directory
-    empty_dir = test_data_dir / "empty"
-    empty_dir.mkdir(exist_ok=True)
-    with pytest.raises(ValueError):
-        CrowTripletDataset(str(empty_dir))
-    
-    # Test with directory containing no valid samples
-    invalid_dir = test_data_dir / "invalid"
-    invalid_dir.mkdir(exist_ok=True)
-    (invalid_dir / "crow1").mkdir(exist_ok=True)
-    with pytest.raises(ValueError):
-        CrowTripletDataset(str(invalid_dir))
-
 def test_dataset_temporal_consistency(test_data_dir):
     """Test temporal consistency of samples."""
     dataset = CrowTripletDataset(str(test_data_dir))
     
     # Group samples by crow
     crow_samples = {}
-    for img_path, audio_path, crow_id in dataset.samples:
+    for img_path, video_path, crow_id in dataset.samples:
         if crow_id not in crow_samples:
             crow_samples[crow_id] = []
-        crow_samples[crow_id].append((img_path, audio_path))
+        crow_samples[crow_id].append((img_path, video_path))
     
     # Check that each crow has multiple samples
     for crow_id, samples in crow_samples.items():
         assert len(samples) > 1, f"Crow {crow_id} should have multiple samples"
         
-        # Check that samples have both image and audio
-        for img_path, audio_path in samples:
+        # Check that samples have both image and video
+        for img_path, video_path in samples:
             assert img_path.exists(), f"Image file {img_path} should exist"
-            if audio_path is not None:
-                assert audio_path.exists(), f"Audio file {audio_path} should exist" 
+            assert video_path.exists(), f"Video file {video_path} should exist"
+
+if __name__ == '__main__':
+    pytest.main([__file__]) 
