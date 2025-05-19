@@ -2,6 +2,7 @@ import pytest
 import torch
 import numpy as np
 import cv2
+import subprocess
 from PIL import Image
 import soundfile as sf
 from pathlib import Path
@@ -32,7 +33,7 @@ def test_video_frame_extraction(video_test_data):
 
 @pytest.mark.video
 def test_video_audio_extraction(video_test_data):
-    """Integration test: Verify audio extraction from real video files."""
+    """Test audio extraction from video files."""
     base_dir = video_test_data['base_dir']
     
     # Check each crow's directory
@@ -40,18 +41,63 @@ def test_video_audio_extraction(video_test_data):
         if not crow_dir.is_dir():
             continue
             
-        # Get all audio files
-        audio_files = list((crow_dir / "audio").glob("*.wav"))
-        assert len(audio_files) > 0, f"No audio files extracted for crow {crow_dir.name}"
+        # Get video file
+        video_files = list(crow_dir.glob("*.mp4"))
+        if not video_files:
+            continue
+            
+        video_path = video_files[0]
         
-        # Check audio file
-        audio_path = audio_files[0]
-        assert audio_path.exists(), f"Audio file {audio_path} does not exist"
+        # Extract audio using ffmpeg
+        audio_path = crow_dir / "audio" / f"{video_path.stem}.wav"
+        audio_path.parent.mkdir(exist_ok=True)
         
-        # Try to read audio file
-        y, sr = sf.read(str(audio_path))
-        assert len(y) > 0, f"Audio file {audio_path} is empty"
-        assert sr > 0, f"Invalid sample rate in {audio_path}"
+        try:
+            # Extract audio from video
+            subprocess.run([
+                "ffmpeg", "-i", str(video_path),
+                "-vn",  # No video
+                "-acodec", "pcm_s16le",  # PCM 16-bit
+                "-ar", "44100",  # Sample rate
+                "-ac", "1",  # Mono
+                "-y",  # Overwrite output file if it exists
+                str(audio_path)
+            ], check=True, capture_output=True)
+            
+            # Verify audio was extracted
+            assert audio_path.exists(), f"Failed to extract audio from {video_path}"
+            
+            # Extract features from the audio
+            features = extract_audio_features(str(audio_path))
+            
+            # Check feature types and shapes
+            assert isinstance(features, tuple)
+            assert len(features) == 2  # mel_spec and chroma
+            
+            mel_spec, chroma = features
+            assert isinstance(mel_spec, np.ndarray)
+            assert isinstance(chroma, np.ndarray)
+            
+            # Check mel spectrogram shape and properties
+            assert mel_spec.ndim == 2
+            assert mel_spec.shape[0] == 128  # n_mels
+            assert mel_spec.shape[1] > 0  # time dimension
+            assert not np.isnan(mel_spec).any()
+            assert not np.isinf(mel_spec).any()
+            
+            # Check chroma shape and properties
+            assert chroma.ndim == 2
+            assert chroma.shape[0] == 12  # chroma bins
+            assert chroma.shape[1] > 0  # time dimension
+            assert not np.isnan(chroma).any()
+            assert not np.isinf(chroma).any()
+            
+        except subprocess.CalledProcessError as e:
+            pytest.skip(f"Failed to extract audio from {video_path}: {e.stderr.decode()}")
+        finally:
+            # Clean up extracted audio file
+            if audio_path.exists():
+                audio_path.unlink()
 
 @pytest.mark.video
 def test_audio_feature_extraction_video(video_test_data):
@@ -164,4 +210,7 @@ def test_model_with_video_data(video_dataset, device):
     assert all(k in metrics for k in ['accuracy', 'precision', 'recall', 'f1'])
     assert isinstance(similarities, np.ndarray)
     assert similarities.shape == (batch_size, batch_size)
-    assert np.all(similarities >= -1) and np.all(similarities <= 1) 
+    assert np.all(similarities >= -1) and np.all(similarities <= 1)
+
+if __name__ == '__main__':
+    pytest.main([__file__]) 

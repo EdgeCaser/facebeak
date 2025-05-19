@@ -59,6 +59,15 @@ class CrowTracker:
             "updated_at": datetime.now().isoformat()
         }
         logger.info("Created new tracking data")
+        
+        # Save initial tracking data
+        try:
+            with open(self.tracking_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            logger.info(f"Saved initial tracking data to {self.tracking_file}")
+        except Exception as e:
+            logger.error(f"Error saving initial tracking data: {e}")
+        
         return data
     
     def _save_tracking_data(self, force=False):
@@ -91,12 +100,13 @@ class CrowTracker:
         try:
             # Get embedding for new crop
             with torch.no_grad():
-                new_embedding = self.embedding_model.get_embedding(crop)
+                new_embedding = self.embedding_model.get_embedding(crop['full'])  # Use full crop for embedding
                 new_embedding = new_embedding.cpu().numpy().flatten()  # Ensure 1D array
+                new_embedding = new_embedding / np.linalg.norm(new_embedding)  # Normalize
             
             best_match = None
             best_score = -1
-            threshold = 0.7  # Similarity threshold for matching
+            threshold = 0.98  # Increased similarity threshold for stricter matching
             
             # Compare with existing crows
             for crow_id, info in self.tracking_data["crows"].items():
@@ -104,13 +114,12 @@ class CrowTracker:
                     logger.debug(f"Crow {crow_id} has no embedding, skipping")
                     continue
                 
-                # Load existing embedding and ensure it's 1D
+                # Load existing embedding and ensure it's normalized
                 existing_embedding = np.array(info["embedding"]).flatten()
+                existing_embedding = existing_embedding / np.linalg.norm(existing_embedding)
                 
                 # Calculate cosine similarity
-                similarity = np.dot(new_embedding, existing_embedding) / (
-                    np.linalg.norm(new_embedding) * np.linalg.norm(existing_embedding)
-                )
+                similarity = np.dot(new_embedding, existing_embedding)
                 
                 logger.debug(f"Similarity with crow {crow_id}: {similarity:.3f} (threshold: {threshold})")
                 
@@ -132,13 +141,45 @@ class CrowTracker:
     def process_detection(self, frame, frame_num, detection, video_path, frame_time):
         """Process a detection and either create a new crow or update an existing one."""
         try:
+            # Validate detection
+            if not isinstance(detection, dict) or 'box' not in detection or 'score' not in detection:
+                logger.warning(f"Invalid detection format: {detection}")
+                return None
+            
+            # Validate box coordinates
+            box = detection['box']
+            if not isinstance(box, (list, tuple, np.ndarray)) or len(box) != 4:
+                logger.warning(f"Invalid box format: {box}")
+                return None
+            
+            # Validate detection score
+            score = detection['score']
+            if not (0.0 <= score <= 1.0):
+                logger.warning(f"Invalid detection score: {score}")
+                return None
+            
+            # Convert box to numpy array if needed
+            box = np.array(box)
+            if not np.all(np.isfinite(box)):
+                logger.warning(f"Invalid box coordinates (non-finite): {box}")
+                return None
+            
+            # Check if box is within frame bounds
+            h, w = frame.shape[:2]
+            if (box[0] >= box[2] or box[1] >= box[3] or  # Invalid box dimensions
+                box[0] < 0 or box[1] < 0 or  # Box outside frame (left/top)
+                box[2] > w or box[3] > h or  # Box outside frame (right/bottom)
+                box[2] - box[0] < 10 or box[3] - box[1] < 10):  # Box too small
+                logger.warning(f"Invalid box coordinates: {box} for frame size {w}x{h}")
+                return None
+            
             # Convert frame_time from float to datetime if it's a float
             if isinstance(frame_time, float):
                 # Assuming frame_time is seconds from video start
                 frame_time = datetime.now() - timedelta(seconds=frame_time)
             
             # Extract crop
-            crop = extract_crow_image(frame, detection['box'])
+            crop = extract_crow_image(frame, box)
             if crop is None:
                 logger.debug(f"Frame {frame_num}: Invalid crop")
                 return None
@@ -149,7 +190,7 @@ class CrowTracker:
             # Create detection record
             detection_record = {
                 "frame": frame_num,
-                "box": detection['box'].tolist(),
+                "bbox": box.tolist(),
                 "score": float(detection['score']),
                 "timestamp": frame_time.isoformat() if frame_time else None
             }
@@ -188,8 +229,9 @@ class CrowTracker:
             if crop_path:
                 # Get and save embedding
                 with torch.no_grad():
-                    embedding = self.embedding_model.get_embedding(crop)
+                    embedding = self.embedding_model.get_embedding(crop['full'])
                     embedding = embedding.cpu().numpy().flatten()  # Ensure 1D array
+                    embedding = embedding / np.linalg.norm(embedding)  # Normalize
                 self.tracking_data["crows"][crow_id]["embedding"] = embedding.tolist()
                 logger.debug(f"Saved embedding for crow {crow_id}")
             
@@ -243,8 +285,17 @@ class CrowTracker:
             filename = f"frame_{frame_num:06d}.jpg"
             crop_path = crow_dir / filename
             
+            # Convert tensor to numpy array if needed
+            if isinstance(crop, dict):
+                # Use the full crop tensor
+                crop_tensor = crop['full'].squeeze(0)  # Remove batch dimension
+                # Convert from [C, H, W] to [H, W, C] and scale to 0-255
+                crop_np = (crop_tensor.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+            else:
+                crop_np = crop
+            
             # Save the crop
-            cv2.imwrite(str(crop_path), crop)
+            cv2.imwrite(str(crop_path), crop_np)
             logger.debug(f"Saved crop to {crop_path}")
             
             return crop_path

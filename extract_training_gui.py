@@ -458,57 +458,68 @@ class CrowExtractorGUI:
                      f"{self.current_frame_num}/{self.total_frames} frames"
             )
             
-            # Detect crows
-            detections = parallel_detect_birds(
-                [frame],
-                score_threshold=self.min_confidence_var.get(),
-                multi_view_yolo=self.mv_yolo_var.get(),
-                multi_view_rcnn=self.mv_rcnn_var.get()
-            )
-            frame_dets = detections[0]
-            logger.debug(f"Frame {self.current_frame_num}: Found {len(frame_dets)} detections")
-            
-            self.stats['detections'] += len(frame_dets)
-            self.stats['current_video_detections'] += len(frame_dets)
-            
-            # Process each detection
-            for det in frame_dets:
-                if det['score'] < self.min_confidence_var.get():
-                    continue
+            # Detect crows with timeout
+            try:
+                detections = parallel_detect_birds(
+                    [frame],
+                    score_threshold=self.min_confidence_var.get(),
+                    multi_view_yolo=self.mv_yolo_var.get(),
+                    multi_view_rcnn=self.mv_rcnn_var.get()
+                )
+                frame_dets = detections[0]
+                logger.debug(f"Frame {self.current_frame_num}: Found {len(frame_dets)} detections")
                 
-                try:
-                    # Process detection and get crow_id
-                    crow_id = self.tracker.process_detection(
-                        frame, 
-                        self.current_frame_num,
-                        det,
-                        self.current_video,
-                        self.current_frame_num / self.fps if self.fps > 0 else None
-                    )
+                self.stats['detections'] += len(frame_dets)
+                self.stats['current_video_detections'] += len(frame_dets)
+                
+                # Process each detection
+                for det in frame_dets:
+                    if det['score'] < self.min_confidence_var.get():
+                        continue
                     
-                    if crow_id:
-                        logger.debug(f"Frame {self.current_frame_num}: Processed detection as {crow_id}")
-                        self.stats['valid_crops'] += 1
-                        self.stats['current_video_crows'].add(crow_id)
-                        if crow_id not in self.tracker.tracking_data["crows"]:
-                            self.stats['crows_created'] += 1
-                            logger.info(f"Created new crow: {crow_id}")
+                    try:
+                        # Process detection and get crow_id
+                        crow_id = self.tracker.process_detection(
+                            frame, 
+                            self.current_frame_num,
+                            det,
+                            self.current_video,
+                            self.current_frame_num / self.fps if self.fps > 0 else None
+                        )
+                        
+                        if crow_id:
+                            logger.debug(f"Frame {self.current_frame_num}: Processed detection as {crow_id}")
+                            self.stats['valid_crops'] += 1
+                            self.stats['current_video_crows'].add(crow_id)
+                            if crow_id not in self.tracker.tracking_data["crows"]:
+                                self.stats['crows_created'] += 1
+                                logger.info(f"Created new crow: {crow_id}")
+                            else:
+                                self.stats['crows_updated'] += 1
+                                logger.debug(f"Updated existing crow: {crow_id}")
                         else:
-                            self.stats['crows_updated'] += 1
-                            logger.debug(f"Updated existing crow: {crow_id}")
-                    else:
+                            self.stats['invalid_crops'] += 1
+                            logger.debug(f"Frame {self.current_frame_num}: Invalid crop")
+                    except Exception as e:
+                        logger.error(f"Error processing detection: {str(e)}", exc_info=True)
                         self.stats['invalid_crops'] += 1
-                        logger.debug(f"Frame {self.current_frame_num}: Invalid crop")
-                except Exception as e:
-                    logger.error(f"Error processing detection: {str(e)}", exc_info=True)
-                    self.stats['invalid_crops'] += 1
+                
+                # Update preview and stats
+                self._update_preview(frame, frame_dets)
+                self._update_stats()
+                
+            except TimeoutError:
+                logger.error(f"Frame {self.current_frame_num}: Detection timed out")
+                self.stats['invalid_crops'] += 1
+                self._update_stats()
+            except Exception as e:
+                logger.error(f"Error detecting crows in frame {self.current_frame_num}: {str(e)}", exc_info=True)
+                self.stats['invalid_crops'] += 1
+                self._update_stats()
             
-            # Update preview and stats
-            self._update_preview(frame, frame_dets)
-            self._update_stats()
-            
-            # Schedule next frame
-            self.root.after(1, lambda: self._process_frame(video_files, current_video_index))
+            # Schedule next frame with a more reasonable interval (100ms)
+            # This gives more time for processing and UI updates
+            self.root.after(100, lambda: self._process_frame(video_files, current_video_index))
             
         except Exception as e:
             logger.error(f"Error processing frame: {str(e)}", exc_info=True)

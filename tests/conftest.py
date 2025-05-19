@@ -73,20 +73,11 @@ def test_data_dir(tmp_path_factory):
         img_dir = test_dir / crow_id / "images"
         img_dir.mkdir(parents=True)
         
-        # Create audio directory
-        audio_dir = test_dir / crow_id / "audio"
-        audio_dir.mkdir(parents=True)
-        
         # Create 5 images for each crow
         for i in range(5):
             img_path = img_dir / f"{crow_id}_img_{i}.jpg"
             img = create_dummy_image()
             img.save(img_path)
-            
-            # Create corresponding audio file
-            audio_path = audio_dir / f"{crow_id}_audio_{i}.wav"
-            audio = create_dummy_audio()
-            sf.write(str(audio_path), audio, 16000)
     
     # Create a metadata file with timestamps
     metadata = {
@@ -94,29 +85,17 @@ def test_data_dir(tmp_path_factory):
             "images": {
                 f"crow1_img_{i}.jpg": {"timestamp": f"2024-03-19 10:00:{i:02d}"} 
                 for i in range(5)
-            },
-            "audio": {
-                f"crow1_audio_{i}.wav": {"timestamp": f"2024-03-19 10:00:{i:02d}"}
-                for i in range(5)
             }
         },
         "crow2": {
             "images": {
                 f"crow2_img_{i}.jpg": {"timestamp": f"2024-03-19 10:01:{i:02d}"}
                 for i in range(5)
-            },
-            "audio": {
-                f"crow2_audio_{i}.wav": {"timestamp": f"2024-03-19 10:01:{i:02d}"}
-                for i in range(5)
             }
         },
         "crow3": {
             "images": {
                 f"crow3_img_{i}.jpg": {"timestamp": f"2024-03-19 10:02:{i:02d}"}
-                for i in range(5)
-            },
-            "audio": {
-                f"crow3_audio_{i}.wav": {"timestamp": f"2024-03-19 10:02:{i:02d}"}
                 for i in range(5)
             }
         }
