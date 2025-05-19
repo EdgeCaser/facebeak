@@ -6,7 +6,7 @@ import torch.optim as optim
 from tqdm import tqdm
 import cv2
 import numpy as np
-from models import CrowResNetEmbedder
+from models import CrowMultiModalEmbedder
 from torchvision import transforms
 import logging
 from pathlib import Path
@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 from sklearn.metrics.pairwise import cosine_similarity
 import seaborn as sns
 import random
+from audio import extract_audio_features
+import librosa
 
 # Configure logging
 logging.basicConfig(
@@ -29,205 +31,164 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class CrowTripletDataset(Dataset):
-    def __init__(self, crop_dir, transform=None, split='train'):
+    def __init__(self, crop_dir, audio_dir=None, transform=None, split='train'):
         """
-        Dataset for training crow embeddings using triplet loss.
+        Dataset for training crow embeddings using triplet loss with both visual and audio features.
+        
         Args:
-            crop_dir: Directory containing crow images. Can be:
-                     - A directory with crow ID subdirectories
-                     - A directory containing multiple session folders
-                     - A directory containing images directly (will be treated as one crow)
+            crop_dir: Directory containing crow images
+            audio_dir: Directory containing corresponding audio files (optional)
             transform: Optional torchvision transforms
             split: 'train' or 'val' to determine which transforms to use
         """
         self.samples = []
         self.crow_to_imgs = {}
+        self.crow_to_audio = {}
         self.split = split
+        self.audio_dir = audio_dir
         logger.debug(f"Initializing dataset from {crop_dir} for {split} split")
         
-        # Define transforms based on split
+        # Image transforms
         if transform is None:
             if split == 'train':
                 self.transform = transforms.Compose([
-                    transforms.ToTensor(),
+                    transforms.ToPILImage(),
                     transforms.RandomHorizontalFlip(),
-                    transforms.RandomRotation(30),
-                    transforms.RandomAffine(
-                        degrees=0, 
-                        translate=(0.1, 0.1),
-                        scale=(0.9, 1.1)
-                    ),
-                    transforms.ColorJitter(
-                        brightness=0.3,
-                        contrast=0.3,
-                        saturation=0.3,
-                        hue=0.1
-                    ),
-                    transforms.RandomErasing(p=0.3),
-                    transforms.RandomApply([
-                        transforms.GaussianBlur(kernel_size=3)
-                    ], p=0.2),
-                    transforms.Normalize(
-                        mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225]
-                    )
-                ])
-                logger.debug("Using training transforms with augmentation")
-            else:  # val/test
-                self.transform = transforms.Compose([
+                    transforms.RandomRotation(10),
+                    transforms.ColorJitter(brightness=0.2, contrast=0.2),
+                    transforms.Resize((224, 224)),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225]
-                    )
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                                      std=[0.229, 0.224, 0.225])
                 ])
-                logger.debug("Using validation transforms (no augmentation)")
+            else:
+                self.transform = transforms.Compose([
+                    transforms.ToPILImage(),
+                    transforms.Resize((224, 224)),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                                      std=[0.229, 0.224, 0.225])
+                ])
         else:
             self.transform = transform
-            logger.debug("Using custom transforms")
-        
-        # Load all crow images recursively
-        def process_directory(current_dir, session_name="", crow_id=None):
-            """Recursively process directories to find crow images."""
-            logger.debug(f"Processing directory: {current_dir} (session: {session_name}, crow: {crow_id})")
             
-            # Check if this directory contains images directly
-            has_images = any(f.endswith(('.jpg', '.png')) for f in os.listdir(current_dir))
-            has_subdirs = any(os.path.isdir(os.path.join(current_dir, d)) for d in os.listdir(current_dir))
+        # Load samples
+        self._load_samples(crop_dir)
+        if audio_dir:
+            self._load_audio_samples(audio_dir)
             
-            if has_images and not has_subdirs:
-                # This is a directory with images directly
-                if crow_id is None:
-                    # Use directory name as crow ID
-                    crow_id = os.path.basename(current_dir)
-                process_crow_directory(current_dir, crow_id, session_name)
-            else:
-                # Process subdirectories
-                for item in os.listdir(current_dir):
-                    item_path = os.path.join(current_dir, item)
-                    
-                    if os.path.isdir(item_path):
-                        # If this is a session directory (contains crow subdirectories)
-                        if any(os.path.isdir(os.path.join(item_path, d)) for d in os.listdir(item_path)):
-                            logger.debug(f"Found session directory: {item}")
-                            process_directory(item_path, item)
-                        else:
-                            # This might be a crow directory
-                            process_directory(item_path, session_name, item)
-                    elif item.endswith(('.jpg', '.png')):
-                        # Found an image in a directory
-                        if crow_id is None:
-                            # Use directory name as crow ID
-                            crow_id = os.path.basename(current_dir)
-                        logger.debug(f"Found image {item} in directory {current_dir}, using crow_id: {crow_id}")
-                        process_crow_directory(current_dir, crow_id, session_name)
-                        break  # Process all images in this directory
-        
-        def process_crow_directory(crow_dir, crow_id, session_name=""):
-            """Process a directory containing crow images."""
-            if not os.path.isdir(crow_dir):
-                return
-                
-            logger.debug(f"Processing crow directory: {crow_dir} (crow_id: {crow_id}, session: {session_name})")
-            imgs = []
-            for img_name in os.listdir(crow_dir):
-                if not img_name.endswith(('.jpg', '.png')):
-                    continue
-                    
-                img_path = os.path.join(crow_dir, img_name)
-                try:
-                    # Load and preprocess image
-                    img = cv2.imread(img_path)
-                    if img is None:
-                        logger.warning(f"Failed to load image: {img_path}")
-                        continue
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    
-                    # Resize maintaining aspect ratio
-                    h, w = img.shape[:2]
-                    target_size = 224
-                    scale = target_size / max(h, w)
-                    new_h, new_w = int(h * scale), int(w * scale)
-                    img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                    
-                    # Pad to square
-                    square_img = np.zeros((target_size, target_size, 3), dtype=np.uint8)
-                    y_offset = (target_size - new_h) // 2
-                    x_offset = (target_size - new_w) // 2
-                    square_img[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = img
-                    
-                    imgs.append(square_img)
-                    logger.debug(f"Successfully processed image: {img_path}")
-                except Exception as e:
-                    logger.error(f"Error processing {img_path}: {e}", exc_info=True)
-                    continue
+        logger.info(f"Loaded {len(self.samples)} samples from {len(self.crow_to_imgs)} crows")
+        if audio_dir:
+            logger.info(f"Loaded audio for {len(self.crow_to_audio)} crows")
             
-            if len(imgs) >= 2:  # Need at least 2 images for triplet
-                # Use session name in crow ID if available
-                full_crow_id = f"{session_name}_{crow_id}" if session_name else crow_id
-                if full_crow_id not in self.crow_to_imgs:
-                    self.crow_to_imgs[full_crow_id] = []
-                self.crow_to_imgs[full_crow_id].extend(imgs)
-                for img in imgs:
-                    self.samples.append((full_crow_id, img))
-                logger.info(f"Added {len(imgs)} images for crow {full_crow_id}")
-            else:
-                logger.warning(f"Skipping crow {crow_id} - insufficient images ({len(imgs)})")
+    def _load_samples(self, crop_dir):
+        """Load image samples from directory."""
+        crop_dir = Path(crop_dir)
         
-        # Start recursive processing
-        process_directory(crop_dir)
-        
-        self.crow_ids = list(self.crow_to_imgs.keys())
-        logger.info(f"Loaded {len(self.samples)} images from {len(self.crow_ids)} crows for {split} split")
-        if len(self.crow_ids) > 0:
-            logger.info(f"Crow IDs: {', '.join(self.crow_ids)}")
-            for crow_id, imgs in self.crow_to_imgs.items():
-                logger.info(f"Crow {crow_id}: {len(imgs)} images")
-                if len(imgs) < 2:
-                    logger.warning(f"Crow {crow_id} has fewer than 2 images and will be skipped for triplet training.")
+        # Handle different directory structures
+        if (crop_dir / "crows").exists():
+            # New structure with crows subdirectory
+            crow_dirs = list((crop_dir / "crows").glob("*"))
         else:
-            logger.error("No valid crow images found in the dataset!")
-        # --- NEW: dataset validation ---
-        if len(self.crow_ids) < 2:
-            logger.error("Triplet training requires at least 2 different crow IDs (classes) in your dataset.")
-            raise ValueError("Triplet training requires at least 2 different crow IDs (classes) in your dataset.")
-        for crow_id, imgs in self.crow_to_imgs.items():
-            if len(imgs) < 2:
-                logger.error(f"Crow ID '{crow_id}' has fewer than 2 images. Each crow must have at least 2 images for triplet training.")
-                raise ValueError(f"Crow ID '{crow_id}' has fewer than 2 images. Each crow must have at least 2 images for triplet training.")
-        logger.info(f"Final valid crows: {len(self.crow_ids)}")
-        logger.info(f"Final total images: {len(self.samples)}")
-
+            # Old structure or direct images
+            crow_dirs = [d for d in crop_dir.glob("*") if d.is_dir()]
+            
+        if not crow_dirs:
+            # If no subdirectories, treat all images as one crow
+            crow_dirs = [crop_dir]
+            
+        for crow_dir in crow_dirs:
+            crow_id = crow_dir.name
+            img_files = list(crow_dir.glob("*.jpg")) + list(crow_dir.glob("*.png"))
+            
+            if not img_files:
+                logger.warning(f"No images found for crow {crow_id}")
+                continue
+                
+            self.crow_to_imgs[crow_id] = img_files
+            for img_file in img_files:
+                self.samples.append((img_file, crow_id))
+                
+    def _load_audio_samples(self, audio_dir):
+        """Load audio samples from directory."""
+        audio_dir = Path(audio_dir)
+        
+        for crow_id, img_files in self.crow_to_imgs.items():
+            # Look for audio files with matching crow ID
+            audio_files = list(audio_dir.glob(f"{crow_id}_*.wav")) + \
+                         list(audio_dir.glob(f"{crow_id}_*.mp3"))
+            
+            if audio_files:
+                self.crow_to_audio[crow_id] = audio_files
+                logger.debug(f"Found {len(audio_files)} audio files for crow {crow_id}")
+            else:
+                logger.warning(f"No audio files found for crow {crow_id}")
+                
+    def _load_and_preprocess_audio(self, audio_path):
+        """Load and preprocess audio file."""
+        try:
+            # Extract features
+            mel_spec, chroma = extract_audio_features(str(audio_path))
+            
+            # Convert to tensor and add channel dimension
+            mel_spec = torch.from_numpy(mel_spec).float()
+            chroma = torch.from_numpy(chroma).float()
+            
+            # Stack mel_spec and chroma as channels
+            audio_features = torch.stack([mel_spec, chroma], dim=0)
+            
+            # Pad or truncate to fixed size if needed
+            target_time = 128  # Adjust based on your needs
+            if audio_features.size(2) > target_time:
+                audio_features = audio_features[:, :, :target_time]
+            elif audio_features.size(2) < target_time:
+                padding = torch.zeros(audio_features.size(0), audio_features.size(1), 
+                                    target_time - audio_features.size(2))
+                audio_features = torch.cat([audio_features, padding], dim=2)
+                
+            return audio_features
+            
+        except Exception as e:
+            logger.error(f"Error processing audio file {audio_path}: {e}")
+            return None
+            
     def __len__(self):
         return len(self.samples)
-
+        
     def __getitem__(self, idx):
-        anchor_crow, anchor_img = self.samples[idx]
+        img_path, crow_id = self.samples[idx]
         
-        # Get positive sample (different image of same crow)
-        pos_img = anchor_img
-        crow_imgs = self.crow_to_imgs[anchor_crow]
-        if len(crow_imgs) < 2:
-            raise ValueError(f"Crow ID '{anchor_crow}' has fewer than 2 images. Cannot sample positive.")
-        while True:
-            pos_img_candidate = random.choice(crow_imgs)
-            if not np.array_equal(pos_img_candidate, anchor_img):
-                pos_img = pos_img_candidate
-                break
+        # Load and transform image
+        img = cv2.imread(str(img_path))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = self.transform(img)
         
-        # Get negative sample (image of different crow)
-        neg_crow = anchor_crow
-        while neg_crow == anchor_crow:
-            neg_crow = random.choice(self.crow_ids)
-        neg_img = random.choice(self.crow_to_imgs[neg_crow])
+        # Get audio features if available
+        audio_features = None
+        if self.audio_dir and crow_id in self.crow_to_audio:
+            # Randomly select an audio file for this crow
+            audio_path = random.choice(self.crow_to_audio[crow_id])
+            audio_features = self._load_and_preprocess_audio(audio_path)
+            
+        return img, audio_features, crow_id
         
-        # Apply transforms
-        if self.transform:
-            anchor_img = self.transform(anchor_img)
-            pos_img = self.transform(pos_img)
-            neg_img = self.transform(neg_img)
+    def get_triplet(self, idx):
+        """Get a triplet of samples (anchor, positive, negative)."""
+        anchor_img, anchor_audio, anchor_id = self[idx]
         
-        return anchor_img, pos_img, neg_img, anchor_crow
+        # Get positive sample (same crow)
+        positive_idx = random.choice([i for i, (_, _, cid) in enumerate(self.samples) 
+                                    if cid == anchor_id and i != idx])
+        positive_img, positive_audio, _ = self[positive_idx]
+        
+        # Get negative sample (different crow)
+        negative_idx = random.choice([i for i, (_, _, cid) in enumerate(self.samples) 
+                                    if cid != anchor_id])
+        negative_img, negative_audio, _ = self[negative_idx]
+        
+        return (anchor_img, positive_img, negative_img), \
+               (anchor_audio, positive_audio, negative_audio), \
+               anchor_id
 
 class TripletLoss(nn.Module):
     def __init__(self, margin=1.0, mining_type='hard'):
@@ -252,37 +213,42 @@ class TripletLoss(nn.Module):
             return self.loss_fn(anchor, positive, negative)
 
 def compute_metrics(model, val_loader, device):
-    """Compute validation metrics."""
+    """Compute validation metrics for multi-modal model."""
     model.eval()
     all_embeddings = []
     all_labels = []
     
     with torch.no_grad():
-        for anchor, pos, neg, label in val_loader:
-            anchor = anchor.to(device)
-            pos = pos.to(device)
-            neg = neg.to(device)
-            anchor_emb = model(anchor).cpu().numpy()
-            pos_emb = model(pos).cpu().numpy()
-            neg_emb = model(neg).cpu().numpy()
-            # label is a list of crow IDs (strings), one per sample in batch
-            # For each batch, label is a list of strings of length batch_size
-            # We need to extend all_labels with the batch's labels, repeated for anchor, pos, neg
+        for (anchor_imgs, pos_imgs, neg_imgs), (anchor_audio, pos_audio, neg_audio), label in val_loader:
+            # Move to device
+            anchor_imgs = anchor_imgs.to(device)
+            pos_imgs = pos_imgs.to(device)
+            neg_imgs = neg_imgs.to(device)
+            
+            if anchor_audio is not None:
+                anchor_audio = anchor_audio.to(device)
+                pos_audio = pos_audio.to(device)
+                neg_audio = neg_audio.to(device)
+            
+            # Get embeddings
+            anchor_emb = model(anchor_imgs, anchor_audio).cpu().numpy()
+            pos_emb = model(pos_imgs, pos_audio).cpu().numpy()
+            neg_emb = model(neg_imgs, neg_audio).cpu().numpy()
+            
             all_embeddings.extend([anchor_emb, pos_emb, neg_emb])
-            # label is a list of strings, so we need to flatten and repeat for anchor, pos, neg
             if isinstance(label, (list, tuple)):
                 all_labels.extend(label)
                 all_labels.extend(label)
                 all_labels.extend(label)
             else:
-                # fallback: single label
                 all_labels.extend([label, label, label])
-    # Convert to numpy arrays and ensure proper shapes
-    all_embeddings = np.vstack(all_embeddings)  # (N, embedding_dim)
-    # Map string labels to unique integers for similarity computation
+                
+    # Rest of the function remains the same
+    all_embeddings = np.vstack(all_embeddings)
     unique_labels = list(sorted(set(all_labels)))
     label_to_int = {lbl: idx for idx, lbl in enumerate(unique_labels)}
     all_labels_int = np.array([label_to_int[lbl] for lbl in all_labels])
+    
     if len(all_embeddings) == 0 or len(all_labels_int) == 0:
         logger.warning("No embeddings or labels found in validation data")
         return {
@@ -295,11 +261,14 @@ def compute_metrics(model, val_loader, device):
             'diff_crow_mean': 0.0,
             'diff_crow_std': 0.0
         }, np.array([]), np.array([])
+        
     similarities = cosine_similarity(all_embeddings)
     same_crow_mask = (all_labels_int[:, None] == all_labels_int[None, :]) & ~np.eye(len(all_labels_int), dtype=bool)
     diff_crow_mask = (all_labels_int[:, None] != all_labels_int[None, :])
+    
     same_crow_sims = similarities[same_crow_mask]
     diff_crow_sims = similarities[diff_crow_mask]
+    
     metrics = {
         'mean_similarity': float(np.mean(similarities)),
         'std_similarity': float(np.std(similarities)),
@@ -310,6 +279,7 @@ def compute_metrics(model, val_loader, device):
         'diff_crow_mean': float(np.mean(diff_crow_sims)) if len(diff_crow_sims) > 0 else 0.0,
         'diff_crow_std': float(np.std(diff_crow_sims)) if len(diff_crow_sims) > 0 else 0.0
     }
+    
     return metrics, similarities, all_labels_int
 
 def plot_metrics(metrics_history, output_dir):
@@ -360,7 +330,7 @@ def plot_metrics(metrics_history, output_dir):
 
 def train_model(model, train_loader, val_loader, criterion, optimizer, device, 
                 epochs, output_dir, patience=5):
-    """Train the model using triplet loss with validation and early stopping."""
+    """Train the multi-modal model using triplet loss."""
     best_val_loss = float('inf')
     patience_counter = 0
     metrics_history = {
@@ -377,17 +347,23 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, device,
         # Training
         model.train()
         total_loss = 0
-        for anchor, positive, negative, _ in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+        for (anchor_imgs, pos_imgs, neg_imgs), (anchor_audio, pos_audio, neg_audio), _ in tqdm(train_loader, 
+                                                                                              desc=f"Epoch {epoch+1}/{epochs}"):
             # Move to device
-            anchor = anchor.to(device)
-            positive = positive.to(device)
-            negative = negative.to(device)
+            anchor_imgs = anchor_imgs.to(device)
+            pos_imgs = pos_imgs.to(device)
+            neg_imgs = neg_imgs.to(device)
+            
+            if anchor_audio is not None:
+                anchor_audio = anchor_audio.to(device)
+                pos_audio = pos_audio.to(device)
+                neg_audio = neg_audio.to(device)
             
             # Forward pass
             optimizer.zero_grad()
-            anchor_emb = model(anchor)
-            pos_emb = model(positive)
-            neg_emb = model(negative)
+            anchor_emb = model(anchor_imgs, anchor_audio)
+            pos_emb = model(pos_imgs, pos_audio)
+            neg_emb = model(neg_imgs, neg_audio)
             
             # Compute triplet loss
             loss = criterion(anchor_emb, pos_emb, neg_emb)
@@ -396,8 +372,8 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, device,
             loss.backward()
             optimizer.step()
             
-            total_loss += loss.item() * anchor.size(0)
-        
+            total_loss += loss.item() * anchor_imgs.size(0)
+            
         avg_train_loss = total_loss / len(train_loader.dataset)
         metrics_history['train_loss'].append(avg_train_loss)
         
@@ -405,17 +381,22 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, device,
         model.eval()
         val_loss = 0
         with torch.no_grad():
-            for anchor, positive, negative, _ in val_loader:
-                anchor = anchor.to(device)
-                positive = positive.to(device)
-                negative = negative.to(device)
+            for (anchor_imgs, pos_imgs, neg_imgs), (anchor_audio, pos_audio, neg_audio), _ in val_loader:
+                anchor_imgs = anchor_imgs.to(device)
+                pos_imgs = pos_imgs.to(device)
+                neg_imgs = neg_imgs.to(device)
                 
-                anchor_emb = model(anchor)
-                pos_emb = model(positive)
-                neg_emb = model(negative)
+                if anchor_audio is not None:
+                    anchor_audio = anchor_audio.to(device)
+                    pos_audio = pos_audio.to(device)
+                    neg_audio = neg_audio.to(device)
+                
+                anchor_emb = model(anchor_imgs, anchor_audio)
+                pos_emb = model(pos_imgs, pos_audio)
+                neg_emb = model(neg_imgs, neg_audio)
                 
                 loss = criterion(anchor_emb, pos_emb, neg_emb)
-                val_loss += loss.item() * anchor.size(0)
+                val_loss += loss.item() * anchor_imgs.size(0)
         
         avg_val_loss = val_loss / len(val_loader.dataset)
         metrics_history['val_loss'].append(avg_val_loss)
@@ -468,54 +449,54 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, device,
     
     return model
 
-if __name__ == "__main__":
+def main():
     # Config
     CROP_DIR = 'crow_crops'  # Directory with subfolders per crow ID
+    AUDIO_DIR = 'crow_audio'  # Directory with audio files
     OUTPUT_DIR = 'training_output'
     BATCH_SIZE = 32
-    EPOCHS = 50
+    EPOCHS = 100
+    VAL_SPLIT = 0.2
     EMBED_DIM = 512
     LR = 1e-4
-    VAL_SPLIT = 0.2
-    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Create output directory
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    # Save training config
+    # Save config
     config = {
         'crop_dir': CROP_DIR,
+        'audio_dir': AUDIO_DIR,
         'batch_size': BATCH_SIZE,
         'epochs': EPOCHS,
+        'val_split': VAL_SPLIT,
         'embed_dim': EMBED_DIM,
         'learning_rate': LR,
-        'val_split': VAL_SPLIT,
-        'device': DEVICE,
-        'timestamp': datetime.now().isoformat()
+        'device': str(DEVICE),
+        'timestamp': datetime.now().strftime('%Y%m%d_%H%M%S')
     }
-    with open(os.path.join(OUTPUT_DIR, 'training_config.json'), 'w') as f:
+    
+    with open(os.path.join(OUTPUT_DIR, 'config.json'), 'w') as f:
         json.dump(config, f, indent=2)
     
     # Create datasets
-    full_dataset = CrowTripletDataset(CROP_DIR)
+    logger.info("Initializing datasets...")
+    full_dataset = CrowTripletDataset(CROP_DIR, AUDIO_DIR)
     val_size = int(len(full_dataset) * VAL_SPLIT)
     train_size = len(full_dataset) - val_size
-    train_dataset, val_dataset = random_split(
-        full_dataset, 
-        [train_size, val_size],
-        generator=torch.Generator().manual_seed(42)
-    )
+    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
     
     # Create data loaders
     train_loader = DataLoader(
         train_dataset, 
         batch_size=BATCH_SIZE, 
-        shuffle=True, 
+        shuffle=True,
         num_workers=4,
         pin_memory=True
     )
     val_loader = DataLoader(
-        val_dataset,
+        val_dataset, 
         batch_size=BATCH_SIZE,
         shuffle=False,
         num_workers=4,
@@ -523,22 +504,37 @@ if __name__ == "__main__":
     )
     
     # Model
-    model = CrowResNetEmbedder(embedding_dim=EMBED_DIM).to(DEVICE)
+    logger.info("Initializing model...")
+    model = CrowMultiModalEmbedder(
+        visual_embed_dim=EMBED_DIM // 2,  # Split embedding dimension between modalities
+        audio_embed_dim=EMBED_DIM // 2,
+        final_embed_dim=EMBED_DIM
+    ).to(DEVICE)
+    
+    # Loss and optimizer
     optimizer = optim.Adam(model.parameters(), lr=LR)
     criterion = TripletLoss(margin=1.0, mining_type='hard')
     
     # Train
-    logger.info(f"Training on {len(train_dataset)} images, validating on {len(val_dataset)} images")
-    logger.info(f"Total crows: {len(full_dataset.crow_ids)}")
+    logger.info(f"Training on {len(train_dataset)} samples, validating on {len(val_dataset)} samples")
+    logger.info(f"Total crows: {len(full_dataset.crow_to_imgs)}")
+    if AUDIO_DIR:
+        logger.info(f"Crows with audio: {len(full_dataset.crow_to_audio)}")
+    
     model = train_model(
         model, 
         train_loader, 
-        val_loader,
+        val_loader, 
         criterion, 
         optimizer, 
         DEVICE, 
-        EPOCHS,
+        EPOCHS, 
         OUTPUT_DIR
     )
     
-    logger.info("Training complete. Check training_output directory for results.") 
+    # Save final model
+    torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, 'final_model.pth'))
+    logger.info("Training complete!")
+
+if __name__ == '__main__':
+    main() 
