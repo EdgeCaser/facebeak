@@ -10,46 +10,122 @@ from PIL import Image
 import soundfile as sf
 import librosa
 import subprocess
+import json
 
-def create_dummy_image(path):
-    arr = (np.random.rand(224, 224, 3) * 255).astype(np.uint8)
-    img = Image.fromarray(arr)
-    img.save(path)
+def create_dummy_image(size=(224, 224), num_channels=3):
+    """Create a dummy image for testing."""
+    # Create a more realistic dummy image with a crow-like shape
+    img = np.zeros((size[0], size[1], num_channels), dtype=np.uint8)
+    
+    # Add a dark silhouette (crow-like shape)
+    center_x, center_y = size[1] // 2, size[0] // 2
+    radius = min(size) // 3
+    
+    # Create a dark oval for the body
+    cv2.ellipse(img, (center_x, center_y), (radius, radius//2), 0, 0, 360, (50, 50, 50), -1)
+    
+    # Add a smaller circle for the head
+    head_radius = radius // 2
+    cv2.circle(img, (center_x + radius//2, center_y - radius//4), head_radius, (50, 50, 50), -1)
+    
+    # Add some noise to make it more realistic
+    noise = np.random.normal(0, 10, img.shape).astype(np.uint8)
+    img = cv2.add(img, noise)
+    
+    return Image.fromarray(img)
 
-def create_dummy_audio(path, sr=16000, duration=1.0):
-    samples = int(sr * duration)
-    audio = np.random.randn(samples).astype(np.float32)
-    sf.write(path, audio, sr)
+def create_dummy_audio(duration=1.0, sr=16000):
+    """Create a dummy audio signal for testing."""
+    # Create a more realistic crow-like audio signal
+    t = np.linspace(0, duration, int(sr * duration))
+    
+    # Base frequency for crow-like sound (around 1-2 kHz)
+    base_freq = 1500
+    
+    # Create a modulated signal to simulate crow cawing
+    signal = np.sin(2 * np.pi * base_freq * t)
+    
+    # Add amplitude modulation
+    am = 0.5 * (1 + np.sin(2 * np.pi * 5 * t))  # 5 Hz modulation
+    signal = signal * am
+    
+    # Add some harmonics
+    signal += 0.3 * np.sin(2 * np.pi * base_freq * 2 * t)  # First harmonic
+    signal += 0.2 * np.sin(2 * np.pi * base_freq * 3 * t)  # Second harmonic
+    
+    # Add some noise
+    noise = np.random.normal(0, 0.1, signal.shape)
+    signal = signal + noise
+    
+    # Normalize
+    signal = signal / np.max(np.abs(signal))
+    
+    return signal.astype(np.float32)
 
 @pytest.fixture(scope="session")
 def test_data_dir(tmp_path_factory):
-    """Create a temporary directory with test data for dataset tests."""
-    # Create a temporary directory structure
-    base = tmp_path_factory.mktemp("test_data")
+    """Create a temporary directory with test data structure."""
+    test_dir = tmp_path_factory.mktemp("test_data")
     
-    # Create crow image directories and images
-    crow_names = ["crow1", "crow2", "crow_audio"]
-    for crow in crow_names:
-        crow_dir = base / "crow_crops" / crow  # Changed to match expected directory structure
-        crow_dir.mkdir(parents=True, exist_ok=True)
-        for i in range(2):
-            create_dummy_image(str(crow_dir / f"img_{i}.jpg"))
+    # Create directory structure for multiple crows
+    for crow_id in ["crow1", "crow2", "crow3"]:
+        # Create image directory
+        img_dir = test_dir / crow_id / "images"
+        img_dir.mkdir(parents=True)
+        
+        # Create audio directory
+        audio_dir = test_dir / crow_id / "audio"
+        audio_dir.mkdir(parents=True)
+        
+        # Create 5 images for each crow
+        for i in range(5):
+            img_path = img_dir / f"{crow_id}_img_{i}.jpg"
+            img = create_dummy_image()
+            img.save(img_path)
+            
+            # Create corresponding audio file
+            audio_path = audio_dir / f"{crow_id}_audio_{i}.wav"
+            audio = create_dummy_audio()
+            sf.write(str(audio_path), audio, 16000)
     
-    # Create crow_audio directory and audio files
-    audio_base = base / "crow_audio"
-    audio_base.mkdir(parents=True, exist_ok=True)
-    for crow in crow_names:
-        crow_audio_dir = audio_base / crow
-        crow_audio_dir.mkdir(parents=True, exist_ok=True)
-        for i in range(2):
-            create_dummy_audio(str(crow_audio_dir / f"audio_{i}.wav"))
+    # Create a metadata file with timestamps
+    metadata = {
+        "crow1": {
+            "images": {
+                f"crow1_img_{i}.jpg": {"timestamp": f"2024-03-19 10:00:{i:02d}"} 
+                for i in range(5)
+            },
+            "audio": {
+                f"crow1_audio_{i}.wav": {"timestamp": f"2024-03-19 10:00:{i:02d}"}
+                for i in range(5)
+            }
+        },
+        "crow2": {
+            "images": {
+                f"crow2_img_{i}.jpg": {"timestamp": f"2024-03-19 10:01:{i:02d}"}
+                for i in range(5)
+            },
+            "audio": {
+                f"crow2_audio_{i}.wav": {"timestamp": f"2024-03-19 10:01:{i:02d}"}
+                for i in range(5)
+            }
+        },
+        "crow3": {
+            "images": {
+                f"crow3_img_{i}.jpg": {"timestamp": f"2024-03-19 10:02:{i:02d}"}
+                for i in range(5)
+            },
+            "audio": {
+                f"crow3_audio_{i}.wav": {"timestamp": f"2024-03-19 10:02:{i:02d}"}
+                for i in range(5)
+            }
+        }
+    }
     
-    # Create a dummy config file to ensure the directory is recognized
-    config_path = base / "config.yaml"
-    with open(config_path, "w") as f:
-        f.write("data_dir: .\n")
+    with open(test_dir / "metadata.json", "w") as f:
+        json.dump(metadata, f)
     
-    return str(base)
+    return test_dir
 
 @pytest.fixture(scope="session")
 def device():
