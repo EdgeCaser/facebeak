@@ -2,7 +2,7 @@ import os
 import json
 import cv2
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 import torch
@@ -92,7 +92,7 @@ class CrowTracker:
             # Get embedding for new crop
             with torch.no_grad():
                 new_embedding = self.embedding_model.get_embedding(crop)
-                new_embedding = new_embedding.cpu().numpy()
+                new_embedding = new_embedding.cpu().numpy().flatten()  # Ensure 1D array
             
             best_match = None
             best_score = -1
@@ -104,8 +104,8 @@ class CrowTracker:
                     logger.debug(f"Crow {crow_id} has no embedding, skipping")
                     continue
                 
-                # Load existing embedding
-                existing_embedding = np.array(info["embedding"])
+                # Load existing embedding and ensure it's 1D
+                existing_embedding = np.array(info["embedding"]).flatten()
                 
                 # Calculate cosine similarity
                 similarity = np.dot(new_embedding, existing_embedding) / (
@@ -129,67 +129,74 @@ class CrowTracker:
             logger.error(f"Error finding matching crow: {e}", exc_info=True)
             return None
     
-    def process_detection(self, frame, frame_num, detection, video_path, frame_time=None):
-        """Process a detection and either match to existing crow or create new one"""
+    def process_detection(self, frame, frame_num, detection, video_path, frame_time):
+        """Process a detection and either create a new crow or update an existing one."""
         try:
-            # Convert frame_time to datetime if it's a float
+            # Convert frame_time from float to datetime if it's a float
             if isinstance(frame_time, float):
-                frame_time = datetime.fromtimestamp(frame_time)
+                # Assuming frame_time is seconds from video start
+                frame_time = datetime.now() - timedelta(seconds=frame_time)
             
             # Extract crop
             crop = extract_crow_image(frame, detection['box'])
             if crop is None:
-                logger.debug(f"Invalid crop at frame {frame_num}")
+                logger.debug(f"Frame {frame_num}: Invalid crop")
                 return None
             
-            # Get embedding for the crop
-            with torch.no_grad():
-                embedding = self.embedding_model.get_embedding(crop)
-                embedding = embedding.cpu().numpy()
-            
-            # Try to find matching crow
+            # Find matching crow
             crow_id = self.find_matching_crow(crop)
+            
+            # Create detection record
+            detection_record = {
+                "frame": frame_num,
+                "box": detection['box'].tolist(),
+                "score": float(detection['score']),
+                "timestamp": frame_time.isoformat() if frame_time else None
+            }
             
             if crow_id is None:
                 # Create new crow
                 crow_id = self._generate_crow_id()
+                logger.info(f"Generated new crow ID: {crow_id}")
+                
                 self.tracking_data["crows"][crow_id] = {
-                    "created_at": datetime.now().isoformat(),
                     "first_seen": frame_time.isoformat() if frame_time else None,
                     "last_seen": frame_time.isoformat() if frame_time else None,
                     "total_detections": 1,
-                    "videos": [video_path],
-                    "embedding": embedding.tolist(),  # Store embedding for future matching
-                    "latest_crop": f"frame_{frame_num:06d}.jpg"
+                    "video_path": video_path,
+                    "first_frame": frame_num,
+                    "last_frame": frame_num,
+                    "detections": [detection_record]  # Initialize with first detection
                 }
                 logger.info(f"Created new crow {crow_id}")
             else:
                 # Update existing crow
-                info = self.tracking_data["crows"][crow_id]
-                info["last_seen"] = frame_time.isoformat() if frame_time else None
-                info["total_detections"] += 1
-                if video_path not in info["videos"]:
-                    info["videos"].append(video_path)
-                info["latest_crop"] = f"frame_{frame_num:06d}.jpg"
-                # Update embedding with running average
-                info["embedding"] = (
-                    0.7 * np.array(info["embedding"]) + 0.3 * embedding
-                ).tolist()
-                logger.debug(f"Updated crow {crow_id}")
+                crow_info = self.tracking_data["crows"][crow_id]
+                
+                # Initialize detections list if it doesn't exist
+                if "detections" not in crow_info:
+                    crow_info["detections"] = []
+                
+                crow_info["last_seen"] = frame_time.isoformat() if frame_time else None
+                crow_info["total_detections"] += 1
+                crow_info["last_frame"] = frame_num
+                crow_info["detections"].append(detection_record)
+                logger.debug(f"Updated existing crow: {crow_id}")
             
             # Save crop
-            crow_dir = self.crows_dir / crow_id
-            crow_dir.mkdir(exist_ok=True)
-            crop_path = crow_dir / f"frame_{frame_num:06d}.jpg"
-            cv2.imwrite(str(crop_path), crop)
-            
-            # Save tracking data
-            self._save_tracking_data()
+            crop_path = self.save_crop(crop, crow_id, frame_num)
+            if crop_path:
+                # Get and save embedding
+                with torch.no_grad():
+                    embedding = self.embedding_model.get_embedding(crop)
+                    embedding = embedding.cpu().numpy().flatten()  # Ensure 1D array
+                self.tracking_data["crows"][crow_id]["embedding"] = embedding.tolist()
+                logger.debug(f"Saved embedding for crow {crow_id}")
             
             return crow_id
             
         except Exception as e:
-            logger.error(f"Error processing detection: {e}", exc_info=True)
+            logger.error(f"Error processing detection: {str(e)}", exc_info=True)
             return None
     
     def get_crow_info(self, crow_id):
@@ -203,7 +210,7 @@ class CrowTracker:
                 "total_detections": data["total_detections"],
                 "first_seen": data["first_seen"],
                 "last_seen": data["last_seen"],
-                "videos": data["videos"]
+                "video_path": data.get("video_path", None)  # Use get() to handle missing key
             }
             for crow_id, data in self.tracking_data["crows"].items()
         }
@@ -223,4 +230,25 @@ class CrowTracker:
                 shutil.rmtree(run_dir)
                 logger.info(f"Cleaned up processing directory: {run_dir}")
         except Exception as e:
-            logger.error(f"Error cleaning up processing directory: {e}") 
+            logger.error(f"Error cleaning up processing directory: {e}")
+
+    def save_crop(self, crop, crow_id, frame_num):
+        """Save a crop image to disk and return the path."""
+        try:
+            # Create crow directory if it doesn't exist
+            crow_dir = self.crows_dir / crow_id
+            crow_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate filename with frame number
+            filename = f"frame_{frame_num:06d}.jpg"
+            crop_path = crow_dir / filename
+            
+            # Save the crop
+            cv2.imwrite(str(crop_path), crop)
+            logger.debug(f"Saved crop to {crop_path}")
+            
+            return crop_path
+            
+        except Exception as e:
+            logger.error(f"Error saving crop: {e}", exc_info=True)
+            return None 

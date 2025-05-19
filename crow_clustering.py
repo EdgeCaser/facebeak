@@ -25,16 +25,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class CrowClusterAnalyzer:
-    def __init__(self, eps_range=(0.2, 0.5), min_samples_range=(2, 5)):
+    def __init__(self, eps_range=(0.2, 0.5), min_samples_range=(2, 5), similarity_threshold=0.7):
         """
         Initialize the crow cluster analyzer.
         
         Args:
             eps_range: Tuple of (min, max) values to try for DBSCAN eps parameter
             min_samples_range: Tuple of (min, max) values to try for DBSCAN min_samples parameter
+            similarity_threshold: Minimum average similarity for a valid cluster
         """
         self.eps_range = eps_range
         self.min_samples_range = min_samples_range
+        self.similarity_threshold = similarity_threshold
         self.best_params = None
         self.cluster_metrics = {}
         
@@ -45,9 +47,72 @@ class CrowClusterAnalyzer:
             return np.array([])
         return np.array([e['embedding'] for e in embeddings])
     
+    def validate_clusters(self, labels: np.ndarray, embeddings: np.ndarray) -> Tuple[List[int], Dict]:
+        """
+        Validate clusters by checking internal similarity and other metrics.
+        
+        Args:
+            labels: Cluster labels from DBSCAN
+            embeddings: Crow embeddings
+            
+        Returns:
+            Tuple of (valid_cluster_ids, validation_metrics)
+        """
+        valid_clusters = []
+        validation_metrics = {
+            'total_clusters': len(set(labels)) - (1 if -1 in labels else 0),
+            'valid_clusters': 0,
+            'invalid_clusters': 0,
+            'cluster_details': {}
+        }
+        
+        for cluster_id in set(labels):
+            if cluster_id == -1:  # Skip noise
+                continue
+                
+            # Get embeddings for this cluster
+            cluster_mask = labels == cluster_id
+            cluster_embeddings = embeddings[cluster_mask]
+            
+            # Calculate pairwise similarities
+            similarities = np.dot(cluster_embeddings, cluster_embeddings.T)
+            np.fill_diagonal(similarities, 0)  # Exclude self-similarity
+            
+            # Calculate metrics
+            mean_similarity = np.mean(similarities)
+            std_similarity = np.std(similarities)
+            cluster_size = len(cluster_embeddings)
+            
+            cluster_metrics = {
+                'size': cluster_size,
+                'mean_similarity': float(mean_similarity),
+                'std_similarity': float(std_similarity),
+                'is_valid': mean_similarity > self.similarity_threshold
+            }
+            
+            validation_metrics['cluster_details'][f'cluster_{cluster_id}'] = cluster_metrics
+            
+            if cluster_metrics['is_valid']:
+                valid_clusters.append(cluster_id)
+                validation_metrics['valid_clusters'] += 1
+            else:
+                validation_metrics['invalid_clusters'] += 1
+                logger.warning(
+                    f"Cluster {cluster_id} has low internal similarity: {mean_similarity:.3f} "
+                    f"(threshold: {self.similarity_threshold})"
+                )
+        
+        # Add summary metrics
+        validation_metrics['valid_cluster_ratio'] = (
+            validation_metrics['valid_clusters'] / validation_metrics['total_clusters']
+            if validation_metrics['total_clusters'] > 0 else 0
+        )
+        
+        return valid_clusters, validation_metrics
+
     def find_optimal_params(self, embeddings: np.ndarray) -> Tuple[float, int]:
         """
-        Find optimal DBSCAN parameters using grid search.
+        Find optimal DBSCAN parameters using grid search with validation.
         
         Args:
             embeddings: Array of crow embeddings
@@ -70,7 +135,10 @@ class CrowClusterAnalyzer:
                     # Skip if all points are noise or only one cluster
                     if len(set(labels)) <= 2:  # -1 (noise) + 1 cluster
                         continue
-                        
+                    
+                    # Validate clusters
+                    valid_clusters, validation_metrics = self.validate_clusters(labels, embeddings)
+                    
                     # Calculate metrics
                     n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
                     n_noise = list(labels).count(-1)
@@ -82,8 +150,12 @@ class CrowClusterAnalyzer:
                         # Calinski-Harabasz score (higher is better)
                         ch_score = calinski_harabasz_score(embeddings, labels)
                         
-                        # Combined score (weighted average)
-                        combined_score = 0.7 * sil_score + 0.3 * ch_score
+                        # Combined score with validation metrics
+                        combined_score = (
+                            0.4 * sil_score +  # Clustering quality
+                            0.3 * ch_score +   # Cluster separation
+                            0.3 * validation_metrics['valid_cluster_ratio']  # Validation quality
+                        )
                         
                         results.append({
                             'eps': eps,
@@ -92,7 +164,9 @@ class CrowClusterAnalyzer:
                             'n_noise': n_noise,
                             'silhouette_score': sil_score,
                             'calinski_harabasz_score': ch_score,
-                            'combined_score': combined_score
+                            'valid_cluster_ratio': validation_metrics['valid_cluster_ratio'],
+                            'combined_score': combined_score,
+                            'validation_metrics': validation_metrics
                         })
                         
                         if combined_score > best_score:
@@ -107,8 +181,17 @@ class CrowClusterAnalyzer:
         if results:
             self.cluster_metrics['parameter_search'] = results
             self.best_params = best_params
-            logger.info(f"Best parameters: eps={best_params[0]:.3f}, min_samples={best_params[1]}")
-            logger.info(f"Best combined score: {best_score:.3f}")
+            
+            # Log best parameters and metrics
+            best_result = next(r for r in results if r['eps'] == best_params[0] and r['min_samples'] == best_params[1])
+            logger.info("Best clustering parameters found:")
+            logger.info(f"eps={best_params[0]:.3f}, min_samples={best_params[1]}")
+            logger.info(f"Metrics:")
+            logger.info(f"- Combined score: {best_score:.3f}")
+            logger.info(f"- Silhouette score: {best_result['silhouette_score']:.3f}")
+            logger.info(f"- Valid cluster ratio: {best_result['valid_cluster_ratio']:.3f}")
+            logger.info(f"- Number of clusters: {best_result['n_clusters']}")
+            logger.info(f"- Number of noise points: {best_result['n_noise']}")
             
             # Plot parameter search results
             self._plot_parameter_search(results)
@@ -159,7 +242,7 @@ class CrowClusterAnalyzer:
     def cluster_crows(self, embeddings: np.ndarray, eps: Optional[float] = None, 
                      min_samples: Optional[int] = None) -> Tuple[np.ndarray, Dict]:
         """
-        Cluster crow embeddings using DBSCAN.
+        Cluster crow embeddings using DBSCAN with validation.
         
         Args:
             embeddings: Array of crow embeddings
@@ -179,6 +262,9 @@ class CrowClusterAnalyzer:
         clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(embeddings)
         labels = clustering.labels_
         
+        # Validate clusters
+        valid_clusters, validation_metrics = self.validate_clusters(labels, embeddings)
+        
         # Calculate metrics
         n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
         n_noise = list(labels).count(-1)
@@ -187,7 +273,8 @@ class CrowClusterAnalyzer:
             'n_clusters': n_clusters,
             'n_noise': n_noise,
             'eps': eps,
-            'min_samples': min_samples
+            'min_samples': min_samples,
+            'validation_metrics': validation_metrics
         }
         
         if n_clusters > 1:
@@ -195,6 +282,14 @@ class CrowClusterAnalyzer:
                 'silhouette_score': silhouette_score(embeddings, labels),
                 'calinski_harabasz_score': calinski_harabasz_score(embeddings, labels)
             })
+        
+        # Log clustering results
+        logger.info("Clustering results:")
+        logger.info(f"Total clusters: {n_clusters}")
+        logger.info(f"Valid clusters: {validation_metrics['valid_clusters']}")
+        logger.info(f"Invalid clusters: {validation_metrics['invalid_clusters']}")
+        logger.info(f"Valid cluster ratio: {validation_metrics['valid_cluster_ratio']:.3f}")
+        logger.info(f"Number of noise points: {n_noise}")
         
         # Visualize clusters
         self._visualize_clusters(embeddings, labels)

@@ -1,0 +1,14 @@
+{
+  "crop_dir": "C:/Users/ianfe/OneDrive/Documents/GitHub/facebeak/crow_crops/test_Sample",
+  "output_dir": "training_output",
+  "batch_size": 32,
+  "learning_rate": 0.0001,
+  "epochs": 50,
+  "val_split": 0.2,
+  "embed_dim": 512,
+  "margin": 1.0,
+  "patience": 5,
+  "device": "cuda",
+  "timestamp": "2025-05-18T21:09:55.191808",
+  "session_id": "70ba6024"
+}
