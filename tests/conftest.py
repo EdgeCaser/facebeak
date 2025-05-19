@@ -197,8 +197,10 @@ def video_test_data(tmp_path_factory):
     base_dir = tmp_path_factory.mktemp("test_data")
 
     # Get the test videos directory
-    test_videos_dir = Path("unit testing videos")
+    test_videos_dir = Path("unit_testing_videos")
+    print("[DEBUG] video_test_data: test_videos_dir is", test_videos_dir)
     if not test_videos_dir.exists():
+        print("[DEBUG] video_test_data: test_videos_dir does not exist, skipping.")
         pytest.skip("Test videos directory not found")
 
     # Process each video in the test directory
@@ -206,7 +208,7 @@ def video_test_data(tmp_path_factory):
         # Extract crow_id from filename (assuming format: "crow_id_*.mp4")
         crow_id = video_path.stem.split("_")[0]
         
-        # Create directories for this crow with the correct structure
+        print("[DEBUG] video_test_data: processing video", video_path, "with crow_id", crow_id)
         crow_dir = base_dir / crow_id
         images_dir = crow_dir / "images"
         audio_dir = crow_dir / "audio"
@@ -216,7 +218,7 @@ def video_test_data(tmp_path_factory):
         # Open video file
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
-            print(f"Warning: Could not open video {video_path}")
+            print("[DEBUG] video_test_data: could not open video", video_path)
             continue
 
         # Extract first two frames (if available)
@@ -236,6 +238,7 @@ def video_test_data(tmp_path_factory):
         # Extract audio using ffmpeg
         audio_path = audio_dir / f"{video_path.stem}.wav"
         try:
+            print("[DEBUG] video_test_data: extracting audio from", video_path, "to", audio_path)
             subprocess.run([
                 "ffmpeg", "-i", str(video_path),
                 "-vn",  # No video
@@ -246,8 +249,7 @@ def video_test_data(tmp_path_factory):
                 str(audio_path)
             ], check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
-            print(f"Warning: Failed to extract audio from {video_path}: {e}")
-            print(f"ffmpeg stderr: {e.stderr.decode()}")
+            print("[DEBUG] video_test_data: ffmpeg extraction failed for", video_path, "stderr:", e.stderr.decode())
             continue
 
     # Verify we have at least some data
