@@ -12,12 +12,20 @@ from training import compute_triplet_loss, compute_metrics
 @pytest.mark.video
 def test_video_frame_extraction(video_test_data):
     """Integration test: Verify frame extraction from real video files."""
-    for video_name, data in video_test_data['video_data'].items():
-        assert len(data['frames']) > 0, f"No frames extracted from {video_name}"
+    base_dir = video_test_data['base_dir']
+    
+    # Check each crow's directory
+    for crow_dir in base_dir.iterdir():
+        if not crow_dir.is_dir():
+            continue
+            
+        # Get all frame files
+        frame_files = list((crow_dir / "images").glob("*.jpg"))
+        assert len(frame_files) > 0, f"No frames extracted for crow {crow_dir.name}"
         
         # Check frame format
-        frame_path = data['frames'][0]
-        img = cv2.imread(frame_path)
+        frame_path = frame_files[0]
+        img = cv2.imread(str(frame_path))
         assert img is not None, f"Failed to read frame {frame_path}"
         assert img.ndim == 3, f"Frame {frame_path} is not a color image"
         assert img.shape[2] == 3, f"Frame {frame_path} does not have 3 color channels"
@@ -25,46 +33,66 @@ def test_video_frame_extraction(video_test_data):
 @pytest.mark.video
 def test_video_audio_extraction(video_test_data):
     """Integration test: Verify audio extraction from real video files."""
-    for video_name, data in video_test_data['video_data'].items():
-        if data['audio'] is not None:
-            # Check audio file exists and is readable
-            audio_path = data['audio']
-            assert Path(audio_path).exists(), f"Audio file {audio_path} does not exist"
+    base_dir = video_test_data['base_dir']
+    
+    # Check each crow's directory
+    for crow_dir in base_dir.iterdir():
+        if not crow_dir.is_dir():
+            continue
             
-            # Try to read audio file
-            y, sr = sf.read(audio_path)
-            assert len(y) > 0, f"Audio file {audio_path} is empty"
-            assert sr > 0, f"Invalid sample rate in {audio_path}"
+        # Get all audio files
+        audio_files = list((crow_dir / "audio").glob("*.wav"))
+        assert len(audio_files) > 0, f"No audio files extracted for crow {crow_dir.name}"
+        
+        # Check audio file
+        audio_path = audio_files[0]
+        assert audio_path.exists(), f"Audio file {audio_path} does not exist"
+        
+        # Try to read audio file
+        y, sr = sf.read(str(audio_path))
+        assert len(y) > 0, f"Audio file {audio_path} is empty"
+        assert sr > 0, f"Invalid sample rate in {audio_path}"
 
 @pytest.mark.video
 def test_audio_feature_extraction_video(video_test_data):
     """Integration test: Verify audio feature extraction on real video audio."""
-    for video_name, data in video_test_data['video_data'].items():
-        if data['audio'] is not None:
-            # Extract features
-            features = extract_audio_features(data['audio'])
+    base_dir = video_test_data['base_dir']
+    
+    # Check each crow's directory
+    for crow_dir in base_dir.iterdir():
+        if not crow_dir.is_dir():
+            continue
             
-            # Check feature types and shapes
-            assert isinstance(features, tuple)
-            assert len(features) == 2  # mel_spec and chroma
+        # Get all audio files
+        audio_files = list((crow_dir / "audio").glob("*.wav"))
+        if not audio_files:
+            continue
             
-            mel_spec, chroma = features
-            assert isinstance(mel_spec, np.ndarray)
-            assert isinstance(chroma, np.ndarray)
-            
-            # Check mel spectrogram shape and properties
-            assert mel_spec.ndim == 2
-            assert mel_spec.shape[0] == 128  # n_mels
-            assert mel_spec.shape[1] > 0  # time dimension
-            assert not np.isnan(mel_spec).any()
-            assert not np.isinf(mel_spec).any()
-            
-            # Check chroma shape and properties
-            assert chroma.ndim == 2
-            assert chroma.shape[0] == 12  # chroma bins
-            assert chroma.shape[1] > 0  # time dimension
-            assert not np.isnan(chroma).any()
-            assert not np.isinf(chroma).any()
+        # Extract features from first audio file
+        audio_path = audio_files[0]
+        features = extract_audio_features(str(audio_path))
+        
+        # Check feature types and shapes
+        assert isinstance(features, tuple)
+        assert len(features) == 2  # mel_spec and chroma
+        
+        mel_spec, chroma = features
+        assert isinstance(mel_spec, np.ndarray)
+        assert isinstance(chroma, np.ndarray)
+        
+        # Check mel spectrogram shape and properties
+        assert mel_spec.ndim == 2
+        assert mel_spec.shape[0] == 128  # n_mels
+        assert mel_spec.shape[1] > 0  # time dimension
+        assert not np.isnan(mel_spec).any()
+        assert not np.isinf(mel_spec).any()
+        
+        # Check chroma shape and properties
+        assert chroma.ndim == 2
+        assert chroma.shape[0] == 12  # chroma bins
+        assert chroma.shape[1] > 0  # time dimension
+        assert not np.isnan(chroma).any()
+        assert not np.isinf(chroma).any()
 
 @pytest.mark.video
 def test_dataset_with_video_data(video_dataset):
@@ -78,7 +106,8 @@ def test_dataset_with_video_data(video_dataset):
         # Check image
         assert isinstance(sample['image'], torch.Tensor)
         assert sample['image'].shape == (3, 224, 224)  # RGB image
-        assert torch.all(sample['image'] >= -1) and torch.all(sample['image'] <= 1)  # Normalized to [-1, 1]
+        # Accept a reasonable range for ImageNet normalization
+        assert sample['image'].min() > -3 and sample['image'].max() < 3, f"Image values out of expected range: min={sample['image'].min()}, max={sample['image'].max()}"
         
         # Check audio
         assert isinstance(sample['audio'], dict)
@@ -102,17 +131,13 @@ def test_model_with_video_data(video_dataset, device):
         final_embedding_dim=128
     ).to(device)
     
-    # Get a batch of data
+    # Get a batch of data using collate_fn to pad audio
     batch_size = 2
     indices = np.random.choice(len(video_dataset), batch_size, replace=False)
-    batch = {
-        'image': torch.stack([video_dataset[i]['image'] for i in indices]).to(device),
-        'audio': {
-            'mel_spec': torch.stack([video_dataset[i]['audio']['mel_spec'] for i in indices]).to(device),
-            'chroma': torch.stack([video_dataset[i]['audio']['chroma'] for i in indices]).to(device)
-        },
-        'crow_id': [video_dataset[i]['crow_id'] for i in indices]
-    }
+    batch = video_dataset.collate_fn([video_dataset[i] for i in indices])
+    batch['image'] = batch['image'].to(device)
+    batch['audio']['mel_spec'] = batch['audio']['mel_spec'].to(device)
+    batch['audio']['chroma'] = batch['audio']['chroma'].to(device)
     
     # Test forward pass
     embeddings = model(batch['image'], batch['audio'])

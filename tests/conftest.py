@@ -9,6 +9,7 @@ import cv2
 from PIL import Image
 import soundfile as sf
 import librosa
+import subprocess
 
 def create_dummy_image(path):
     arr = (np.random.rand(224, 224, 3) * 255).astype(np.uint8)
@@ -97,85 +98,80 @@ def pytest_configure(config):
     )
 
 @pytest.fixture(scope="session")
-def video_test_data(tmp_path_factory, request):
-    """Create test data from video files. Only used by tests marked with @pytest.mark.video."""
-    # Skip if test is not marked with video
-    if not request.node.get_closest_marker('video'):
-        pytest.skip("Test not marked as requiring video data")
-    
-    # Create a temporary directory for extracted data
-    base = tmp_path_factory.mktemp("video_test_data")
-    
-    # Path to test videos
-    video_dir = Path("unit testing videos")
-    video_files = list(video_dir.glob("*.mp4"))
-    
-    if not video_files:
-        pytest.skip("No test videos found in 'unit testing videos' directory")
-    
-    # Create directories for extracted data
-    frames_dir = base / "frames"
-    audio_dir = base / "audio"
-    frames_dir.mkdir(parents=True, exist_ok=True)
-    audio_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Process each video
-    video_data = {}
-    for video_path in video_files:
-        video_name = video_path.stem
-        video_data[video_name] = {
-            'frames': [],
-            'audio': None
-        }
+def video_test_data(tmp_path_factory):
+    """Create a test dataset from videos by extracting frames and audio."""
+    # Create base directory
+    base_dir = tmp_path_factory.mktemp("test_data")
+
+    # Get the test videos directory
+    test_videos_dir = Path("unit testing videos")
+    if not test_videos_dir.exists():
+        pytest.skip("Test videos directory not found")
+
+    # Process each video in the test directory
+    for video_path in test_videos_dir.glob("*.mp4"):
+        # Extract crow_id from filename (assuming format: "crow_id_*.mp4")
+        crow_id = video_path.stem.split("_")[0]
         
-        # Extract frames
+        # Create directories for this crow with the correct structure
+        crow_dir = base_dir / crow_id
+        images_dir = crow_dir / "images"
+        audio_dir = crow_dir / "audio"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        audio_dir.mkdir(exist_ok=True)
+
+        # Open video file
         cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            print(f"Warning: Could not open video {video_path}")
+            continue
+
+        # Extract first two frames (if available)
         frame_count = 0
-        while cap.isOpened():
+        while frame_count < 2:
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            # Save every 10th frame to avoid too many files
-            if frame_count % 10 == 0:
-                frame_path = frames_dir / f"{video_name}_frame_{frame_count:04d}.jpg"
-                cv2.imwrite(str(frame_path), frame)
-                video_data[video_name]['frames'].append(str(frame_path))
-            
+                
+            # Save frame as image
+            frame_path = images_dir / f"frame_{frame_count}.jpg"
+            cv2.imwrite(str(frame_path), frame)
             frame_count += 1
+
         cap.release()
-        
-        # Extract audio
+
+        # Extract audio using ffmpeg
+        audio_path = audio_dir / f"{video_path.stem}.wav"
         try:
-            # Extract audio using librosa
-            y, sr = librosa.load(str(video_path), sr=None)
-            audio_path = audio_dir / f"{video_name}.wav"
-            sf.write(str(audio_path), y, sr)
-            video_data[video_name]['audio'] = str(audio_path)
-        except Exception as e:
-            logger.warning(f"Failed to extract audio from {video_path}: {e}")
-    
+            subprocess.run([
+                "ffmpeg", "-i", str(video_path),
+                "-vn",  # No video
+                "-acodec", "pcm_s16le",  # PCM 16-bit
+                "-ar", "44100",  # Sample rate
+                "-ac", "1",  # Mono
+                "-y",  # Overwrite output file if it exists
+                str(audio_path)
+            ], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Warning: Failed to extract audio from {video_path}: {e}")
+            print(f"ffmpeg stderr: {e.stderr.decode()}")
+            continue
+
+    # Verify we have at least some data
+    if not any(base_dir.iterdir()):
+        pytest.skip("No valid test data could be extracted from videos")
+
     return {
-        'base_dir': str(base),
-        'frames_dir': str(frames_dir),
-        'audio_dir': str(audio_dir),
-        'video_data': video_data
+        "base_dir": base_dir
     }
 
 @pytest.fixture(scope="session")
 def video_dataset(video_test_data, request):
-    """Create a dataset from video test data. Only used by tests marked with @pytest.mark.video."""
-    # Skip if test is not marked with video
-    if not request.node.get_closest_marker('video'):
-        pytest.skip("Test not marked as requiring video data")
-    
+    """Create a dataset from video test data."""
     from dataset import CrowTripletDataset
-    
     try:
-        dataset = CrowTripletDataset(
-            video_test_data['base_dir'],
-            transform=None  # No transforms for testing
-        )
+        # (The fixture now creates a minimal CrowTripletDataset–compatible structure in video_test_data['base_dir'])
+        dataset = CrowTripletDataset(video_test_data['base_dir'], transform=None)
         return dataset
     except ValueError as e:
         pytest.skip(str(e)) 
