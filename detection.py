@@ -4,6 +4,7 @@ import numpy as np
 from tqdm import tqdm
 from ultralytics import YOLO
 import cv2
+from multi_view import create_multi_view_extractor
 
 # Load models once at module level
 print("[INFO] Loading detection models...")
@@ -116,58 +117,105 @@ def merge_overlapping_detections(detections, iou_threshold=0.4):
     
     return merged
 
-def detect_crows_parallel(frames, score_threshold=0.3, yolo_threshold=0.2):
+def detect_crows_parallel(
+    frames,
+    score_threshold=0.3,
+    yolo_threshold=0.2,
+    multi_view_yolo=False,
+    multi_view_rcnn=False,
+    multi_view_params=None
+):
     """
-    Detect birds using parallel YOLOv8 and Faster R-CNN models.
-    A detection is considered valid if either model detects it with sufficient confidence.
+    Detect birds using parallel YOLOv8 and Faster R-CNN models, with optional multi-view extraction.
     Args:
         frames: List of video frames
         score_threshold: Minimum confidence score for final detections
         yolo_threshold: Minimum confidence score for YOLO detections
+        multi_view_yolo: If True, run YOLO on multiple views per frame
+        multi_view_rcnn: If True, run Faster R-CNN on multiple views per frame
+        multi_view_params: Dict of params for multi-view extractor (optional)
     Returns:
         List of detections per frame
     """
     detections = []
-    print(f"[INFO] Processing {len(frames)} frames with parallel detection")
-    
+    print(f"[INFO] Processing {len(frames)} frames with parallel detection (multi-view: YOLO={multi_view_yolo}, RCNN={multi_view_rcnn})")
+
+    # Set up multi-view extractor if needed
+    if multi_view_yolo or multi_view_rcnn:
+        extractor = create_multi_view_extractor(**(multi_view_params or {}))
+    else:
+        extractor = None
+
     with torch.no_grad():
         for frame in tqdm(frames, desc="Detecting birds"):
-            # Run both models in parallel
-            yolo_results = yolo_model(frame, conf=yolo_threshold)[0]
-            frame_tensor = torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0
-            if torch.cuda.is_available():
-                frame_tensor = frame_tensor.cuda()
-            rcnn_results = faster_rcnn_model([frame_tensor])[0]
-            
-            # Process YOLO detections
             yolo_dets = []
-            for box, score, cls in zip(yolo_results.boxes.xyxy, yolo_results.boxes.conf, yolo_results.boxes.cls):
-                if int(cls) == YOLO_BIRD_CLASS_ID:
-                    yolo_dets.append({
-                        'box': box.cpu().numpy(),
-                        'score': score.cpu().numpy(),
-                        'class': 'bird',
-                        'model': 'yolo'
-                    })
-            
-            # Process Faster R-CNN detections
             rcnn_dets = []
-            for box, label, score in zip(rcnn_results['boxes'], rcnn_results['labels'], rcnn_results['scores']):
-                if (label == COCO_BIRD_CLASS_ID or label == COCO_CROW_CLASS_ID) and score > score_threshold:
-                    rcnn_dets.append({
-                        'box': box.cpu().numpy(),
-                        'score': score.cpu().numpy(),
-                        'class': 'crow' if label == COCO_CROW_CLASS_ID else 'bird',
-                        'model': 'rcnn'
-                    })
-            
+
+            # --- YOLO detections ---
+            if multi_view_yolo and extractor is not None:
+                yolo_views = extractor.extract(frame)
+                for view in yolo_views:
+                    yolo_results = yolo_model(view, conf=yolo_threshold)[0]
+                    for box, score, cls in zip(yolo_results.boxes.xyxy, yolo_results.boxes.conf, yolo_results.boxes.cls):
+                        if int(cls) == YOLO_BIRD_CLASS_ID:
+                            yolo_dets.append({
+                                'box': box.cpu().numpy(),
+                                'score': score.cpu().numpy(),
+                                'class': 'bird',
+                                'model': 'yolo',
+                                'view': 'multi'  # Mark as multi-view
+                            })
+            else:
+                yolo_results = yolo_model(frame, conf=yolo_threshold)[0]
+                for box, score, cls in zip(yolo_results.boxes.xyxy, yolo_results.boxes.conf, yolo_results.boxes.cls):
+                    if int(cls) == YOLO_BIRD_CLASS_ID:
+                        yolo_dets.append({
+                            'box': box.cpu().numpy(),
+                            'score': score.cpu().numpy(),
+                            'class': 'bird',
+                            'model': 'yolo',
+                            'view': 'single'
+                        })
+
+            # --- Faster R-CNN detections ---
+            if multi_view_rcnn and extractor is not None:
+                rcnn_views = extractor.extract(frame)
+                for view in rcnn_views:
+                    frame_tensor = torch.from_numpy(view).permute(2, 0, 1).float() / 255.0
+                    if torch.cuda.is_available():
+                        frame_tensor = frame_tensor.cuda()
+                    rcnn_results = faster_rcnn_model([frame_tensor])[0]
+                    for box, label, score in zip(rcnn_results['boxes'], rcnn_results['labels'], rcnn_results['scores']):
+                        if (label == COCO_BIRD_CLASS_ID or label == COCO_CROW_CLASS_ID) and score > score_threshold:
+                            rcnn_dets.append({
+                                'box': box.cpu().numpy(),
+                                'score': score.cpu().numpy(),
+                                'class': 'crow' if label == COCO_CROW_CLASS_ID else 'bird',
+                                'model': 'rcnn',
+                                'view': 'multi'
+                            })
+            else:
+                frame_tensor = torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0
+                if torch.cuda.is_available():
+                    frame_tensor = frame_tensor.cuda()
+                rcnn_results = faster_rcnn_model([frame_tensor])[0]
+                for box, label, score in zip(rcnn_results['boxes'], rcnn_results['labels'], rcnn_results['scores']):
+                    if (label == COCO_BIRD_CLASS_ID or label == COCO_CROW_CLASS_ID) and score > score_threshold:
+                        rcnn_dets.append({
+                            'box': box.cpu().numpy(),
+                            'score': score.cpu().numpy(),
+                            'class': 'crow' if label == COCO_CROW_CLASS_ID else 'bird',
+                            'model': 'rcnn',
+                            'view': 'single'
+                        })
+
             # Combine detections from both models
             all_dets = yolo_dets + rcnn_dets
-            
-            # Merge overlapping detections
+
+            # Merge overlapping detections (lower IOU threshold for multi-view)
+            iou_thresh = 0.3 if (multi_view_yolo or multi_view_rcnn) else 0.4
             if all_dets:
-                merged_dets = merge_overlapping_detections(all_dets, iou_threshold=0.4)
-                # For merged detections, use the higher confidence score
+                merged_dets = merge_overlapping_detections(all_dets, iou_threshold=iou_thresh)
                 for det in merged_dets:
                     if 'merged_scores' in det:
                         det['score'] = max(det['merged_scores'])
@@ -175,7 +223,7 @@ def detect_crows_parallel(frames, score_threshold=0.3, yolo_threshold=0.2):
                 detections.append(merged_dets)
             else:
                 detections.append([])
-    
+
     total_detections = sum(len(d) for d in detections)
     frames_with_birds = sum(1 for d in detections if d)
     print(f"[INFO] Parallel detection complete. Found {total_detections} birds in {frames_with_birds} frames")

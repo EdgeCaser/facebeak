@@ -126,6 +126,12 @@ class FacebeakGUI:
         self.mv_stride_entry.insert(0, "1")
         ttk.Label(control_frame, text="How often to run multi-view extraction (1 = every frame, 2 = every other frame, etc.). Use 1 unless you want to speed up processing by skipping some frames for multi-view analysis.", wraplength=400, font=("Arial", 8)).grid(row=9, column=2, sticky="w")
 
+        # Multi-view checkboxes
+        self.mv_yolo_var = tk.BooleanVar(value=False)
+        self.mv_rcnn_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(control_frame, text="Enable Multi-View for YOLO", variable=self.mv_yolo_var).grid(row=10, column=0, columnspan=2, sticky="w", pady=2)
+        ttk.Checkbutton(control_frame, text="Enable Multi-View for Faster R-CNN", variable=self.mv_rcnn_var).grid(row=10, column=2, columnspan=1, sticky="w", pady=2)
+
         # Run button (moved to class variable for access in other methods)
         self.run_button = ttk.Button(control_frame, text="Process Videos", command=self.run_facebeak)
         self.run_button.grid(row=11, column=0, columnspan=3, pady=10)
@@ -239,6 +245,8 @@ class FacebeakGUI:
         embed_thresh = self.embed_thresh.get()
         skip = self.skip_entry.get()
         mv_stride = self.mv_stride_entry.get()
+        mv_yolo = self.mv_yolo_var.get()
+        mv_rcnn = self.mv_rcnn_var.get()
         
         # Validate thresholds
         try:
@@ -274,7 +282,9 @@ class FacebeakGUI:
             'iou_thresh': iou_thresh,
             'embed_thresh': embed_thresh,
             'skip': skip,
-            'mv_stride': mv_stride
+            'mv_stride': mv_stride,
+            'mv_yolo': mv_yolo,
+            'mv_rcnn': mv_rcnn
         })).start()
 
     def _process_videos(self, videos: List[str], output_dir: str, params: dict):
@@ -297,8 +307,12 @@ class FacebeakGUI:
                        "--iou-threshold", params['iou_thresh'],
                        "--embedding-threshold", params['embed_thresh'],
                        "--skip", params['skip'],
-                       "--multi-view-stride", params['mv_stride'],
-                       "--preserve-audio"]  # New argument to preserve audio
+                       "--multi-view-stride", params['mv_stride']]
+                if params.get('mv_yolo'):
+                    cmd.append('--multi-view-yolo')
+                if params.get('mv_rcnn'):
+                    cmd.append('--multi-view-rcnn')
+                cmd.append("--preserve-audio")  # New argument to preserve audio
                 
                 self.output_box.insert(tk.END, f"\nProcessing: {video}\n")
                 self.output_box.insert(tk.END, f"Running: {' '.join(cmd)}\n")

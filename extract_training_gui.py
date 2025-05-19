@@ -232,9 +232,15 @@ class CrowExtractorGUI:
         ttk.Spinbox(settings_frame, from_=1, to=10, textvariable=self.min_detections_var, 
                    width=5).grid(row=1, column=1, sticky=tk.W, padx=5)
         
+        # Multi-view checkboxes
+        self.mv_yolo_var = tk.BooleanVar(value=False)
+        self.mv_rcnn_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(settings_frame, text="Enable Multi-View for YOLO", variable=self.mv_yolo_var).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=2)
+        ttk.Checkbutton(settings_frame, text="Enable Multi-View for Faster R-CNN", variable=self.mv_rcnn_var).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=2)
+        
         # Control buttons
         control_frame = ttk.Frame(self.left_panel)
-        control_frame.grid(row=2, column=0, columnspan=3, pady=5)
+        control_frame.grid(row=4, column=0, columnspan=3, pady=5)
         
         self.start_button = ttk.Button(control_frame, text="Start Processing", command=self._start_processing)
         self.start_button.grid(row=0, column=0, padx=5)
@@ -253,7 +259,7 @@ class CrowExtractorGUI:
         
         # Progress tracking
         progress_frame = ttk.LabelFrame(self.left_panel, text="Progress", padding="5")
-        progress_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        progress_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
         
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, 
@@ -265,7 +271,7 @@ class CrowExtractorGUI:
         
         # Statistics panel
         stats_frame = ttk.LabelFrame(self.left_panel, text="Statistics", padding="5")
-        stats_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        stats_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
         
         # Initialize statistics
         self.stats = {
@@ -453,7 +459,12 @@ class CrowExtractorGUI:
             )
             
             # Detect crows
-            detections = parallel_detect_birds([frame], score_threshold=self.min_confidence_var.get())
+            detections = parallel_detect_birds(
+                [frame],
+                score_threshold=self.min_confidence_var.get(),
+                multi_view_yolo=self.mv_yolo_var.get(),
+                multi_view_rcnn=self.mv_rcnn_var.get()
+            )
             frame_dets = detections[0]
             logger.debug(f"Frame {self.current_frame_num}: Found {len(frame_dets)} detections")
             
