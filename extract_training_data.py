@@ -15,7 +15,7 @@ from logging_config import setup_logging
 # Configure logging
 logger = setup_logging()
 
-def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detections=2):
+def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detections=2, batch_size=32):
     """
     Extract crow crops from a video for training.
     Args:
@@ -23,6 +23,7 @@ def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detect
         tracker: CrowTracker instance
         min_confidence: Minimum detection confidence
         min_detections: Minimum number of detections needed to save a crow
+        batch_size: Batch size for processing images
     """
     logger.info(f"Processing video: {video_path}")
     logger.info(f"Using detection threshold: {min_confidence}")
@@ -36,7 +37,6 @@ def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detect
     fps = cap.get(cv2.CAP_PROP_FPS)
     logger.info(f"Video info: {total_frames} frames, {fps} FPS")
     
-    batch_size = 32
     frames = []
     frame_numbers = []
     detections_by_crow = defaultdict(list)  # crow_id -> list of (frame_num, detection)
@@ -95,7 +95,18 @@ def main():
     parser.add_argument("--output-dir", default="crow_crops", help="Base directory to save crops")
     parser.add_argument("--min-confidence", type=float, default=0.2, help="Minimum detection confidence")
     parser.add_argument("--min-detections", type=int, default=2, help="Minimum detections per crow")
+    parser.add_argument("--batch-size", type=int, default=32, help="Batch size for processing (default: 32, adjust based on GPU memory)")
     args = parser.parse_args()
+    
+    # Adjust batch size based on available GPU memory if CUDA is available
+    if torch.cuda.is_available():
+        gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)  # GB
+        if gpu_memory < 4:
+            args.batch_size = max(8, args.batch_size // 2)
+            logger.info(f"Reduced batch size to {args.batch_size} due to low GPU memory ({gpu_memory:.1f} GB)")
+        elif gpu_memory > 8:
+            args.batch_size = min(64, args.batch_size * 2)
+            logger.info(f"Increased batch size to {args.batch_size} due to high GPU memory ({gpu_memory:.1f} GB)")
     
     # Initialize crow tracker
     tracker = CrowTracker(args.output_dir)
@@ -103,7 +114,7 @@ def main():
     # Create processing run directory
     run_dir = tracker.create_processing_run()
     logger.info(f"Starting extraction with run directory: {run_dir}")
-    logger.info(f"Using parameters: min_confidence={args.min_confidence}, min_detections={args.min_detections}")
+    logger.info(f"Using parameters: min_confidence={args.min_confidence}, min_detections={args.min_detections}, batch_size={args.batch_size}")
     
     # Process all videos in directory
     video_extensions = ('.mp4', '.avi', '.mov', '.mkv')
@@ -119,7 +130,8 @@ def main():
             video_path,
             tracker,
             min_confidence=args.min_confidence,
-            min_detections=args.min_detections
+            min_detections=args.min_detections,
+            batch_size=args.batch_size
         )
     
     # Clean up processing directory
@@ -134,4 +146,4 @@ def main():
     logger.info("You can now use these crops to train the model with train_triplet_resnet.py")
 
 if __name__ == "__main__":
-    main() 
+    main()

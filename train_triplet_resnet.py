@@ -125,29 +125,60 @@ class CrowTripletDataset(Dataset):
                 logger.warning(f"No audio files found for crow {crow_id}")
                 
     def _load_and_preprocess_audio(self, audio_path):
-        """Load and preprocess audio file."""
+        """Load and preprocess audio file with data augmentation."""
         try:
             # Extract features
             mel_spec, chroma = extract_audio_features(str(audio_path))
-            
-            # Convert to tensor and add channel dimension
+
+            # Apply data augmentation if training
+            if self.split == 'train':
+                # Pitch shifting
+                if random.random() < 0.5:
+                    n_steps = random.uniform(-2, 2)
+                    mel_spec = librosa.effects.pitch_shift(mel_spec, sr=22050, n_steps=n_steps)
+                # Time stretching
+                if random.random() < 0.5:
+                    rate = random.uniform(0.8, 1.2)
+                    mel_spec = librosa.effects.time_stretch(mel_spec, rate=rate)
+
+            # Ensure normalization to [0, 1] after augmentation
+            mel_min, mel_max = np.nanmin(mel_spec), np.nanmax(mel_spec)
+            if mel_max - mel_min > 1e-8:
+                mel_spec = (mel_spec - mel_min) / (mel_max - mel_min)
+            else:
+                mel_spec = np.zeros_like(mel_spec)
+            chroma_min, chroma_max = np.nanmin(chroma), np.nanmax(chroma)
+            if chroma_max - chroma_min > 1e-8:
+                chroma = (chroma - chroma_min) / (chroma_max - chroma_min)
+            else:
+                chroma = np.zeros_like(chroma)
+
+            # Convert to tensor
             mel_spec = torch.from_numpy(mel_spec).float()
             chroma = torch.from_numpy(chroma).float()
+        
+            # Dynamic padding or truncation based on actual length
+            target_time = min(max(64, mel_spec.size(1)), 256)  # Adaptive target between 64 and 256
             
-            # Stack mel_spec and chroma as channels
-            audio_features = torch.stack([mel_spec, chroma], dim=0)
+            # Handle mel spectrogram
+            if mel_spec.size(1) > target_time:
+                mel_spec = mel_spec[:, :target_time]
+            elif mel_spec.size(1) < target_time:
+                padding = torch.zeros(mel_spec.size(0), target_time - mel_spec.size(1))
+                mel_spec = torch.cat([mel_spec, padding], dim=1)
             
-            # Pad or truncate to fixed size if needed
-            target_time = 128  # Adjust based on your needs
-            if audio_features.size(2) > target_time:
-                audio_features = audio_features[:, :, :target_time]
-            elif audio_features.size(2) < target_time:
-                padding = torch.zeros(audio_features.size(0), audio_features.size(1), 
-                                    target_time - audio_features.size(2))
-                audio_features = torch.cat([audio_features, padding], dim=2)
-                
-            return audio_features
+            # Handle chroma
+            if chroma.size(1) > target_time:
+                chroma = chroma[:, :target_time]
+            elif chroma.size(1) < target_time:
+                padding = torch.zeros(chroma.size(0), target_time - chroma.size(1))
+                chroma = torch.cat([chroma, padding], dim=1)
             
+            return {
+                'mel_spec': mel_spec,
+                'chroma': chroma
+            }
+        
         except Exception as e:
             logger.error(f"Error processing audio file {audio_path}: {e}")
             return None
@@ -439,6 +470,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, device,
             if patience_counter >= patience:
                 logger.info(f"Early stopping triggered after {epoch + 1} epochs")
                 break
+        
+        # Clear GPU memory after each epoch
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
     
     # Plot metrics
     plot_metrics(metrics_history, output_dir)
@@ -476,7 +511,6 @@ def main():
         'device': str(DEVICE),
         'timestamp': datetime.now().strftime('%Y%m%d_%H%M%S')
     }
-    
     with open(os.path.join(OUTPUT_DIR, 'config.json'), 'w') as f:
         json.dump(config, f, indent=2)
     
@@ -535,6 +569,10 @@ def main():
     # Save final model
     torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, 'final_model.pth'))
     logger.info("Training complete!")
+    
+    # Clear GPU memory
+    if DEVICE.type == 'cuda':
+        torch.cuda.empty_cache()
 
 if __name__ == '__main__':
     main() 

@@ -532,6 +532,10 @@ class TrainingGUI:
                          f"(Best Val Loss: {self.metrics.best_val_loss:.4f})"
                 ))
                 self.logger.info(f"=== EPOCH {epoch+1} END ===")
+                # Clear GPU cache after each epoch
+                if device.type == 'cuda':
+                    torch.cuda.empty_cache()
+                    self.logger.info("Cleared GPU cache")
             self.logger.info("Training loop complete. Saving final results.")
             
             # Save final metrics
