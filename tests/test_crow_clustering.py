@@ -326,7 +326,7 @@ def test_error_handling():
     analyzer = CrowClusterAnalyzer()
     
     # Test with empty embeddings
-    with pytest.raises(ValueError, match="Expected 2D array"):
+    with pytest.raises(ValueError, match="Need at least 2 embeddings for clustering"):
         analyzer.cluster_crows(np.array([]), eps=0.25, min_samples=2)
     
     # Test with invalid parameters

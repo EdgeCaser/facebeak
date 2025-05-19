@@ -6,8 +6,8 @@ import torch
 
 def setup_logging():
     """Set up logging configuration."""
-    # Create logs directory if it doesn't exist
-    log_dir = Path('logs')
+    # Get log directory from environment or use default
+    log_dir = Path(os.environ.get('LOG_DIR', 'logs'))
     log_dir.mkdir(exist_ok=True)
     
     # Use a single log file that gets overwritten
@@ -15,18 +15,23 @@ def setup_logging():
     
     # Configure logging
     logging.basicConfig(
-        level=logging.DEBUG,  # Set to DEBUG for maximum verbosity
+        level=logging.INFO,  # Set to INFO by default
         format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
         handlers=[
             # File handler - overwrites the file on each run
             logging.FileHandler(log_file, mode='w'),  # 'w' mode overwrites the file
             # Console handler
             logging.StreamHandler()
-        ]
+        ],
+        force=True  # Force reconfiguration of logging
     )
     
-    logger = logging.getLogger(__name__)
-    logger.info("=== Starting new training session ===")
+    # Get the facebeak logger specifically
+    logger = logging.getLogger('facebeak')
+    logger.setLevel(logging.INFO)  # Ensure level is set correctly
+    
+    # Log startup information
+    logger.info("=== Starting new session ===")
     logger.info(f"Log file: {log_file}")
     logger.info(f"Python version: {os.sys.version}")
     logger.info(f"PyTorch version: {torch.__version__}")

@@ -1,6 +1,42 @@
 {
+  "best_parameter_search": {
+    "eps": 0.5,
+    "min_samples": 3,
+    "n_clusters": 3,
+    "n_noise": 0,
+    "silhouette_score": -0.003546816277863554,
+    "calinski_harabasz_score": 1.0222623272064342,
+    "valid_cluster_ratio": 1.0,
+    "combined_score": 0.6052599716507847,
+    "validation_metrics": {
+      "total_clusters": 3,
+      "valid_clusters": 3,
+      "invalid_clusters": 0,
+      "valid_cluster_ratio": 1.0,
+      "cluster_details": {
+        "cluster_0": {
+          "size": 10,
+          "mean_similarity": 0.8,
+          "std_similarity": 0.1,
+          "is_valid": 1
+        },
+        "cluster_1": {
+          "size": 10,
+          "mean_similarity": 0.8,
+          "std_similarity": 0.1,
+          "is_valid": 1
+        },
+        "cluster_2": {
+          "size": 8,
+          "mean_similarity": 0.8,
+          "std_similarity": 0.1,
+          "is_valid": 1
+        }
+      }
+    }
+  },
   "final_clustering": {
-    "n_clusters": 1,
+    "n_clusters": 3,
     "n_noise": 0,
     "eps": 0.25,
     "min_samples": 2,
@@ -29,6 +65,8 @@
           "is_valid": 1
         }
       }
-    }
+    },
+    "silhouette_score": -0.003546816277863554,
+    "calinski_harabasz_score": 1.0222623272064342
   }
 }

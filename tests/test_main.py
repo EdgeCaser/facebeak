@@ -65,31 +65,33 @@ class TestMainFunctions(unittest.TestCase):
     @patch('cv2.VideoCapture')
     @patch('cv2.VideoWriter')
     @patch('main.detect_crows_parallel')
-    @patch('main.process_frame')
-    def test_process_video(self, mock_process_frame, mock_detect_crows, mock_video_writer, mock_video_capture):
+    @patch('main.interpolate_frames')
+    def test_process_video(self, mock_interpolate, mock_detect_crows, mock_video_writer, mock_video_capture):
         """Test video processing with mocked components."""
         # Create a mock video capture
         mock_cap = MagicMock()
         mock_cap.isOpened.return_value = True
-        mock_cap.get.return_value = 30  # fps
-        mock_cap.read.side_effect = [
-            (True, np.zeros((480, 640, 3), dtype=np.uint8)),  # First frame
-            (True, np.zeros((480, 640, 3), dtype=np.uint8)),  # Second frame
-            (False, None)  # End of video
+        mock_cap.get.side_effect = [
+            640,  # width
+            480,  # height
+            30,   # fps
+            30    # total_frames
         ]
+        mock_cap.read.side_effect = [
+            (True, np.zeros((480, 640, 3), dtype=np.uint8)) for _ in range(30)  # 30 frames
+        ] + [(False, None)]  # End of video
         mock_video_capture.return_value = mock_cap
         
-        # Create a mock video writer
-        mock_writer = MagicMock()
-        mock_video_writer.return_value = mock_writer
+        # Create mock video writers
+        mock_skip_writer = MagicMock()
+        mock_full_writer = MagicMock()
+        mock_video_writer.side_effect = [mock_skip_writer, mock_full_writer]
         
         # Mock detection results
         mock_detect_crows.return_value = [
             [{'bbox': [100, 100, 200, 200], 'score': 0.9, 'class': 'crow'}]
+            for _ in range(6)  # 6 frames (30 frames / skip=5)
         ]
-        
-        # Mock frame processing
-        mock_process_frame.return_value = (np.zeros((480, 640, 3), dtype=np.uint8), [])
         
         # Create temporary files for testing
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -112,29 +114,42 @@ class TestMainFunctions(unittest.TestCase):
                 min_hits=2,
                 iou_threshold=0.2,
                 embedding_threshold=0.7,
-                skip=1,
+                skip=5,
                 multi_view_stride=1,
                 preserve_audio=False
             )
             
             # Process the video
-            process_video(video_path, skip_output, full_output, args)
+            frame_count = process_video(video_path, skip_output, full_output, args)
             
             # Verify video capture was opened
             mock_video_capture.assert_called_once_with(video_path)
             
-            # Verify video writer was created
-            mock_video_writer.assert_called()
+            # Verify video writers were created
+            self.assertEqual(mock_video_writer.call_count, 2)
             
             # Verify frames were processed
-            self.assertEqual(mock_cap.read.call_count, 3)  # Two frames + one to detect end
-            self.assertEqual(mock_process_frame.call_count, 2)
+            self.assertEqual(mock_cap.read.call_count, 31)  # 30 frames + 1 to detect end
+            self.assertEqual(mock_detect_crows.call_count, 1)
             
-            # Verify video writer was released
-            mock_writer.release.assert_called_once()
+            # Verify interpolate_frames was called
+            mock_interpolate.assert_called_once()
+            call_args = mock_interpolate.call_args[0]
+            self.assertEqual(call_args[0], video_path)  # video_path
+            self.assertEqual(call_args[1], full_output)  # output_path
+            self.assertEqual(len(call_args[2]), 6)  # processed_frames
+            self.assertEqual(len(call_args[3]), 6)  # processed_tracks
+            self.assertEqual(call_args[4], 30)  # fps
+            self.assertEqual(call_args[5], False)  # preserve_audio
+            
+            # Verify video writers were released
+            mock_skip_writer.release.assert_called_once()
             
             # Verify video capture was released
             mock_cap.release.assert_called_once()
+            
+            # Verify frame count
+            self.assertEqual(frame_count, 30)
 
     @patch('cv2.VideoCapture')
     def test_process_video_invalid_file(self, mock_video_capture):
