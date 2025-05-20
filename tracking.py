@@ -29,26 +29,27 @@ import torch.nn.functional as F
 from threading import Thread, Event
 from multi_view import MultiViewExtractor
 from color_normalization import ColorNormalizer
+import functools
 
 # Custom exception classes
 class TrackingError(Exception):
-    """Base class for tracking-related errors."""
+    """Base exception for tracking errors."""
     pass
 
 class DeviceError(TrackingError):
-    """Raised when there are device-related errors."""
+    """Exception raised for device-related errors."""
     pass
 
 class ModelError(TrackingError):
-    """Raised when there are model-related errors."""
+    """Exception raised for model-related errors."""
     pass
 
 class EmbeddingError(TrackingError):
-    """Raised when there are embedding processing errors."""
+    """Exception raised for embedding-related errors."""
     pass
 
 class TimeoutException(TrackingError):
-    """Raised when an operation times out."""
+    """Exception raised for operation timeouts."""
     pass
 
 # Configure logging
@@ -56,31 +57,23 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def timeout(seconds):
-    """Decorator to add timeout to functions."""
+    """Decorator for function timeout."""
     def decorator(func):
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            result = []
-            error = []
-            event = Event()
-            
-            def target():
-                try:
-                    result.append(func(*args, **kwargs))
-                except Exception as e:
-                    error.append(e)
-                finally:
-                    event.set()
-            
-            thread = Thread(target=target)
-            thread.daemon = True
-            thread.start()
-            
-            if not event.wait(seconds):
+            def handler(signum, frame):
                 raise TimeoutException(f"Function {func.__name__} timed out after {seconds} seconds")
             
-            if error:
-                raise error[0]
-            return result[0]
+            # Set signal handler
+            signal.signal(signal.SIGALRM, handler)
+            signal.alarm(seconds)
+            
+            try:
+                result = func(*args, **kwargs)
+            finally:
+                # Disable alarm
+                signal.alarm(0)
+            return result
         return wrapper
     return decorator
 
@@ -320,6 +313,12 @@ class EnhancedTracker:
             self.conf_threshold = conf_threshold
             self.multi_view_stride = multi_view_stride
             
+            # Memory management parameters
+            self.max_track_history = 100  # Maximum number of history entries per track
+            self.max_embedding_history = 100  # Maximum number of embeddings per track
+            self.max_behavior_history = 50  # Maximum number of behaviors per track
+            self.cleanup_interval = 10  # Frames between cleanup operations
+            
             # Retry parameters
             self.max_retries = 3
             self.retry_delay = 0.1  # seconds
@@ -344,13 +343,14 @@ class EnhancedTracker:
             
             # Initialize tracking state with improved memory management
             self.frame_count = 0
-            self.track_embeddings = defaultdict(lambda: deque(maxlen=100))  # Limit history
-            self.track_head_embeddings = defaultdict(lambda: deque(maxlen=100))
+            self.track_embeddings = defaultdict(lambda: deque(maxlen=self.max_embedding_history))
+            self.track_head_embeddings = defaultdict(lambda: deque(maxlen=self.max_embedding_history))
             self.track_history = {}
-            self.track_id_changes = {}  # Regular dict to ensure proper cleanup
+            self.track_id_changes = {}
             self.track_ages = {}
             self.next_id = 0
-            self.active_tracks = set()  # Track currently active track IDs
+            self.active_tracks = set()
+            self.last_cleanup_frame = 0
             
             # Initialize models with improved error handling
             self._initialize_models(model_path)
@@ -414,6 +414,9 @@ class EnhancedTracker:
             
         Returns:
             bool: True if successful, False otherwise
+            
+        Raises:
+            DeviceError: If device movement fails
         """
         try:
             if isinstance(device, str):
@@ -427,77 +430,24 @@ class EnhancedTracker:
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                     
-            if hasattr(self, 'multi_view_extractor') and hasattr(self.multi_view_extractor, 'to'):
-                self.multi_view_extractor = self.multi_view_extractor.to(device)
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-                    
-            self.device = device
-            self.logger.info(f"Moved models to device: {device}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error moving models to device: {str(e)}")
-            raise DeviceError(f"Error moving models to device: {str(e)}")
-            return False
-            
-    def get_model_device(self):
-        """Get the current device of the models.
-        
-        Returns:
-            torch.device: Current device
-        """
-        try:
-            if hasattr(self, 'model'):
-                return next(self.model.parameters()).device
-            return self.device
-        except Exception:
-            return torch.device('cpu')
-
-    def _retry_operation(self, operation, *args, max_retries=None, **kwargs):
-        """Retry an operation with exponential backoff."""
-        if max_retries is None:
-            max_retries = self.max_retries
-            
-        last_error = None
-        for attempt in range(max_retries):
-            try:
-                return operation(*args, **kwargs)
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries - 1:
-                    delay = self.retry_delay * (2 ** attempt)
-                    self.logger.warning(f"Operation failed (attempt {attempt + 1}/{max_retries}): {str(e)}. Retrying in {delay:.2f}s...")
-                    time.sleep(delay)
-                else:
-                    self.logger.error(f"Operation failed after {max_retries} attempts: {str(e)}")
-                    raise last_error
-
-    def _initialize_models(self, model_path=None):
-        """Initialize models with improved error handling."""
-        try:
-            self.logger.info("Initializing models...")
-            
-            # Initialize SORT tracker
-            self.tracker = Sort(max_age=self.max_age, min_hits=self.min_hits, iou_threshold=self.iou_threshold)
-            
-            # Initialize models
-            try:
-                self.model = self._load_model(model_path)
-                self.model = self.model.to(self.device)
-                self.model.eval()
-            except Exception as e:
-                raise ModelError(f"Failed to load or initialize model: {str(e)}")
-            
-            # Initialize multi-view extractor
-            try:
-                self.multi_view = create_multi_view_extractor()
+            if hasattr(self, 'multi_view_extractor'):
+                # MultiViewExtractor is not a PyTorch model, so we don't need to move it to device
+                # Verify multi-view extractor with a test image
+                test_img = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
+                test_views = self.multi_view_extractor.extract(test_img)
+                if not isinstance(test_views, list) or len(test_views) == 0:
+                    raise ModelError("Multi-view extractor failed to generate views")
             except Exception as e:
                 raise ModelError(f"Failed to initialize multi-view extractor: {str(e)}")
             
             # Initialize color normalizer
             try:
                 self.color_norm = ColorNormalizer()
+                # Test color normalization
+                test_img = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
+                norm_img = self.color_norm.normalize(test_img)
+                if norm_img.shape != test_img.shape:
+                    raise ModelError("Color normalization shape mismatch")
             except Exception as e:
                 raise ModelError(f"Failed to initialize color normalizer: {str(e)}")
             
@@ -508,7 +458,17 @@ class EnhancedTracker:
             raise
 
     def _load_model(self, model_path=None):
-        """Load model with improved error handling."""
+        """Load model with improved error handling.
+        
+        Args:
+            model_path: Optional path to model weights
+            
+        Returns:
+            torch.nn.Module: Loaded model
+            
+        Raises:
+            ModelError: If model loading fails
+        """
         try:
             if model_path is None:
                 # Load default torchvision ResNet18
@@ -516,16 +476,30 @@ class EnhancedTracker:
                 model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
                 # Remove the final classification layer for embedding
                 model = torch.nn.Sequential(*list(model.children())[:-1])
+                
+                # Verify model architecture
+                if not isinstance(model, torch.nn.Module):
+                    raise ModelError("Invalid model architecture")
                 return model
+                
             if not os.path.exists(model_path):
                 raise ModelError(f"Model file not found: {model_path}")
+                
             try:
+                # Load model with proper device placement
                 model = torch.load(model_path, map_location=self.device)
                 if not isinstance(model, torch.nn.Module):
                     raise ModelError("Loaded file is not a valid PyTorch model")
+                    
+                # Verify model parameters
+                if not any(p.requires_grad for p in model.parameters()):
+                    self.logger.warning("Model has no trainable parameters")
+                    
                 return model
+                
             except Exception as e:
                 raise ModelError(f"Failed to load model from {model_path}: {str(e)}")
+                
         except Exception as e:
             self.logger.error(f"Model loading failed: {str(e)}")
             raise
@@ -577,23 +551,30 @@ class EnhancedTracker:
             region: Region type ('full' or 'head')
             
         Returns:
-            numpy.ndarray: Embedding vector of shape (512,)
+            numpy.ndarray: Normalized embedding vector of shape (512,)
+            
+        Raises:
+            EmbeddingError: If embedding processing fails
         """
         try:
             with torch.no_grad():
                 # Ensure tensor is on correct device
-                if torch.cuda.is_available():
-                    img_tensor = img_tensor.cuda()
+                img_tensor = img_tensor.to(self.device)
                 
                 # Add batch dimension if needed
                 if len(img_tensor.shape) == 3:
                     img_tensor = img_tensor.unsqueeze(0)
                 
-                # Get embedding
+                # Get embedding with proper device placement
                 embedding = self.model(img_tensor)
                 
                 # Normalize embedding
                 embedding = F.normalize(embedding, p=2, dim=1)
+                
+                # Verify normalization
+                norm = torch.norm(embedding, p=2, dim=1)
+                if not torch.allclose(norm, torch.ones_like(norm), atol=1e-6):
+                    raise EmbeddingError("Embedding normalization failed")
                 
                 # Convert to numpy and ensure correct shape
                 embedding = embedding.squeeze().cpu().numpy()
@@ -604,12 +585,55 @@ class EnhancedTracker:
                 
         except Exception as e:
             self.logger.error(f"Error processing embedding: {str(e)}")
-            return np.zeros(512)  # Return zero embedding on error
+            raise EmbeddingError(f"Failed to process embedding: {str(e)}")
+
+    def _cleanup_old_tracks(self):
+        """Clean up old tracks and free memory."""
+        try:
+            current_frame = self.frame_count
+            if current_frame - self.last_cleanup_frame < self.cleanup_interval:
+                return
+            
+            self.logger.debug("Running track cleanup...")
+            
+            # Remove old tracks
+            tracks_to_remove = set()
+            for track_id, history in self.track_history.items():
+                if current_frame - history['last_seen'] > self.max_age:
+                    tracks_to_remove.add(track_id)
+            
+            # Clean up track data
+            for track_id in tracks_to_remove:
+                # Remove from all collections
+                self.track_history.pop(track_id, None)
+                self.track_embeddings.pop(track_id, None)
+                self.track_head_embeddings.pop(track_id, None)
+                self.track_id_changes.pop(track_id, None)
+                self.track_ages.pop(track_id, None)
+                self.active_tracks.discard(track_id)
+                
+                # Log cleanup
+                self.logger.debug(f"Removed old track {track_id}")
+            
+            # Force garbage collection
+            if len(tracks_to_remove) > 0:
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            
+            self.last_cleanup_frame = current_frame
+            self.logger.debug(f"Cleanup complete: removed {len(tracks_to_remove)} tracks")
+            
+        except Exception as e:
+            self.logger.error(f"Error during track cleanup: {str(e)}")
 
     def update(self, frame, detections):
         """Update tracks with new detections."""
         try:
             self.frame_count += 1
+            
+            # Run cleanup if needed
+            self._cleanup_old_tracks()
             
             # Convert detections to proper format if needed
             if isinstance(detections, list):
@@ -648,8 +672,8 @@ class EnhancedTracker:
                     self.track_history[track_id] = {
                         'created_frame': self.frame_count,
                         'last_seen': self.frame_count,
-                        'history': deque(maxlen=100),
-                        'behaviors': deque(maxlen=50),
+                        'history': deque(maxlen=self.max_track_history),
+                        'behaviors': deque(maxlen=self.max_behavior_history),
                         'views': set(),
                         'temporal_consistency': 0.0
                     }
@@ -657,14 +681,8 @@ class EnhancedTracker:
                     self.track_id_changes[track_id] = {
                         'created_frame': self.frame_count,
                         'last_seen': self.frame_count,
-                        'history': [{
-                            'frame': self.frame_count,
-                            'event': 'created',
-                            'age': 0,
-                            'bbox': bbox.tolist(),
-                            'device': self.device.type
-                        }],
-                        'behaviors': [],
+                        'history': deque(maxlen=self.max_track_history),
+                        'behaviors': deque(maxlen=self.max_behavior_history),
                         'device_transitions': [],
                         'errors': []
                     }
@@ -673,38 +691,40 @@ class EnhancedTracker:
                     # Update last seen
                     self.track_history[track_id]['last_seen'] = self.frame_count
                     self.track_id_changes[track_id]['last_seen'] = self.frame_count
-                    
-                    # Add history entry
-                    history_entry = {
-                        'frame': self.frame_count,
-                        'event': 'updated',
-                        'age': self.frame_count - self.track_history[track_id]['created_frame'],
-                        'bbox': bbox.tolist(),
-                        'device': self.device.type
-                    }
-                    
-                    # Add behavior if present
-                    if isinstance(detections, list):
-                        for det in detections:
-                            if compute_iou(bbox, det['bbox']) > self.iou_threshold and 'behavior' in det:
-                                history_entry['behavior'] = det['behavior']
-                                self.track_id_changes[track_id]['behaviors'].append(det['behavior'])
-                                break
-                    
-                    self.track_id_changes[track_id]['history'].append(history_entry)
                 
-                # Find matching detection and process embedding
+                # Add history entry
+                history_entry = {
+                    'frame': self.frame_count,
+                    'event': 'updated',
+                    'age': self.frame_count - self.track_history[track_id]['created_frame'],
+                    'bbox': bbox.tolist(),
+                    'device': self.device.type
+                }
+                
+                # Add behavior if present
                 if isinstance(detections, list):
-                    matching_det = None
-                    best_iou = 0
                     for det in detections:
-                        iou = compute_iou(bbox, det['bbox'])
-                        if iou > max(self.iou_threshold, best_iou):
-                            matching_det = det
-                            best_iou = iou
-                    
-                    if matching_det:
-                        try:
+                        if compute_iou(bbox, det['bbox']) > self.iou_threshold and 'behavior' in det:
+                            history_entry['behavior'] = det['behavior']
+                            self.track_history[track_id]['behaviors'].append(det['behavior'])
+                            self.track_id_changes[track_id]['behaviors'].append(det['behavior'])
+                            break
+                
+                self.track_history[track_id]['history'].append(history_entry)
+                self.track_id_changes[track_id]['history'].append(history_entry)
+                
+                # Process embeddings
+                try:
+                    if isinstance(detections, list):
+                        matching_det = None
+                        best_iou = 0
+                        for det in detections:
+                            iou = compute_iou(bbox, det['bbox'])
+                            if iou > max(self.iou_threshold, best_iou):
+                                matching_det = det
+                                best_iou = iou
+                        
+                        if matching_det:
                             # Extract and process crow image
                             crow_img = self.extract_crow_image(frame, matching_det['bbox'])
                             if crow_img is not None:
@@ -718,65 +738,21 @@ class EnhancedTracker:
                                     head_emb = self._process_embedding(crow_img['head'], 'head')
                                     if head_emb is not None:
                                         self.track_head_embeddings[track_id].append(head_emb)
-                        except Exception as e:
-                            self.logger.error(f"Error processing embeddings for track {track_id}: {str(e)}")
-                            self.track_id_changes[track_id]['errors'].append({
-                                'frame': self.frame_count,
-                                'error': str(e),
-                                'bbox': bbox.tolist()
-                            })
-                            # Add zero embeddings on error
-                            self.track_embeddings[track_id].append(np.zeros(512))
-                            self.track_head_embeddings[track_id].append(np.zeros(512))
+                except Exception as e:
+                    self.logger.error(f"Error processing embeddings for track {track_id}: {str(e)}")
+                    self.track_id_changes[track_id]['errors'].append({
+                        'frame': self.frame_count,
+                        'error': str(e),
+                        'type': 'embedding'
+                    })
                 
-                # Update track age
-                self.track_ages[track_id] = self.frame_count - self.track_history[track_id]['created_frame']
-                
-                # Add to active tracks
                 active_tracks.append(track)
             
-            # Clean up old tracks
-            self._cleanup_old_tracks()
+            return np.array(active_tracks)
             
-            # Return active tracks
-            if active_tracks:
-                return np.stack(active_tracks)
-            else:
-                return np.empty((0, 5), dtype=np.float32)
-                
         except Exception as e:
-            self.logger.error(f"Error in update: {str(e)}")
-            return np.empty((0, 5), dtype=np.float32)
-
-    def _cleanup_old_tracks(self):
-        """Clean up tracks that haven't been seen for a while."""
-        current_frame = self.frame_count
-        tracks_to_remove = []
-        
-        for track_id, info in self.track_history.items():
-            if current_frame - info['last_seen'] > self.max_age:
-                tracks_to_remove.append(track_id)
-                # Add final history entry
-                if track_id in self.track_id_changes:
-                    self.track_id_changes[track_id]['history'].append({
-                        'frame': current_frame,
-                        'event': 'removed',
-                        'age': current_frame - info['created_frame'],
-                        'reason': 'max_age_exceeded'
-                    })
-        
-        for track_id in tracks_to_remove:
-            self.logger.debug(f"Removing old track {track_id}")
-            del self.track_history[track_id]
-            if track_id in self.track_embeddings:
-                del self.track_embeddings[track_id]
-            if track_id in self.track_head_embeddings:
-                del self.track_head_embeddings[track_id]
-            if track_id in self.track_ages:
-                del self.track_ages[track_id]
-            if track_id in self.track_id_changes:
-                del self.track_id_changes[track_id]
-            self.active_tracks.discard(track_id)
+            self.logger.error(f"Error updating tracks: {str(e)}")
+            raise
 
     def extract_crow_image(self, frame, bbox, padding=0.3, min_size=100):
         """Extract a cropped image of a crow from the frame using robust validation and enhancement logic.
@@ -794,6 +770,62 @@ class EnhancedTracker:
         except Exception as e:
             self.logger.error(f"Error extracting crow image: {str(e)}")
             return None
+
+    def _initialize_models(self, model_path=None):
+        """Initialize models with improved error handling.
+        
+        Raises:
+            ModelError: If model initialization fails
+        """
+        try:
+            self.logger.info("Initializing models...")
+            
+            # Initialize SORT tracker
+            self.tracker = Sort(max_age=self.max_age, min_hits=self.min_hits, iou_threshold=self.iou_threshold)
+            
+            # Initialize main model
+            try:
+                self.model = self._load_model(model_path)
+                self.model = self.model.to(self.device)
+                self.model.eval()
+                
+                # Verify model output shape
+                test_input = torch.randn(1, 3, 224, 224, device=self.device)
+                with torch.no_grad():
+                    test_output = self.model(test_input)
+                    if test_output.shape[1] != 512:
+                        raise ModelError(f"Model output shape mismatch: expected 512, got {test_output.shape[1]}")
+            except Exception as e:
+                raise ModelError(f"Failed to load or initialize model: {str(e)}")
+            
+            # Initialize multi-view extractor
+            try:
+                self.multi_view_extractor = create_multi_view_extractor()
+                # MultiViewExtractor is not a PyTorch model, so we don't need to move it to device
+                # Verify multi-view extractor with a test image
+                test_img = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
+                test_views = self.multi_view_extractor.extract(test_img)
+                if not isinstance(test_views, list) or len(test_views) == 0:
+                    raise ModelError("Multi-view extractor failed to generate views")
+            except Exception as e:
+                raise ModelError(f"Failed to initialize multi-view extractor: {str(e)}")
+            
+            # Initialize color normalizer
+            try:
+                self.color_norm = ColorNormalizer()
+                # Test color normalization
+                test_img = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
+                norm_img = self.color_norm.normalize(test_img)
+                if norm_img.shape != test_img.shape:
+                    raise ModelError("Color normalization shape mismatch")
+            except Exception as e:
+                raise ModelError(f"Failed to initialize color normalizer: {str(e)}")
+            
+            self.logger.info("All models initialized successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Model initialization failed: {str(e)}")
+            raise
 
 def compute_iou(box1, box2):
     x1, y1, x2, y2 = box1
