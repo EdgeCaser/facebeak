@@ -304,6 +304,27 @@ def video_test_data(tmp_path_factory):
 
         cap.release()
 
+        # If no images were saved for this crow, save up to 5 raw frames
+        if img_count == 0:
+            print(f"[DEBUG] video_test_data: no detections for {crow_id}, saving raw frames instead")
+            cap_raw = cv2.VideoCapture(str(video_path))
+            raw_saved = 0
+            frame_num = 0
+            while raw_saved < 5:
+                ret, frame = cap_raw.read()
+                if not ret:
+                    break
+                img_path = images_dir / f"raw_frame_{frame_num:06d}.jpg"
+                cv2.imwrite(str(img_path), frame)
+                metadata[crow_id]["images"][str(img_path)] = {
+                    "frame": frame_num,
+                    "bbox": None,
+                    "score": None
+                }
+                raw_saved += 1
+                frame_num += 1
+            cap_raw.release()
+
         # Extract audio using ffmpeg
         audio_path = audio_dir / f"{video_path.stem}.wav"
         try:

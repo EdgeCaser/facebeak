@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 import detection
 import torch
 import signal
+import time
 
 # Utility: create a fake frame
 FRAME_SHAPE = (224, 224, 3)
@@ -262,4 +263,189 @@ def patch_bbox_in_tests():
     builtins.print = patched_print
 
 # Apply patch to all test detection dicts
-patch_bbox_in_tests() 
+patch_bbox_in_tests()
+
+def test_detect_crows_legacy(monkeypatch):
+    """Test the legacy detect_crows function."""
+    # Mock detect_crows_parallel to verify it's called correctly
+    mock_results = [[{'bbox': [10, 10, 50, 50], 'score': 0.9, 'class': 'bird'}]]
+    with patch('detection.detect_crows_parallel', return_value=mock_results) as mock_parallel:
+        frames = [fake_frame()]
+        results = detection.detect_crows(frames, score_threshold=0.3)
+        mock_parallel.assert_called_once_with(frames, score_threshold=0.3)
+        assert results == mock_results
+
+def test_detect_crows_cascade_deprecated(monkeypatch):
+    """Test the deprecated cascade detection function."""
+    import warnings
+    with warnings.catch_warnings(record=True) as w:
+        # Trigger the warning
+        detection.detect_crows_cascade([fake_frame()])
+        assert len(w) == 1
+        assert issubclass(w[0].category, DeprecationWarning)
+        assert "deprecated" in str(w[0].message)
+
+def test_extract_roi_edge_cases():
+    """Test extract_roi with edge cases."""
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    
+    # Test bbox at image boundaries
+    bbox = [0, 0, 50, 50]
+    roi, coords = detection.extract_roi(frame, bbox, padding=0.1)
+    assert coords[0] == 0 and coords[1] == 0
+    
+    # Test bbox at other boundary
+    bbox = [50, 50, 100, 100]
+    roi, coords = detection.extract_roi(frame, bbox, padding=0.1)
+    assert coords[2] == 100 and coords[3] == 100
+    
+    # Test bbox larger than image
+    bbox = [-10, -10, 110, 110]
+    roi, coords = detection.extract_roi(frame, bbox, padding=0.1)
+    assert coords[0] == 0 and coords[1] == 0
+    assert coords[2] == 100 and coords[3] == 100
+    
+    # Test zero padding
+    bbox = [10, 10, 50, 50]
+    roi, coords = detection.extract_roi(frame, bbox, padding=0)
+    assert coords == tuple(bbox)
+
+def test_compute_iou_edge_cases():
+    """Test compute_iou with edge cases."""
+    # Test degenerate boxes (zero width/height)
+    assert detection.compute_iou([0, 0, 0, 10], [0, 0, 10, 10]) == 0
+    assert detection.compute_iou([0, 0, 10, 0], [0, 0, 10, 10]) == 0
+    
+    # Test identical boxes
+    box = [10, 10, 50, 50]
+    assert detection.compute_iou(box, box) == 1.0
+    
+    # Test boxes with negative coordinates
+    assert detection.compute_iou([-10, -10, 0, 0], [0, 0, 10, 10]) == 0
+    
+    # Test boxes with float coordinates
+    box1 = [10.5, 10.5, 50.5, 50.5]
+    box2 = [10.0, 10.0, 50.0, 50.0]
+    iou = detection.compute_iou(box1, box2)
+    assert 0 < iou < 1
+
+def test_model_initialization():
+    """Test model initialization and CUDA availability."""
+    # Test YOLO model initialization
+    assert hasattr(detection, 'yolo_model')
+    assert detection.yolo_model is not None
+    
+    # Test Faster R-CNN model initialization
+    assert hasattr(detection, 'faster_rcnn_model')
+    assert detection.faster_rcnn_model is not None
+    
+    # Test CUDA availability
+    if torch.cuda.is_available():
+        assert next(detection.yolo_model.parameters()).is_cuda
+        assert next(detection.faster_rcnn_model.parameters()).is_cuda
+    else:
+        assert not next(detection.yolo_model.parameters()).is_cuda
+        assert not next(detection.faster_rcnn_model.parameters()).is_cuda
+
+def test_timeout_decorator():
+    """Test the timeout decorator directly."""
+    @detection.timeout(1)
+    def slow_function():
+        time.sleep(2)
+        return "success"
+    
+    @detection.timeout(2)
+    def fast_function():
+        time.sleep(1)
+        return "success"
+    
+    # Test timeout
+    with pytest.raises(detection.TimeoutError):
+        slow_function()
+    
+    # Test successful execution
+    assert fast_function() == "success"
+    
+    # Test error propagation
+    @detection.timeout(1)
+    def error_function():
+        raise ValueError("test error")
+    
+    with pytest.raises(ValueError, match="test error"):
+        error_function()
+
+def test_multi_view_extractor_integration(monkeypatch):
+    """Test integration with multi-view extractor."""
+    class FakeExtractor:
+        def __init__(self, orig, flipped):
+            self.extract_count = 0
+            self.orig = orig
+            self.flipped = flipped
+        def extract(self, frame):
+            self.extract_count += 1
+            # Return two different views: original and flipped
+            return [self.orig, self.flipped]
+
+    # Prepare a single frame and its flipped version
+    orig_frame = fake_frame()
+    flipped_frame = np.flip(orig_frame, axis=1).copy()
+
+    # Create fake models that return different results for different views
+    def fake_yolo(frame, *args, **kwargs):
+        class Boxes:
+            if np.array_equal(frame, orig_frame):
+                xyxy = [torch.tensor([10, 10, 50, 50])]
+                conf = [torch.tensor(0.9)]
+            elif np.array_equal(frame, flipped_frame):
+                xyxy = [torch.tensor([60, 10, 100, 50])]
+                conf = [torch.tensor(0.8)]
+            else:
+                xyxy = []
+                conf = []
+            cls = [torch.tensor(detection.YOLO_BIRD_CLASS_ID)] * len(xyxy)
+        class Result:
+            boxes = Boxes()
+        return [Result()]
+
+    def fake_rcnn(frame, *args, **kwargs):
+        return [{
+            'boxes': [torch.tensor([10, 10, 50, 50])],
+            'labels': [detection.COCO_BIRD_CLASS_ID],
+            'scores': [torch.tensor(0.9)]
+        }]
+
+    # Patch models and extractor
+    monkeypatch.setattr(detection, 'yolo_model', fake_yolo)
+    monkeypatch.setattr(detection, 'faster_rcnn_model', fake_rcnn)
+    monkeypatch.setattr(detection, 'create_multi_view_extractor', lambda **kwargs: FakeExtractor(orig_frame, flipped_frame))
+
+    # Test multi-view detection
+    frames = [orig_frame]
+    results = detection.detect_crows_parallel(
+        frames,
+        multi_view_yolo=True,
+        multi_view_rcnn=True,
+        multi_view_params={'num_views': 2}
+    )
+
+    assert len(results) == 1
+    detections = results[0]
+    assert len(detections) > 0
+
+    # Verify that detections from different views were merged
+    bboxes = [d['bbox'] for d in detections]
+    assert any(np.allclose(bbox, [10, 10, 50, 50]) for bbox in bboxes)
+    assert any(np.allclose(bbox, [60, 10, 100, 50]) for bbox in bboxes)
+
+def test_merge_overlapping_detections_empty():
+    # Should return [] for empty input
+    assert detection.merge_overlapping_detections([]) == []
+
+def test_merge_overlapping_detections_single():
+    # Should return the single detection unchanged
+    dets = [{'bbox': [10, 10, 50, 50], 'score': 0.9, 'class': 'bird', 'model': 'yolo', 'view': 'single'}]
+    merged = detection.merge_overlapping_detections(dets)
+    assert merged == dets
+
+# Note: The print statements for CPU model loading are only hit if CUDA is not available at import time.
+# To test these would require mocking torch.cuda.is_available() and reloading the module, which is not always practical or necessary for most codebases. 
