@@ -157,7 +157,8 @@ def timeout(seconds):
             thread.start()
             thread.join(seconds)
             if thread.is_alive():
-                thread._stop()
+                # Instead of stopping the thread directly, we'll just let it run in the background
+                # since it's a daemon thread, it will be terminated when the main program exits
                 raise TimeoutError(f"Operation timed out after {seconds} seconds")
             if error:
                 raise error[0]
@@ -200,7 +201,7 @@ def detect_crows_parallel(
                     for view in yolo_views:
                         try:
                             print(f"[DEBUG] Frame {idx}: Before YOLO model inference (multi-view)")
-                            yolo_results = _run_model_inference(yolo_model, view, conf=yolo_threshold)[0]
+                            yolo_results = _run_model_inference(yolo_model, view.copy(), conf=yolo_threshold)[0]  # Make a copy of the view
                             print(f"[DEBUG] Frame {idx}: After YOLO model inference (multi-view)")
                             for bbox, score, cls in zip(yolo_results.boxes.xyxy, yolo_results.boxes.conf, yolo_results.boxes.cls):
                                 print(f"[DEBUG] YOLO bbox: {bbox}, score: {score}, cls: {cls}")
@@ -218,7 +219,7 @@ def detect_crows_parallel(
                 else:
                     try:
                         print(f"[DEBUG] Frame {idx}: Before YOLO model inference (single-view)")
-                        yolo_results = _run_model_inference(yolo_model, frame, conf=yolo_threshold)[0]
+                        yolo_results = _run_model_inference(yolo_model, frame.copy(), conf=yolo_threshold)[0]  # Make a copy of the frame
                         print(f"[DEBUG] Frame {idx}: After YOLO model inference (single-view)")
                         print("[DEBUG] YOLO results:", yolo_results)
                         for bbox, score, cls in zip(yolo_results.boxes.xyxy, yolo_results.boxes.conf, yolo_results.boxes.cls):
@@ -243,7 +244,7 @@ def detect_crows_parallel(
                     for view in rcnn_views:
                         try:
                             print(f"[DEBUG] Frame {idx}: Before RCNN model inference (multi-view)")
-                            frame_tensor = torch.from_numpy(view).permute(2, 0, 1).float() / 255.0
+                            frame_tensor = torch.from_numpy(view.copy()).permute(2, 0, 1).float() / 255.0  # Make a copy of the view
                             if torch.cuda.is_available():
                                 frame_tensor = frame_tensor.cuda()
                             rcnn_results = _run_model_inference(faster_rcnn_model, [frame_tensor])[0]
@@ -264,7 +265,7 @@ def detect_crows_parallel(
                 else:
                     try:
                         print(f"[DEBUG] Frame {idx}: Before RCNN model inference (single-view)")
-                        frame_tensor = torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0
+                        frame_tensor = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0  # Make a copy of the frame
                         if torch.cuda.is_available():
                             frame_tensor = frame_tensor.cuda()
                         print(f"[DEBUG] Frame {idx}: Running RCNN model...")
