@@ -9,13 +9,16 @@ from audio import extract_audio_features
 @pytest.mark.video
 def test_audio_extraction_from_video(video_test_data):
     """Test audio extraction from video files."""
+    if not video_test_data['valid']:
+        pytest.skip("No valid video files found in test data")
+        
     base_dir = video_test_data['base_dir']
+    metadata = video_test_data['metadata']
     
     # Check each crow's directory
-    for crow_dir in base_dir.iterdir():
-        if not crow_dir.is_dir():
-            continue
-            
+    for crow_id, crow_data in metadata.items():
+        crow_dir = base_dir / crow_id
+        
         # Get video file
         video_files = list(crow_dir.glob("*.mp4"))
         if not video_files:
@@ -73,13 +76,16 @@ def test_audio_extraction_from_video(video_test_data):
 @pytest.mark.video
 def test_audio_feature_consistency(video_test_data):
     """Test consistency of audio feature extraction from video."""
+    if not video_test_data['valid']:
+        pytest.skip("No valid video files found in test data")
+        
     base_dir = video_test_data['base_dir']
+    metadata = video_test_data['metadata']
     
     # Check each crow's directory
-    for crow_dir in base_dir.iterdir():
-        if not crow_dir.is_dir():
-            continue
-            
+    for crow_id, crow_data in metadata.items():
+        crow_dir = base_dir / crow_id
+        
         # Get video file
         video_files = list(crow_dir.glob("*.mp4"))
         if not video_files:
