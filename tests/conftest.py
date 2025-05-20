@@ -201,7 +201,15 @@ def video_test_data(tmp_path_factory):
     print("[DEBUG] video_test_data: test_videos_dir is", test_videos_dir)
     if not test_videos_dir.exists():
         print("[DEBUG] video_test_data: test_videos_dir does not exist, skipping.")
-        pytest.skip("Test videos directory not found")
+        return {"base_dir": base_dir, "valid": False}
+
+    # Initialize detection models
+    from detection import detect_crows_parallel
+    from tracking import extract_crow_image
+
+    # Initialize metadata dictionary
+    metadata = {}
+    valid_videos_found = False
 
     # Process each video in the test directory
     for video_path in test_videos_dir.glob("*.mp4"):
@@ -215,23 +223,84 @@ def video_test_data(tmp_path_factory):
         images_dir.mkdir(parents=True, exist_ok=True)
         audio_dir.mkdir(exist_ok=True)
 
+        # Initialize metadata for this crow
+        metadata[crow_id] = {"images": {}}
+
         # Open video file
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
             print("[DEBUG] video_test_data: could not open video", video_path)
             continue
 
-        # Extract first two frames (if available)
+        valid_videos_found = True
+        # Extract frames in batches for detection
+        frames = []
+        frame_numbers = []
         frame_count = 0
-        while frame_count < 2:
-            ret, frame = cap.read()
-            if not ret:
+        max_frames = 30  # Limit to 30 frames per video for testing
+        img_count = 0  # Counter for saved images
+        
+        while frame_count < max_frames and img_count < 5:  # Save up to 5 images per crow
+            frames = []
+            frame_numbers = []
+            
+            # Read a batch of frames
+            for _ in range(10):  # Process 10 frames at a time
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames.append(frame)
+                frame_numbers.append(frame_count)
+                frame_count += 1
+                
+            if not frames:
                 break
                 
-            # Save frame as image
-            frame_path = images_dir / f"frame_{frame_count}.jpg"
-            cv2.imwrite(str(frame_path), frame)
-            frame_count += 1
+            # Detect crows in the batch
+            try:
+                print(f"[DEBUG] video_test_data: detecting crows in batch of {len(frames)} frames")
+                detections = detect_crows_parallel(frames, score_threshold=0.3)
+                
+                # Process detections and save frames
+                for frame_idx, frame_dets in enumerate(detections):
+                    if not frame_dets:
+                        continue
+                        
+                    frame = frames[frame_idx]
+                    frame_num = frame_numbers[frame_idx]
+                    
+                    for det in frame_dets:
+                        if det['score'] < 0.3:  # Skip low confidence detections
+                            continue
+                            
+                        # Extract crop using extract_crow_image
+                        crop = extract_crow_image(frame, det['bbox'])
+                        if crop is None:
+                            print(f"[DEBUG] video_test_data: failed to extract crop for detection {det}")
+                            continue
+                            
+                        # Save the crop
+                        crop_np = (crop['full'].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+                        img_path = images_dir / f"frame_{frame_num:06d}.jpg"
+                        cv2.imwrite(str(img_path), crop_np)
+                        
+                        # Update metadata
+                        metadata[crow_id]["images"][str(img_path)] = {
+                            "frame": frame_num,
+                            "bbox": det['bbox'].tolist(),
+                            "score": float(det['score'])
+                        }
+                        img_count += 1
+                        
+                        if img_count >= 5:  # Stop after saving 5 images
+                            break
+                            
+                    if img_count >= 5:
+                        break
+                        
+            except Exception as e:
+                print(f"[ERROR] video_test_data: error processing batch: {str(e)}")
+                continue
 
         cap.release()
 
@@ -242,7 +311,6 @@ def video_test_data(tmp_path_factory):
             subprocess.run([
                 "ffmpeg", "-i", str(video_path),
                 "-vn",  # No video
-                "-acodec", "pcm_s16le",  # PCM 16-bit
                 "-ar", "44100",  # Sample rate
                 "-ac", "1",  # Mono
                 "-y",  # Overwrite output file if it exists
@@ -252,12 +320,15 @@ def video_test_data(tmp_path_factory):
             print("[DEBUG] video_test_data: ffmpeg extraction failed for", video_path, "stderr:", e.stderr.decode())
             continue
 
-    # Verify we have at least some data
-    if not any(base_dir.iterdir()):
-        pytest.skip("No valid test data could be extracted from videos")
+    # Save metadata file
+    metadata_path = base_dir / "metadata.json"
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
 
     return {
-        "base_dir": base_dir
+        "base_dir": base_dir,
+        "valid": valid_videos_found,
+        "metadata": metadata
     }
 
 @pytest.fixture(scope="session")

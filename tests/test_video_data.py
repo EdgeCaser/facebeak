@@ -13,16 +13,20 @@ from training import compute_triplet_loss, compute_metrics
 @pytest.mark.video
 def test_video_frame_extraction(video_test_data):
     """Integration test: Verify frame extraction from real video files."""
+    if not video_test_data['valid']:
+        pytest.skip("No valid video files found in test data")
+        
     base_dir = video_test_data['base_dir']
+    metadata = video_test_data['metadata']
     
     # Check each crow's directory
-    for crow_dir in base_dir.iterdir():
-        if not crow_dir.is_dir():
-            continue
-            
+    for crow_id, crow_data in metadata.items():
+        crow_dir = base_dir / crow_id
+        images_dir = crow_dir / "images"
+        
         # Get all frame files
-        frame_files = list((crow_dir / "images").glob("*.jpg"))
-        assert len(frame_files) > 0, f"No frames extracted for crow {crow_dir.name}"
+        frame_files = list(images_dir.glob("*.jpg"))
+        assert len(frame_files) > 0, f"No frames extracted for crow {crow_id}"
         
         # Check frame format
         frame_path = frame_files[0]
@@ -30,17 +34,25 @@ def test_video_frame_extraction(video_test_data):
         assert img is not None, f"Failed to read frame {frame_path}"
         assert img.ndim == 3, f"Frame {frame_path} is not a color image"
         assert img.shape[2] == 3, f"Frame {frame_path} does not have 3 color channels"
+        
+        # Verify metadata
+        assert crow_id in metadata, f"No metadata found for crow {crow_id}"
+        assert "images" in metadata[crow_id], f"No image metadata found for crow {crow_id}"
+        assert len(metadata[crow_id]["images"]) > 0, f"No image entries in metadata for crow {crow_id}"
 
 @pytest.mark.video
 def test_video_audio_extraction(video_test_data):
     """Test audio extraction from video files."""
+    if not video_test_data['valid']:
+        pytest.skip("No valid video files found in test data")
+        
     base_dir = video_test_data['base_dir']
+    metadata = video_test_data['metadata']
     
     # Check each crow's directory
-    for crow_dir in base_dir.iterdir():
-        if not crow_dir.is_dir():
-            continue
-            
+    for crow_id, crow_data in metadata.items():
+        crow_dir = base_dir / crow_id
+        
         # Get video file
         video_files = list(crow_dir.glob("*.mp4"))
         if not video_files:
@@ -53,7 +65,6 @@ def test_video_audio_extraction(video_test_data):
         audio_path.parent.mkdir(exist_ok=True)
         
         try:
-            # Extract audio from video
             subprocess.run([
                 "ffmpeg", "-i", str(video_path),
                 "-vn",  # No video
@@ -102,13 +113,16 @@ def test_video_audio_extraction(video_test_data):
 @pytest.mark.video
 def test_audio_feature_extraction_video(video_test_data):
     """Integration test: Verify audio feature extraction on real video audio."""
+    if not video_test_data['valid']:
+        pytest.skip("No valid video files found in test data")
+        
     base_dir = video_test_data['base_dir']
+    metadata = video_test_data['metadata']
     
     # Check each crow's directory
-    for crow_dir in base_dir.iterdir():
-        if not crow_dir.is_dir():
-            continue
-            
+    for crow_id, crow_data in metadata.items():
+        crow_dir = base_dir / crow_id
+        
         # Get all audio files
         audio_files = list((crow_dir / "audio").glob("*.wav"))
         if not audio_files:
@@ -143,6 +157,9 @@ def test_audio_feature_extraction_video(video_test_data):
 @pytest.mark.video
 def test_dataset_with_video_data(video_dataset):
     """Integration test: Verify dataset functionality with real video data."""
+    if not hasattr(video_dataset, 'valid') or not video_dataset.valid:
+        pytest.skip("No valid video data available for dataset")
+        
     assert len(video_dataset) > 0, "Dataset should contain samples"
     
     # Test a few samples

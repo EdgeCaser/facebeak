@@ -13,13 +13,16 @@ class TestFacebeak(unittest.TestCase):
     @pytest.fixture(autouse=True)
     def setup_video_data(self, video_test_data):
         """Setup test data from videos."""
+        if not video_test_data['valid']:
+            pytest.skip("No valid video files found in test data")
+            
         self.base_dir = video_test_data['base_dir']
+        self.metadata = video_test_data['metadata']
         self.dataset = CrowTripletDataset(str(self.base_dir), split='train')
         
         # Get a video file and extract its audio for testing
-        for crow_dir in self.base_dir.iterdir():
-            if not crow_dir.is_dir():
-                continue
+        for crow_id, crow_data in self.metadata.items():
+            crow_dir = self.base_dir / crow_id
             video_files = list(crow_dir.glob("*.mp4"))
             if video_files:
                 self.video_path = video_files[0]
