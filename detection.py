@@ -81,12 +81,12 @@ def compute_iou(bbox1, bbox2):
     
     return intersection / union if union > 0 else 0
 
-def merge_overlapping_detections(detections, iou_threshold=0.4):
+def merge_overlapping_detections(detections, iou_threshold=0.5):
     """
-    Merge overlapping detections from different models and views.
+    Merge overlapping detections with improved consistency.
     Args:
         detections: List of detection dictionaries
-        iou_threshold: IOU threshold for merging
+        iou_threshold: IOU threshold for merging (increased from 0.4)
     Returns:
         List of merged detections
     """
@@ -106,34 +106,44 @@ def merge_overlapping_detections(detections, iou_threshold=0.4):
         used.add(i)
         scores = [det1['score']]
         views = [det1.get('view', 'single')]
+        boxes = [det1['bbox']]
         
         for j, det2 in enumerate(sorted_dets[i+1:], start=i+1):
             if j in used:
                 continue
             iou = compute_iou(det1['bbox'], det2['bbox'])
             if iou > iou_threshold:
-                current_group.append(det2)
-                used.add(j)
-                scores.append(det2['score'])
-                views.append(det2.get('view', 'single'))
+                # Add confidence similarity check
+                if abs(det1['score'] - det2['score']) < 0.2:  # Similar confidence
+                    current_group.append(det2)
+                    used.add(j)
+                    scores.append(det2['score'])
+                    views.append(det2.get('view', 'single'))
+                    boxes.append(det2['bbox'])
         
         if len(current_group) > 1:
-            # Calculate view diversity bonus
+            # Calculate view diversity bonus with improved weighting
             unique_views = len(set(views))
-            view_bonus = 0.1 * (unique_views - 1) if unique_views > 1 else 0
+            view_bonus = 0.15 * (unique_views - 1) if unique_views > 1 else 0
             
-            boxes = np.array([d['bbox'] for d in current_group])
-            # Use weighted average of boxes based on scores
+            # Use weighted average of boxes with improved weighting
             weights = np.array(scores) / sum(scores)
+            weights = weights ** 1.5  # Favor higher confidence detections more strongly
+            weights = weights / sum(weights)  # Renormalize
             merged_box = np.average(boxes, weights=weights, axis=0)
+            
+            # Calculate final score with improved weighting
+            base_score = max(scores)
+            confidence_bonus = 0.1 * (len(current_group) - 1)  # Bonus for multiple detections
+            final_score = base_score + view_bonus + confidence_bonus
             
             merged.append({
                 'bbox': merged_box,
-                'score': max(scores) + view_bonus,  # Boost score with view diversity
+                'score': min(final_score, 1.0),  # Cap at 1.0
                 'class': 'crow' if any(d['class'] == 'crow' for d in current_group) else 'bird',
                 'model': 'merged',
-                'merged_scores': scores,  # Keep track of original scores
-                'views': views  # Track views used in merge
+                'merged_scores': scores,
+                'views': views
             })
         else:
             merged.append(det1)
@@ -293,7 +303,7 @@ def detect_crows_parallel(
             finally:
                 all_dets = yolo_dets + rcnn_dets
                 if all_dets:
-                    merged = merge_overlapping_detections(all_dets, iou_threshold=0.4)
+                    merged = merge_overlapping_detections(all_dets, iou_threshold=0.5)
                     filtered = [d for d in merged if d['score'] >= score_threshold and d['class'] in ('bird', 'crow')]
                     detections.append(filtered)
                 else:
