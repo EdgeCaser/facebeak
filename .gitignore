@@ -298,3 +298,50 @@ backups/
 Thumbs.db
 
 crow_crops/
+
+# IDE and Editor files
+.cursor/
+.cursor.json
+.vscode/
+.idea/
+.benchmarks/
+
+# Project-specific generated files
+clustering_metrics.json
+crow_clusters_visualization.png
+clustering_parameter_search.png
+nonexistent.db
+backups/
+test_audio/
+test_crops/
+test_output/
+unit_testing_videos/
+training_output/
+crow_crops_test_Sample/
+
+# Media files (except documentation)
+*.jpg
+*.jpeg
+*.png
+!docs/*.jpg
+!docs/*.jpeg
+!docs/*.png
+*.MOV
+output.mp4
+
+# Model files (should be downloaded separately)
+yolov8s.pt
+yolov8n.pt
+crow_resnet_triplet.pth
+
+# Personal data and models (not ignored - these are your private files)
+# videos/
+# crow_crops/
+# yolov8s.pt
+# yolov8n.pt
+# crow_resnet_triplet.pth
+# crow_embeddings.db
+
+# Generated output (but not source data)
+output.mp4
+temp_*.mp4
