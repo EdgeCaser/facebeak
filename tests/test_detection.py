@@ -447,5 +447,60 @@ def test_merge_overlapping_detections_single():
     merged = detection.merge_overlapping_detections(dets)
     assert merged == dets
 
+def test_merge_overlapping_detections_temporal_consistency():
+    """Test that temporal consistency affects merging decisions."""
+    dets = [
+        {'bbox': [10, 10, 50, 50], 'score': 0.9, 'class': 'bird', 'model': 'yolo', 'view': 'single', 'temporal_consistency': 0.8},
+        {'bbox': [12, 12, 52, 52], 'score': 0.8, 'class': 'bird', 'model': 'rcnn', 'view': 'single', 'temporal_consistency': 0.2}
+    ]
+    merged = detection.merge_overlapping_detections(dets, iou_threshold=0.5)
+    assert len(merged) == 1
+    assert merged[0]['score'] > 0.9  # Score should be boosted
+
+def test_merge_overlapping_detections_confidence_weighting():
+    """Test that confidence weighting affects merged box position."""
+    dets = [
+        {'bbox': [10, 10, 50, 50], 'score': 0.9, 'class': 'bird', 'model': 'yolo', 'view': 'single'},
+        {'bbox': [30, 30, 70, 70], 'score': 0.6, 'class': 'bird', 'model': 'rcnn', 'view': 'single'}
+    ]
+    merged = detection.merge_overlapping_detections(dets, iou_threshold=0.5)
+    assert len(merged) == 1
+    merged_box = merged[0]['bbox']
+    assert abs(merged_box[0] - 10) < abs(merged_box[0] - 30)  # x1 closer to first box
+
+def test_merge_overlapping_detections_view_diversity():
+    """Test that view diversity bonus is properly applied."""
+    dets = [
+        {'bbox': [10, 10, 50, 50], 'score': 0.7, 'class': 'bird', 'model': 'yolo', 'view': 'left'},
+        {'bbox': [12, 12, 52, 52], 'score': 0.7, 'class': 'bird', 'model': 'rcnn', 'view': 'right'},
+        {'bbox': [11, 11, 51, 51], 'score': 0.7, 'class': 'bird', 'model': 'yolo', 'view': 'front'}
+    ]
+    merged = detection.merge_overlapping_detections(dets, iou_threshold=0.5)
+    assert len(merged) == 1
+    assert merged[0]['score'] > 0.7
+    assert len(merged[0]['views']) == 3
+
+def test_merge_overlapping_detections_iou_threshold():
+    """Test that new IOU threshold affects merging behavior."""
+    dets = [
+        {'bbox': [10, 10, 50, 50], 'score': 0.9, 'class': 'bird', 'model': 'yolo', 'view': 'single'},
+        {'bbox': [40, 40, 80, 80], 'score': 0.8, 'class': 'bird', 'model': 'rcnn', 'view': 'single'}
+    ]
+    merged = detection.merge_overlapping_detections(dets, iou_threshold=0.5)
+    assert len(merged) == 2
+    merged = detection.merge_overlapping_detections(dets, iou_threshold=0.3)
+    assert len(merged) == 1
+
+def test_merge_overlapping_detections_score_capping():
+    """Test that merged scores are properly capped at 1.0."""
+    dets = [
+        {'bbox': [10, 10, 50, 50], 'score': 0.9, 'class': 'bird', 'model': 'yolo', 'view': 'left'},
+        {'bbox': [12, 12, 52, 52], 'score': 0.9, 'class': 'bird', 'model': 'rcnn', 'view': 'right'},
+        {'bbox': [11, 11, 51, 51], 'score': 0.9, 'class': 'bird', 'model': 'yolo', 'view': 'front'}
+    ]
+    merged = detection.merge_overlapping_detections(dets, iou_threshold=0.5)
+    assert len(merged) == 1
+    assert merged[0]['score'] <= 1.0
+
 # Note: The print statements for CPU model loading are only hit if CUDA is not available at import time.
 # To test these would require mocking torch.cuda.is_available() and reloading the module, which is not always practical or necessary for most codebases. 
