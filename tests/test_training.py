@@ -124,7 +124,7 @@ def test_compute_metrics():
 
 def test_compute_metrics_edge_cases():
     """Test compute_metrics with edge cases."""
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = CrowMultiModalEmbedder(
         visual_embedding_dim=512,
         audio_embedding_dim=256,
@@ -133,10 +133,10 @@ def test_compute_metrics_edge_cases():
     
     # Test with empty dataset
     empty_dataset = {
-        'image': torch.empty(0, 3, 224, 224),
+        'image': torch.empty(0, 3, 224, 224, device=device),
         'audio': {
-            'mel_spec': torch.empty(0, 128, 64),
-            'chroma': torch.empty(0, 12, 64)
+            'mel_spec': torch.empty(0, 128, 64, device=device),
+            'chroma': torch.empty(0, 12, 64, device=device)
         },
         'crow_id': []
     }
@@ -148,10 +148,10 @@ def test_compute_metrics_edge_cases():
     
     # Test with single sample
     single_sample = {
-        'image': torch.randn(1, 3, 224, 224).to(device),  # (1, 3, 224, 224)
+        'image': torch.randn(1, 3, 224, 224, device=device),
         'audio': {
-            'mel_spec': torch.randn(1, 128, 64).to(device),
-            'chroma': torch.randn(1, 12, 64).to(device)
+            'mel_spec': torch.randn(1, 128, 64, device=device),
+            'chroma': torch.randn(1, 12, 64, device=device)
         },
         'crow_id': ['crow1']
     }
@@ -163,10 +163,10 @@ def test_compute_metrics_edge_cases():
     
     # Test with identical samples
     identical_samples = {
-        'image': torch.randn(2, 3, 224, 224).to(device),  # (2, 3, 224, 224)
+        'image': torch.randn(2, 3, 224, 224, device=device),
         'audio': {
-            'mel_spec': torch.randn(2, 128, 64).to(device),
-            'chroma': torch.randn(2, 12, 64).to(device)
+            'mel_spec': torch.randn(2, 128, 64, device=device),
+            'chroma': torch.randn(2, 12, 64, device=device)
         },
         'crow_id': ['crow1', 'crow1']
     }

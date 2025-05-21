@@ -154,13 +154,21 @@ class CrowResNetEmbedder(nn.Module):
 
 class CrowMultiModalEmbedder(nn.Module):
     def __init__(self, visual_dim=None, audio_dim=None, hidden_dim=1024, output_dim=512,
-                 visual_embed_dim=None, audio_embed_dim=None, final_embed_dim=None, **kwargs):
+                 visual_embed_dim=None, audio_embed_dim=None, final_embed_dim=None, device=None, **kwargs):
         """
         Multi-modal embedder combining visual and audio features.
         Accepts both (visual_dim, audio_dim, output_dim) and
         (visual_embed_dim, audio_embed_dim, final_embed_dim) for compatibility.
+        
+        Args:
+            visual_dim/visual_embed_dim: Dimension of visual embeddings
+            audio_dim/audio_embed_dim: Dimension of audio embeddings
+            hidden_dim: Dimension of hidden layers
+            output_dim/final_embed_dim: Dimension of final combined embeddings
+            device: Device to place model on (if None, will use CUDA if available)
         """
         super().__init__()
+        
         # Backward compatibility
         if visual_embed_dim is not None:
             visual_dim = visual_embed_dim
@@ -169,49 +177,130 @@ class CrowMultiModalEmbedder(nn.Module):
         if final_embed_dim is not None:
             output_dim = final_embed_dim
 
-        self.visual_embedder = CrowResNetEmbedder(output_dim=visual_dim or 512)
-        self.audio_embedder = AudioFeatureExtractor(output_dim=audio_dim or 512)
-        
-        # Fusion layers
-        self.fusion = nn.Sequential(
-            nn.Linear((visual_dim or 512) + (audio_dim or 512), hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(hidden_dim, output_dim)
-        )
-        
-        # Visual-only projection
-        self.visual_proj = nn.Sequential(
-            nn.Linear(visual_dim or 512, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(hidden_dim, output_dim)
-        )
-        self.final_embedding_dim = output_dim
+        # Determine device with improved logging
+        if device is None:
+            if torch.cuda.is_available():
+                device = torch.device('cuda')
+                torch.cuda.empty_cache()  # Clear any existing allocations
+                logging.info(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+            else:
+                device = torch.device('cpu')
+                logging.info("CUDA not available, using CPU")
+        self.device = device
+
+        # Initialize components
+        try:
+            self.visual_embedder = CrowResNetEmbedder(output_dim=visual_dim or 512)
+            self.audio_embedder = AudioFeatureExtractor(output_dim=audio_dim or 512)
+            
+            # Fusion layers
+            self.fusion = nn.Sequential(
+                nn.Linear((visual_dim or 512) + (audio_dim or 512), hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.5),
+                nn.Linear(hidden_dim, output_dim)
+            )
+            
+            # Visual-only projection
+            self.visual_proj = nn.Sequential(
+                nn.Linear(visual_dim or 512, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.5),
+                nn.Linear(hidden_dim, output_dim)
+            )
+            self.final_embedding_dim = output_dim
+            
+            # Move model to device and verify
+            self._move_to_device()
+            
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize model components: {str(e)}")
     
-    def forward(self, image, audio=None):
-        """
-        Forward pass.
+    def _move_to_device(self):
+        """Move model to device and verify all parameters are on the correct device."""
+        self.to(self.device)
+        
+        # Verify model parameters are on correct device
+        param_devices = set(str(p.device) for p in self.parameters())
+        expected_device = str(self.device)
+        
+        # More flexible device checking for CUDA
+        if expected_device.startswith('cuda'):
+            if not all(d.startswith('cuda') for d in param_devices):
+                raise RuntimeError(f"Some model parameters not on CUDA device")
+        else:
+            if not all(d == expected_device for d in param_devices):
+                raise RuntimeError(f"Model parameters not on expected device {self.device}")
+        
+        logging.info(f"Model successfully moved to {self.device}")
+    
+    def forward(self, visual_input, audio_input=None):
+        """Forward pass with improved device handling and input validation.
         
         Args:
-            image: Image tensor of shape (batch_size, 3, height, width) or None
-            audio: Optional dictionary containing 'mel_spec' and 'chroma' tensors
+            visual_input: Image tensor of shape (batch_size, 3, height, width) or None
+            audio_input: Optional dictionary containing 'mel_spec' and 'chroma' tensors or None
+            
+        Returns:
+            torch.Tensor: Combined embeddings of shape (batch_size, final_embed_dim)
         """
-        if image is not None:
-            visual_features = self.visual_embedder(image)
+        # Validate inputs
+        if visual_input is None and audio_input is None:
+            raise ValueError("At least one of visual_input or audio_input must be provided")
+            
+        # Process visual input if available
+        if visual_input is not None:
+            # Ensure proper type and device
+            if not isinstance(visual_input, torch.Tensor):
+                raise TypeError("visual_input must be a torch.Tensor")
+            if visual_input.device != self.device:
+                visual_input = visual_input.to(self.device)
+                
+            # Process visual features
+            visual_features = self.visual_embedder(visual_input)
+            visual_features = visual_features.view(visual_features.size(0), -1)
+            visual_features = self.visual_proj(visual_features)
         else:
             visual_features = None
-        if audio is not None:
-            audio_features = self.audio_embedder(audio)
+        
+        # Process audio input if available
+        if audio_input is not None:
+            # Validate audio input structure
+            if not isinstance(audio_input, dict):
+                raise TypeError("audio_input must be a dictionary")
+            if 'mel_spec' not in audio_input or 'chroma' not in audio_input:
+                raise ValueError("audio_input must contain 'mel_spec' and 'chroma' keys")
+                
+            # Ensure proper types and device for audio features
+            mel_spec = audio_input['mel_spec']
+            chroma = audio_input['chroma']
+            
+            if not isinstance(mel_spec, torch.Tensor) or not isinstance(chroma, torch.Tensor):
+                raise TypeError("mel_spec and chroma must be torch.Tensors")
+                
+            if mel_spec.device != self.device:
+                mel_spec = mel_spec.to(self.device)
+            if chroma.device != self.device:
+                chroma = chroma.to(self.device)
+                
+            # Process audio features
+            audio_features = self.audio_embedder({
+                'mel_spec': mel_spec,
+                'chroma': chroma
+            })
+            
             if visual_features is not None:
+                # Combine features
                 combined = torch.cat([visual_features, audio_features], dim=1)
-                return self.fusion(combined)
+                embeddings = self.fusion(combined)
             else:
-                # Audio-only projection (reuse visual_proj for now)
-                return self.visual_proj(audio_features)
+                embeddings = audio_features
         else:
-            # Visual-only projection
-            return self.visual_proj(visual_features)
+            embeddings = visual_features
+            
+        # L2 normalize for triplet loss
+        embeddings = nn.functional.normalize(embeddings, p=2, dim=1)
+        return embeddings
     
     def get_visual_embedding(self, image):
         """Get visual-only embedding."""
