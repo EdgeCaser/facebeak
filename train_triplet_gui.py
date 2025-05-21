@@ -316,6 +316,19 @@ class TrainingGUI:
         try:
             self.logger.info("Initializing training loop")
             
+            # Device setup with improved logging
+            device = torch.device(config['device'])
+            if device.type == 'cuda':
+                if not torch.cuda.is_available():
+                    self.logger.warning("CUDA requested but not available, falling back to CPU")
+                    device = torch.device('cpu')
+                    config['device'] = 'cpu'
+                else:
+                    torch.cuda.empty_cache()  # Clear any existing allocations
+                    self.logger.info(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+            else:
+                self.logger.info("Using CPU device")
+            
             # Create datasets
             self.logger.info(f"Loading dataset from: {config['crop_dir']}")
             full_dataset = CrowTripletDataset(
@@ -336,143 +349,222 @@ class TrainingGUI:
                 generator=torch.Generator().manual_seed(42)
             )
             
-            # Create data loaders
+            # Create data loaders with device-aware settings
             self.logger.info("Creating data loaders")
+            pin_memory = device.type == 'cuda'  # Only use pin_memory with CUDA
             train_loader = DataLoader(
                 train_dataset, 
                 batch_size=config['batch_size'], 
                 shuffle=True, 
-                num_workers=0,
-                pin_memory=pin_memory_setting
+                num_workers=0,  # Keep at 0 for stability
+                pin_memory=pin_memory
             )
             val_loader = DataLoader(
                 val_dataset,
                 batch_size=config['batch_size'],
                 shuffle=False,
-                num_workers=0,
-                pin_memory=pin_memory_setting
+                num_workers=0,  # Keep at 0 for stability
+                pin_memory=pin_memory
             )
             
-            # Model
-            device = torch.device(config['device'])
-            self.logger.info(f"Using device: {device}")
-            
+            # Model initialization with improved error handling
             self.logger.info("Initializing model")
-            model = CrowMultiModalEmbedder(
-                visual_embed_dim=config['embed_dim'] // 2,  # Split embedding dimension between modalities
-                audio_embed_dim=config['embed_dim'] // 2,
-                final_embed_dim=config['embed_dim']
-            ).to(device)
+            try:
+                model = CrowMultiModalEmbedder(
+                    visual_embed_dim=config['embed_dim'] // 2,
+                    audio_embed_dim=config['embed_dim'] // 2,
+                    final_embed_dim=config['embed_dim'],
+                    device=device
+                )
+                self.logger.info(f"Model initialized on device: {device}")
+                
+                # Load checkpoint if available
+                best_model_path = os.path.join(config['output_dir'], 'best_model.pth')
+                if os.path.exists(best_model_path):
+                    self.logger.info(f"Loading model weights from checkpoint: {best_model_path}")
+                    try:
+                        # Load to CPU first to avoid device mismatch
+                        state_dict = torch.load(best_model_path, map_location='cpu')
+                        model_state_dict = model.state_dict()
+                        filtered_state_dict = {}
+                        
+                        # Filter and validate state dict
+                        for k, v in state_dict.items():
+                            if k in model_state_dict and v.shape == model_state_dict[k].shape:
+                                filtered_state_dict[k] = v
+                            else:
+                                self.logger.warning(f"Skipping incompatible key: {k}")
+                        
+                        # Load filtered state dict
+                        model.load_state_dict(filtered_state_dict, strict=False)
+                        self.logger.info(f"Loaded {len(filtered_state_dict)}/{len(model_state_dict)} model parameters")
+                        
+                        # Verify model is on correct device after loading
+                        model = model.to(device)
+                        param_devices = set(str(p.device) for p in model.parameters())
+                        if device.type == 'cuda':
+                            if not all(d.startswith('cuda') for d in param_devices):
+                                raise RuntimeError("Model parameters not on CUDA after loading checkpoint")
+                        else:
+                            if not all(d == str(device) for d in param_devices):
+                                raise RuntimeError(f"Model parameters not on {device} after loading checkpoint")
+                            
+                    except Exception as e:
+                        self.logger.error(f"Failed to load checkpoint: {str(e)}")
+                        self.logger.warning("Using randomly initialized model")
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to initialize model: {str(e)}")
+                messagebox.showerror("Model Initialization Error", f"Failed to initialize model: {str(e)}")
+                self.training = False
+                self.root.after(0, self._training_complete)
+                return
+            
             self.logger.info(f"Model architecture:\n{model}")
             
+            # Initialize optimizer and loss function
             self.logger.info("Initializing optimizer and loss function")
             optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
             criterion = TripletLoss(margin=config['margin'], mining_type='hard')
             
-            # Training loop
+            # Training loop with improved device handling
             self.logger.info("Starting training epochs")
             patience_counter = 0
             for epoch in range(config['epochs']):
-                self.logger.info(f"=== EPOCH {epoch+1} START ===")
                 if not self.training:
                     self.logger.info("Training stopped by user")
                     break
+                    
                 self.logger.info(f"Starting epoch {epoch + 1}/{config['epochs']}")
-                # Training
+                
+                # Training phase
                 model.train()
                 total_loss = 0
                 batch_count = 0
-                self.logger.info(f"Epoch {epoch+1}: Training loop start")
-                self.logger.info("About to enter training batch loop")
+                
                 for batch_idx, (imgs, audio, _) in enumerate(train_loader):
-                    self.logger.info(f"Batch {batch_idx} start")
-                    # Check for pause/stop after every batch
+                    # Check for pause/stop
                     while self.paused:
-                        self.logger.info(f"Training paused at batch {batch_idx}")
                         time.sleep(0.1)
                         if not self.training:
-                            self.logger.info("Training stopped by user during pause")
                             break
                     if not self.training:
-                        self.logger.info("Training stopped by user during batch loop")
                         break
+                        
                     try:
-                        self.logger.debug(f"Epoch {epoch+1} Batch {batch_idx}: Data loaded, running forward pass")
-                        # Unpack triplet data
+                        # Unpack and move data to device efficiently
                         anchor_imgs, pos_imgs, neg_imgs = imgs
                         anchor_audio, pos_audio, neg_audio = audio
                         
-                        # Move to device
-                        anchor_imgs = anchor_imgs.to(device)
-                        pos_imgs = pos_imgs.to(device)
-                        neg_imgs = neg_imgs.to(device)
+                        # Move tensors to device only if needed
+                        if anchor_imgs.device != device:
+                            anchor_imgs = anchor_imgs.to(device)
+                            pos_imgs = pos_imgs.to(device)
+                            neg_imgs = neg_imgs.to(device)
                         
                         if anchor_audio is not None:
-                            anchor_audio = anchor_audio.to(device)
-                            pos_audio = pos_audio.to(device)
-                            neg_audio = neg_audio.to(device)
+                            if isinstance(anchor_audio, dict):
+                                anchor_audio = {k: v.to(device) if v.device != device else v 
+                                              for k, v in anchor_audio.items()}
+                                pos_audio = {k: v.to(device) if v.device != device else v 
+                                           for k, v in pos_audio.items()}
+                                neg_audio = {k: v.to(device) if v.device != device else v 
+                                           for k, v in neg_audio.items()}
+                            else:
+                                if anchor_audio.device != device:
+                                    anchor_audio = anchor_audio.to(device)
+                                    pos_audio = pos_audio.to(device)
+                                    neg_audio = neg_audio.to(device)
                         
+                        # Forward pass
                         optimizer.zero_grad()
                         anchor_emb = model(anchor_imgs, anchor_audio)
                         pos_emb = model(pos_imgs, pos_audio)
                         neg_emb = model(neg_imgs, neg_audio)
+                        
+                        # Compute loss
                         loss = criterion(anchor_emb, pos_emb, neg_emb)
+                        
+                        # Backward pass
                         loss.backward()
                         optimizer.step()
+                        
+                        # Update metrics
                         total_loss += loss.item() * anchor_imgs.size(0)
                         batch_count += 1
+                        
                         if batch_idx % 10 == 0:
                             self.logger.debug(f"Epoch {epoch + 1}, Batch {batch_idx}, Loss: {loss.item():.4f}")
-                        # UI update after every batch
+                        
+                        # UI updates
                         self.root.after(0, self._update_metrics_display)
                         self.root.after(0, self._update_plots)
-                        self.logger.info(f"Batch {batch_idx} end")
-                        time.sleep(0.01)  # Yield control to main thread
+                        
                     except Exception as e:
                         self.logger.error(f"Error in training batch {batch_idx}: {str(e)}", exc_info=True)
                         continue
-                self.logger.info("Exited training batch loop")
+                        
+                # Compute epoch metrics
                 avg_train_loss = total_loss / len(train_loader.dataset)
                 self.metrics.train_loss.append(avg_train_loss)
                 self.logger.info(f"Epoch {epoch + 1} training loss: {avg_train_loss:.4f}")
-                # Validation
+                
+                # Validation phase
                 self.logger.info(f"Starting validation for epoch {epoch + 1}")
                 model.eval()
                 val_loss = 0
                 val_batch_count = 0
+                
                 with torch.no_grad():
                     for batch_idx, (imgs, audio, _) in enumerate(val_loader):
                         try:
-                            # Unpack triplet data
+                            # Unpack and move data to device efficiently
                             anchor_imgs, pos_imgs, neg_imgs = imgs
                             anchor_audio, pos_audio, neg_audio = audio
                             
-                            # Move to device
-                            anchor_imgs = anchor_imgs.to(device)
-                            pos_imgs = pos_imgs.to(device)
-                            neg_imgs = neg_imgs.to(device)
+                            # Move tensors to device only if needed
+                            if anchor_imgs.device != device:
+                                anchor_imgs = anchor_imgs.to(device)
+                                pos_imgs = pos_imgs.to(device)
+                                neg_imgs = neg_imgs.to(device)
                             
                             if anchor_audio is not None:
-                                anchor_audio = anchor_audio.to(device)
-                                pos_audio = pos_audio.to(device)
-                                neg_audio = neg_audio.to(device)
+                                if isinstance(anchor_audio, dict):
+                                    anchor_audio = {k: v.to(device) if v.device != device else v 
+                                                  for k, v in anchor_audio.items()}
+                                    pos_audio = {k: v.to(device) if v.device != device else v 
+                                               for k, v in pos_audio.items()}
+                                    neg_audio = {k: v.to(device) if v.device != device else v 
+                                               for k, v in neg_audio.items()}
+                                else:
+                                    if anchor_audio.device != device:
+                                        anchor_audio = anchor_audio.to(device)
+                                        pos_audio = pos_audio.to(device)
+                                        neg_audio = neg_audio.to(device)
                             
+                            # Forward pass
                             anchor_emb = model(anchor_imgs, anchor_audio)
                             pos_emb = model(pos_imgs, pos_audio)
                             neg_emb = model(neg_imgs, neg_audio)
+                            
+                            # Compute loss
                             loss = criterion(anchor_emb, pos_emb, neg_emb)
                             val_loss += loss.item() * anchor_imgs.size(0)
                             val_batch_count += 1
+                            
                             if batch_idx % 10 == 0:
                                 self.logger.debug(f"Validation batch {batch_idx}, Loss: {loss.item():.4f}")
+                                
                         except Exception as e:
                             self.logger.error(f"Error in validation batch {batch_idx}: {str(e)}", exc_info=True)
                             continue
-                self.logger.info(f"Epoch {epoch+1}: Validation loop end, {val_batch_count} batches processed")
+                            
+                # Compute validation metrics
                 avg_val_loss = val_loss / len(val_loader.dataset)
                 self.metrics.val_loss.append(avg_val_loss)
                 self.logger.info(f"Epoch {epoch + 1} validation loss: {avg_val_loss:.4f}")
-                # Compute validation metrics
+                
+                # Compute additional validation metrics
                 self.logger.info("Computing validation metrics")
                 try:
                     val_metrics, similarities, _ = compute_metrics(model, val_loader, device)
@@ -486,19 +578,23 @@ class TrainingGUI:
                     self.logger.error(f"Error computing validation metrics: {str(e)}", exc_info=True)
                     val_metrics = {}
                     similarities = []
+                
                 # Update metrics
                 self.metrics.current_epoch = epoch + 1
                 self.metrics.training_time = time.time() - self.metrics.start_time
-                self.logger.info(f"Updating UI for epoch {epoch+1}")
+                
+                # Update UI
                 self.root.after(0, self._update_metrics_display)
                 self.root.after(0, self._update_plots)
+                
                 # Save checkpoint
                 checkpoint_path = os.path.join(config['output_dir'], f'checkpoint_epoch_{epoch+1}.pth')
                 self.logger.info(f"Saving checkpoint to: {checkpoint_path}")
                 try:
+                    # Save checkpoint to CPU to ensure compatibility
                     checkpoint = {
                         'epoch': epoch + 1,
-                        'model_state_dict': model.state_dict(),
+                        'model_state_dict': {k: v.cpu() for k, v in model.state_dict().items()},
                         'optimizer_state_dict': optimizer.state_dict(),
                         'train_loss': avg_train_loss,
                         'val_loss': avg_val_loss,
@@ -507,6 +603,7 @@ class TrainingGUI:
                     torch.save(checkpoint, checkpoint_path)
                 except Exception as e:
                     self.logger.error(f"Error saving checkpoint: {str(e)}", exc_info=True)
+                
                 # Early stopping
                 if avg_val_loss < self.metrics.best_val_loss:
                     self.metrics.best_val_loss = avg_val_loss
@@ -514,7 +611,8 @@ class TrainingGUI:
                     best_model_path = os.path.join(config['output_dir'], 'best_model.pth')
                     self.logger.info(f"Saving new best model to: {best_model_path}")
                     try:
-                        torch.save(model.state_dict(), best_model_path)
+                        # Save best model to CPU to ensure compatibility
+                        torch.save({k: v.cpu() for k, v in model.state_dict().items()}, best_model_path)
                     except Exception as e:
                         self.logger.error(f"Error saving best model: {str(e)}", exc_info=True)
                 else:
@@ -523,23 +621,23 @@ class TrainingGUI:
                     if patience_counter >= config['patience']:
                         self.logger.info(f"Early stopping triggered after {epoch + 1} epochs")
                         break
-                # Update progress (thread-safe)
+                
+                # Update progress
                 progress = ((epoch + 1) / config['epochs']) * 100
-                self.logger.info(f"Updating progress bar for epoch {epoch+1}: {progress:.2f}%")
                 self.root.after(0, lambda: self.progress_var.set(progress))
                 self.root.after(0, lambda: self.progress_label.configure(
                     text=f"Epoch {epoch + 1}/{config['epochs']} "
                          f"(Best Val Loss: {self.metrics.best_val_loss:.4f})"
                 ))
-                self.logger.info(f"=== EPOCH {epoch+1} END ===")
-                # Clear GPU cache after each epoch
+                
+                # Clear GPU memory after each epoch if using CUDA
                 if device.type == 'cuda':
                     torch.cuda.empty_cache()
                     self.logger.info("Cleared GPU cache")
+                
             self.logger.info("Training loop complete. Saving final results.")
             
             # Save final metrics
-            self.logger.info("Saving final training results")
             self._save_training_results(config)
             
             # Update UI

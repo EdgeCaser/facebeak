@@ -86,7 +86,7 @@ def merge_overlapping_detections(detections, iou_threshold=0.5):
     Merge overlapping detections with improved consistency.
     Args:
         detections: List of detection dictionaries
-        iou_threshold: IOU threshold for merging (increased from 0.4)
+        iou_threshold: IOU threshold for merging
     Returns:
         List of merged detections
     """
@@ -108,45 +108,54 @@ def merge_overlapping_detections(detections, iou_threshold=0.5):
         views = [det1.get('view', 'single')]
         boxes = [det1['bbox']]
         
+        # Find all overlapping detections
         for j, det2 in enumerate(sorted_dets[i+1:], start=i+1):
             if j in used:
                 continue
+                
             iou = compute_iou(det1['bbox'], det2['bbox'])
-            if iou > iou_threshold:
-                # Add confidence similarity check
-                if abs(det1['score'] - det2['score']) < 0.2:  # Similar confidence
-                    current_group.append(det2)
-                    used.add(j)
-                    scores.append(det2['score'])
-                    views.append(det2.get('view', 'single'))
-                    boxes.append(det2['bbox'])
+            # Always merge if IOU exceeds threshold
+            if iou >= iou_threshold:
+                current_group.append(det2)
+                used.add(j)
+                scores.append(det2['score'])
+                views.append(det2.get('view', 'single'))
+                boxes.append(det2['bbox'])
         
         if len(current_group) > 1:
-            # Calculate view diversity bonus with improved weighting
+            # Calculate view diversity bonus
             unique_views = len(set(views))
             view_bonus = 0.15 * (unique_views - 1) if unique_views > 1 else 0
             
-            # Use weighted average of boxes with improved weighting
-            weights = np.array(scores) / sum(scores)
-            weights = weights ** 1.5  # Favor higher confidence detections more strongly
-            weights = weights / sum(weights)  # Renormalize
+            # Use weighted average of boxes with squared confidence-based weighting
+            weights = np.array(scores) ** 2  # Square the weights to favor higher confidence more strongly
+            weights = weights / np.sum(weights)  # Normalize weights
+            
+            # Calculate merged box using weighted average
             merged_box = np.average(boxes, weights=weights, axis=0)
             
-            # Calculate final score with improved weighting
-            base_score = max(scores)
+            # Calculate final score
+            base_score = max(scores)  # Use highest confidence as base
             confidence_bonus = 0.1 * (len(current_group) - 1)  # Bonus for multiple detections
-            final_score = base_score + view_bonus + confidence_bonus
+            final_score = min(base_score + view_bonus + confidence_bonus, 1.0)  # Cap at 1.0
             
             merged.append({
-                'bbox': merged_box,
-                'score': min(final_score, 1.0),  # Cap at 1.0
+                'bbox': merged_box.tolist(),  # Convert to list for consistency
+                'score': float(final_score),  # Ensure float type
                 'class': 'crow' if any(d['class'] == 'crow' for d in current_group) else 'bird',
                 'model': 'merged',
                 'merged_scores': scores,
                 'views': views
             })
         else:
-            merged.append(det1)
+            # For single detections, ensure consistent types
+            merged.append({
+                'bbox': det1['bbox'] if isinstance(det1['bbox'], list) else det1['bbox'].tolist(),
+                'score': float(det1['score']),
+                'class': det1['class'],
+                'model': det1['model'],
+                'view': det1.get('view', 'single')
+            })
     
     return merged
 

@@ -461,12 +461,14 @@ def test_merge_overlapping_detections_confidence_weighting():
     """Test that confidence weighting affects merged box position."""
     dets = [
         {'bbox': [10, 10, 50, 50], 'score': 0.9, 'class': 'bird', 'model': 'yolo', 'view': 'single'},
-        {'bbox': [30, 30, 70, 70], 'score': 0.6, 'class': 'bird', 'model': 'rcnn', 'view': 'single'}
+        {'bbox': [15, 15, 55, 55], 'score': 0.6, 'class': 'bird', 'model': 'rcnn', 'view': 'single'}  # Increased overlap to ~0.6 IOU
     ]
     merged = detection.merge_overlapping_detections(dets, iou_threshold=0.5)
     assert len(merged) == 1
     merged_box = merged[0]['bbox']
-    assert abs(merged_box[0] - 10) < abs(merged_box[0] - 30)  # x1 closer to first box
+    # The merged box should be closer to the higher confidence detection
+    assert abs(merged_box[0] - 10) < abs(merged_box[0] - 15)  # x1 closer to first box
+    assert abs(merged_box[1] - 10) < abs(merged_box[1] - 15)  # y1 closer to first box
 
 def test_merge_overlapping_detections_view_diversity():
     """Test that view diversity bonus is properly applied."""
@@ -481,13 +483,15 @@ def test_merge_overlapping_detections_view_diversity():
     assert len(merged[0]['views']) == 3
 
 def test_merge_overlapping_detections_iou_threshold():
-    """Test that new IOU threshold affects merging behavior."""
+    """Test that IOU threshold affects merging behavior."""
     dets = [
         {'bbox': [10, 10, 50, 50], 'score': 0.9, 'class': 'bird', 'model': 'yolo', 'view': 'single'},
-        {'bbox': [40, 40, 80, 80], 'score': 0.8, 'class': 'bird', 'model': 'rcnn', 'view': 'single'}
+        {'bbox': [15, 15, 55, 55], 'score': 0.8, 'class': 'bird', 'model': 'rcnn', 'view': 'single'}  # Increased overlap to ~0.6 IOU
     ]
-    merged = detection.merge_overlapping_detections(dets, iou_threshold=0.5)
+    # With high threshold, should not merge
+    merged = detection.merge_overlapping_detections(dets, iou_threshold=0.7)
     assert len(merged) == 2
+    # With lower threshold, should merge
     merged = detection.merge_overlapping_detections(dets, iou_threshold=0.3)
     assert len(merged) == 1
 

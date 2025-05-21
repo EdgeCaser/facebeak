@@ -165,4 +165,7 @@ def create_normalizer(method: str = 'adaptive', use_gpu: bool = True) -> ColorNo
         # Always try GPU first if requested, will fall back to CPU if unavailable
         return AdaptiveNormalizer(use_gpu=use_gpu and torch.cuda.is_available())
     else:
-        raise ValueError(f"Unknown normalization method: {method}") 
+        raise ValueError(f"Unknown normalization method: {method}")
+
+# Alias ColorNormalizer to AdaptiveNormalizer for default usage
+ColorNormalizer = AdaptiveNormalizer 
