@@ -178,7 +178,7 @@ def find_matching_crow(embedding, threshold=0.6, video_path=None, frame_number=N
         cursor = conn.cursor()
         
         # Ensure input embedding is 1-D and normalized
-        embedding = embedding.reshape(-1).astype(np.float32)
+        embedding = np.asarray(embedding, dtype=np.float32).reshape(-1)
         embedding = embedding / np.linalg.norm(embedding)
         
         # Get recent embeddings from the same video first
@@ -203,19 +203,22 @@ def find_matching_crow(embedding, threshold=0.6, video_path=None, frame_number=N
             
             # Check recent embeddings first with a stricter threshold
             for crow_id, emb_blob, frame_num, conf in recent_rows:
+                # Ensure confidence is a float
+                conf = float(conf) if conf is not None else 0.0
+                
                 known_emb = np.frombuffer(emb_blob, dtype=np.float32).reshape(-1)
                 known_emb = known_emb / np.linalg.norm(known_emb)
                 
                 # Calculate similarity
-                similarity = 1 - cosine(embedding, known_emb)
+                similarity = float(1 - cosine(embedding, known_emb))
                 
                 # Adjust threshold based on frame distance and confidence
-                frame_distance = frame_number - frame_num
-                temporal_factor = max(0.9, 1.0 - (frame_distance / 30.0))  # Less decay over 30 frames
-                confidence_factor = 0.9 + (conf * 0.1)  # Less weight by confidence
+                frame_distance = float(frame_number - frame_num)
+                temporal_factor = float(max(0.9, 1.0 - (frame_distance / 30.0)))  # Less decay over 30 frames
+                confidence_factor = float(0.9 + (conf * 0.1))  # Less weight by confidence
                 
                 # Use higher base threshold for temporal matches
-                adjusted_threshold = max(0.7, threshold) * temporal_factor * confidence_factor
+                adjusted_threshold = float(max(0.7, threshold)) * temporal_factor * confidence_factor
                 
                 if similarity > adjusted_threshold:
                     logger.info(f"Found temporal match for crow {crow_id} (similarity: {similarity:.3f}, "
@@ -242,14 +245,17 @@ def find_matching_crow(embedding, threshold=0.6, video_path=None, frame_number=N
         
         # Compare with all known crows
         best_match = None
-        best_score = 0
+        best_score = 0.0
         
         for crow_id, emb_blob, timestamp, conf in rows:
+            # Ensure confidence is a float
+            conf = float(conf) if conf is not None else 0.0
+            
             known_emb = np.frombuffer(emb_blob, dtype=np.float32).reshape(-1)
             known_emb = known_emb / np.linalg.norm(known_emb)
             
             # Calculate similarity
-            similarity = 1 - cosine(embedding, known_emb)
+            similarity = float(1 - cosine(embedding, known_emb))
             
             # Get crow history for threshold adjustment
             cursor.execute('''
@@ -260,19 +266,23 @@ def find_matching_crow(embedding, threshold=0.6, video_path=None, frame_number=N
             ''', (crow_id,))
             total_sightings, days_since_last_seen = cursor.fetchone()
             
+            # Convert to float to ensure scalar values
+            total_sightings = float(total_sightings)
+            days_since_last_seen = float(days_since_last_seen)
+            
             # Adjust threshold based on crow's history
             # More lenient for crows with more sightings, but less so
-            history_factor = 1.0 - (min(total_sightings, 50) * 0.001)  # Up to 0.05 reduction
+            history_factor = float(1.0 - (min(total_sightings, 50.0) * 0.001))  # Up to 0.05 reduction
             
             # More lenient for recently seen crows, but less so
-            recency_factor = 1.0 - (min(days_since_last_seen, 30) / 30.0 * 0.05)  # Up to 0.05 reduction
+            recency_factor = float(1.0 - (min(days_since_last_seen, 30.0) / 30.0 * 0.05))  # Up to 0.05 reduction
             
             # Weight by confidence, but less so
-            confidence_factor = 0.95 + (conf * 0.05)  # Less weight by confidence
+            confidence_factor = float(0.95 + (conf * 0.05))  # Less weight by confidence
             
             # Use much higher base threshold for non-temporal matches
-            adjusted_threshold = max(0.8, threshold) * history_factor * recency_factor * confidence_factor
-            adjusted_threshold = max(0.8, adjusted_threshold)  # Don't go below 0.8
+            adjusted_threshold = float(max(0.8, threshold)) * history_factor * recency_factor * confidence_factor
+            adjusted_threshold = float(max(0.8, adjusted_threshold))  # Don't go below 0.8
             
             if similarity > adjusted_threshold and similarity > best_score:
                 best_score = similarity

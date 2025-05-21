@@ -167,5 +167,5 @@ def create_normalizer(method: str = 'adaptive', use_gpu: bool = True) -> ColorNo
     else:
         raise ValueError(f"Unknown normalization method: {method}")
 
-# Alias ColorNormalizer to AdaptiveNormalizer for default usage
-ColorNormalizer = AdaptiveNormalizer 
+# Remove the alias - ColorNormalizer should remain an abstract base class
+# ColorNormalizer = AdaptiveNormalizer  # This line should be removed 

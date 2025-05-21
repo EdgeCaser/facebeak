@@ -203,14 +203,14 @@ def compute_embedding(img_tensors):
             raise
         raise EmbeddingError(f"Error in compute_embedding: {str(e)}")
 
-def extract_crow_image(frame, bbox, padding=0.3, min_size=100):
+def extract_crow_image(frame, bbox, padding=0.3, min_size=10):
     """Extract a cropped image of a crow from the frame.
     
     Args:
         frame: Input frame (numpy array)
         bbox: Bounding box in [x1, y1, x2, y2] format
         padding: Padding factor around the bbox (default: 0.3)
-        min_size: Minimum size for valid bbox (default: 100)
+        min_size: Minimum size for valid bbox (default: 10)
         
     Returns:
         Dictionary containing 'full' and 'head' tensors, or None if extraction fails
@@ -222,119 +222,66 @@ def extract_crow_image(frame, bbox, padding=0.3, min_size=100):
             logger.warning(f"Invalid bbox size: {bbox.size}, expected 4 values")
             return None
             
-        # Ensure bbox is in [x1, y1, x2, y2] format
-        if bbox[0] > bbox[2] or bbox[1] > bbox[3]:
-            logger.warning(f"Invalid bbox coordinates: {bbox}")
+        # Ensure bbox is in [x1, y1, x2, y2] format and coordinates are valid
+        x1, y1, x2, y2 = bbox
+        if x1 >= x2 or y1 >= y2:
+            logger.warning(f"Invalid bbox coordinates: {bbox} (x1 >= x2 or y1 >= y2)")
             return None
             
-        x1, y1, x2, y2 = map(int, bbox)
         h, w = frame.shape[:2]
         
         # Validate bbox coordinates
-        if (x1 >= x2 or y1 >= y2 or x1 < 0 or y1 < 0 or x2 > w or y2 > h or
-            x2 - x1 < min_size or y2 - y1 < min_size):
+        if (x1 < 0 or y1 < 0 or x2 > w or y2 > h or  # Box outside frame
+            x2 - x1 < min_size or y2 - y1 < min_size):  # Box too small
             logger.warning(f"Invalid bbox coordinates: {bbox} for frame size {w}x{h}")
             return None
             
         # Calculate padding
         pad_w = int((x2 - x1) * padding)
         pad_h = int((y2 - y1) * padding)
-        x1 = max(0, x1 - pad_w)
-        y1 = max(0, y1 - pad_h)
-        x2 = min(w, x2 + pad_w)
-        y2 = min(h, y2 + pad_h)
+        x1 = int(max(0, x1 - pad_w))
+        y1 = int(max(0, y1 - pad_h))
+        x2 = int(min(w, x2 + pad_w))
+        y2 = int(min(h, y2 + pad_h))
         
         # Extract and validate crops
         try:
             crow_img = frame[y1:y2, x1:x2].copy()  # Make a copy to ensure contiguous array
-            if not isinstance(crow_img, np.ndarray) or crow_img.size == 0 or crow_img.shape[0] == 0 or crow_img.shape[1] == 0:
+            if not isinstance(crow_img, np.ndarray) or crow_img.size == 0:
                 logger.warning(f"Invalid crow crop extracted for bbox {bbox}")
                 return None
             
-            head_height = int((y2 - y1) * 0.33)
-            if head_height <= 0:
-                logger.warning(f"Invalid head height {head_height} for bbox {bbox}")
-                return None
-            
-            head_img = frame[y1:y1 + head_height, x1:x2].copy()  # Make a copy to ensure contiguous array
-            if not isinstance(head_img, np.ndarray) or head_img.size == 0 or head_img.shape[0] == 0 or head_img.shape[1] == 0:
+            # Calculate head region (top third of the crow)
+            head_height = max(1, int((y2 - y1) * 0.33))  # Ensure at least 1 pixel
+            head_img = frame[y1:y1 + head_height, x1:x2].copy()
+            if not isinstance(head_img, np.ndarray) or head_img.size == 0:
                 logger.warning(f"Invalid head crop extracted for bbox {bbox}")
                 return None
+                
+            # Convert to tensors and normalize
+            def to_tensor(img):
+                # Ensure image is in RGB format
+                if len(img.shape) == 2:
+                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+                elif img.shape[2] == 4:
+                    img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+                
+                # Resize to 224x224 (standard input size for ResNet)
+                img = cv2.resize(img, (224, 224))
+                
+                # Convert to tensor and normalize
+                img = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+                return img
+            
+            return {
+                'full': to_tensor(crow_img),
+                'head': to_tensor(head_img)
+            }
+            
         except Exception as e:
             logger.error(f"Error extracting crops: {str(e)}")
             return None
             
-        def enhance_image(img):
-            """Simple image enhancement using only normalization."""
-            try:
-                if not isinstance(img, np.ndarray) or img.size == 0:
-                    return None
-                
-                # Basic validation
-                if len(img.shape) != 3 or img.shape[2] != 3:
-                    logger.warning(f"Invalid image shape: {img.shape}")
-                    return None
-                
-                # Simple contrast enhancement using normalization only
-                img = img.astype(np.float32)
-                img = (img - img.min()) / (img.max() - img.min() + 1e-6)
-                img = (img * 255).astype(np.uint8)
-                return img
-                
-            except Exception as e:
-                logger.error(f"Error in enhance_image: {str(e)}")
-                return None
-            
-        # Enhance images
-        crow_img = enhance_image(crow_img)
-        head_img = enhance_image(head_img)
-        if crow_img is None or head_img is None:
-            logger.warning(f"Image enhancement failed for bbox {bbox}")
-            return None
-            
-        def resize_with_aspect(img, target_size=224):
-            try:
-                if not isinstance(img, np.ndarray) or img.size == 0:
-                    return None
-                
-                h, w = img.shape[:2]
-                if h == 0 or w == 0:
-                    return None
-                
-                scale = target_size / max(h, w)
-                new_h, new_w = int(h * scale), int(w * scale)
-                if new_h == 0 or new_w == 0:
-                    return None
-                
-                resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                square = np.zeros((target_size, target_size, 3), dtype=np.uint8)
-                y_offset = (target_size - new_h) // 2
-                x_offset = (target_size - new_w) // 2
-                square[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
-                return square
-                
-            except Exception as e:
-                logger.error(f"Error in resize_with_aspect: {str(e)}")
-                return None
-            
-        # Resize images
-        crow_square = resize_with_aspect(crow_img)
-        head_square = resize_with_aspect(head_img)
-        if crow_square is None or head_square is None:
-            logger.warning(f"Image resizing failed for bbox {bbox}")
-            return None
-            
-        # Convert to tensors
-        try:
-            crow_tensor = torch.from_numpy(crow_square).permute(2, 0, 1).float() / 255.0
-            head_tensor = torch.from_numpy(head_square).permute(2, 0, 1).float() / 255.0
-            return {
-                'full': crow_tensor,
-                'head': head_tensor
-            }
-        except Exception as e:
-            logger.error(f"Error converting to tensor: {str(e)}")
-            return None
     except Exception as e:
         logger.error(f"Error extracting crow image: {str(e)}")
         return None
@@ -362,6 +309,9 @@ class EnhancedTracker:
             self.conf_threshold = conf_threshold
             self.multi_view_stride = multi_view_stride
             self.strict_mode = strict_mode
+            
+            # Add embedding quality threshold
+            self.min_embedding_quality = 0.3  # Minimum quality threshold for embeddings
             
             # Set track limits based on max_age to ensure proper cleanup
             self.max_track_history = max_age * 2  # Keep twice the max_age worth of history
@@ -546,28 +496,23 @@ class EnhancedTracker:
     def _process_detection_batch(self, frame, detections, frame_idx):
         """Process a batch of detections with improved track management and error handling."""
         try:
-            if not isinstance(frame, np.ndarray) or frame.ndim != 3:
-                raise ValueError("Invalid frame format")
-            if not isinstance(detections, (list, np.ndarray)):
-                raise ValueError("Invalid detections format")
+            # Validate input format
+            if not isinstance(detections, np.ndarray) or detections.ndim != 2:
+                raise ValueError("Invalid detections format: expected 2D numpy array")
             
-            # Convert detections to numpy array if needed
-            if isinstance(detections, list):
-                detections = np.array([d['bbox'] + [d.get('score', 0.0)] for d in detections])
-            
-            # Update SORT tracker
+            # Get tracked objects from SORT
             tracked_objects = self.tracker.update(detections)
-            processed_tracks = []
             
             # Process each tracked object
+            processed_tracks = []
             for track in tracked_objects:
                 try:
                     x1, y1, x2, y2, track_id = track
-                    bbox = [x1, y1, x2, y2]
+                    bbox = [float(x1), float(y1), float(x2), float(y2)]  # Ensure float type
                     
-                    # Get detection confidence
-                    det_idx = np.argmax([iou(bbox, d[:4]) for d in detections])
-                    confidence = detections[det_idx, 4]
+                    # Get detection confidence using IOU
+                    det_idx = np.argmax([compute_iou(bbox, d[:4]) for d in detections])
+                    confidence = float(detections[det_idx, 4])  # Ensure float type
                     
                     # Skip low confidence detections
                     if confidence < self.conf_threshold:
@@ -577,287 +522,159 @@ class EnhancedTracker:
                     if track_id not in self.track_history:
                         self._initialize_track(track_id, frame_idx)
                     
-                    # Extract region for embedding
-                    try:
-                        region = self._extract_region(frame, bbox)
-                        if region is None or region.size == 0:
-                            self.logger.warning(f"Empty region for track {track_id}")
-                            # Store zero embedding for empty region
-                            zero_emb = torch.zeros(512, device=self.device)
-                            self.track_embeddings[track_id].append(zero_emb)
-                            continue
-                        
-                        # Get embedding with retry logic
-                        embedding = None
-                        for attempt in range(self.max_retries):
-                            try:
-                                embedding = self._process_embedding(region)
-                                if embedding is not None:
-                                    break
-                            except Exception as e:
-                                if attempt == self.max_retries - 1:
-                                    self.logger.error(f"Failed to compute embedding after {self.max_retries} attempts: {str(e)}")
-                                    # Store zero embedding on final failure
-                                    zero_emb = torch.zeros(512, device=self.device)
-                                    self.track_embeddings[track_id].append(zero_emb)
-                                    raise
-                                time.sleep(self.retry_delay)
-                        
-                        if embedding is None:
-                            # Store zero embedding for None result
-                            zero_emb = torch.zeros(512, device=self.device)
-                            self.track_embeddings[track_id].append(zero_emb)
-                            continue
-                        
-                        # Get view information if available
-                        view_info = None
-                        if self.multi_view is not None:
-                            try:
-                                view_info = self.multi_view.get_view_info(frame, bbox)
-                            except Exception as e:
-                                self.logger.warning(f"Failed to get view info: {str(e)}")
-                        
-                        # Update or create track
-                        track_info = self._update_track(
-                            track_id=int(track_id),
-                            bbox=bbox,
-                            embedding=embedding,
-                            confidence=float(confidence),
-                            frame_idx=frame_idx,
-                            view_info=view_info
-                        )
-                        
-                        if track_info is not None:
-                            processed_tracks.append(track_info)
-                            
-                    except Exception as e:
-                        self.logger.error(f"Error processing track {track_id}: {str(e)}")
-                        # Store zero embedding for any error
-                        zero_emb = torch.zeros(512, device=self.device)
-                        if track_id not in self.track_embeddings:
-                            self.track_embeddings[track_id] = deque(maxlen=self.max_embedding_history)
-                        self.track_embeddings[track_id].append(zero_emb)
+                    # Extract crow image and compute embedding
+                    crow_img = self.extract_crow_image(frame, bbox)
+                    if crow_img is None:
                         continue
                     
+                    # Process embedding
+                    embedding = self._process_embedding(crow_img)
+                    if embedding is None:
+                        continue
+                    
+                    # Update track
+                    if self._update_track(track_id, frame_idx, bbox, confidence, embedding):
+                        processed_tracks.append(track)
+                
                 except Exception as e:
                     self.logger.error(f"Error processing tracked object: {str(e)}")
                     continue
             
-            return processed_tracks
+            return np.array(processed_tracks) if processed_tracks else np.empty((0, 5))
             
         except Exception as e:
             self.logger.error(f"Detection batch processing failed: {str(e)}")
-            if isinstance(e, TimeoutException):
-                raise
-            return []
+            return np.empty((0, 5))
 
-    def _update_track(self, track_id, bbox, embedding, confidence, frame_idx, view_info=None):
-        """Update track information with improved persistence and temporal consistency."""
+    def _update_track(self, track_id, frame_idx, bbox, confidence, embedding=None, head_embedding=None):
+        """Update track state with proper embedding and history management."""
         try:
-            # Check age limit first
-            if track_id in self.track_ages and self.track_ages[track_id] > self.max_age:
-                self.logger.debug(f"Track {track_id} exceeded max age {self.max_age}")
+            if track_id not in self.track_history:
+                self.logger.warning(f"Track {track_id} not found in history")
                 return False
                 
-            # Check track count limit
-            if len(self.track_embeddings) >= self.max_tracks:
-                self.logger.debug(f"Track count limit reached ({self.max_tracks})")
-                return False
+            # Get current track state
+            track_state = self.track_history[track_id]
+            current_time = time.time()
             
-            # Get track history
-            history = self.track_history[track_id]
-            changes = self.track_id_changes[track_id]
+            # Update track age
+            self.track_ages[track_id] = frame_idx - track_state['history'][0]['frame']
             
-            # Update track statistics
-            history['update_count'] += 1
-            history['total_updates'] += 1
-            history['consecutive_misses'] = 0
-            history['last_update_time'] = time.time()
-            history['last_update_frame'] = frame_idx
+            # Calculate temporal consistency and embedding quality
+            temporal_consistency = self._calculate_temporal_consistency(track_id, bbox, embedding)
+            embedding_quality = self._calculate_embedding_quality(embedding) if embedding is not None else 0.0
             
-            # Convert embedding to tensor and move to device with proper error handling
-            try:
-                if isinstance(embedding, np.ndarray):
-                    embedding = torch.from_numpy(embedding).float().to(self.device)
-                elif isinstance(embedding, torch.Tensor):
-                    embedding = embedding.detach().float().to(self.device)
-                else:
-                    embedding = torch.tensor(embedding, dtype=torch.float32, device=self.device)
+            # Update embedding history if valid
+            if embedding is not None and embedding_quality > self.min_embedding_quality:
+                # Ensure embedding is on correct device
+                embedding = embedding.to(self.device)
+                head_embedding = head_embedding.to(self.device) if head_embedding is not None else None
                 
-                # Ensure embedding is normalized
-                embedding = F.normalize(embedding, p=2, dim=0)
+                # Update embedding history with proper device handling
+                self.track_embeddings[track_id].append(embedding.clone())
+                if head_embedding is not None:
+                    self.track_head_embeddings[track_id].append(head_embedding.clone())
                 
-                # Calculate embedding quality
-                if len(history['embedding_history']) > 0:
-                    prev_emb = history['embedding_history'][-1]
-                    similarity = torch.dot(embedding, prev_emb) / (torch.norm(embedding) * torch.norm(prev_emb))
-                    embedding_quality = max(0.0, min(1.0, similarity.item()))
-                else:
-                    embedding_quality = 1.0
+                # Update last valid embedding
+                track_state['last_valid_embedding'] = embedding.clone()
+                track_state['last_embedding_quality'] = embedding_quality
                 
-                # Update embedding quality metrics
-                history['embedding_quality'] = embedding_quality
-                history['average_embedding_quality'] = (
-                    (history['average_embedding_quality'] * (history['total_updates'] - 1) + embedding_quality) 
-                    / history['total_updates']
-                )
-                
-            except Exception as e:
-                self.logger.error(f"Error processing embedding for track {track_id}: {str(e)}")
-                embedding_quality = 0.0
-                embedding = torch.zeros(512, device=self.device)
+                # Update embedding factor for temporal consistency
+                track_state['embedding_factor'] = min(1.0, embedding_quality / self.min_embedding_quality)
             
-            # Store last valid embedding (ensure it's a clone to avoid reference issues)
-            history['last_valid_embedding'] = embedding.clone()
-            changes['last_valid_embedding'] = embedding.clone()
+            # Calculate track quality metrics
+            size_score = self._calculate_size_score(bbox)
+            movement_score = self._calculate_movement_score(track_id, bbox)
+            behavior_score = self._calculate_behavior_score(track_id)
             
-            # Update track history with proper device handling
-            history_entry = {
-                'frame_idx': int(frame_idx),
-                'bbox': [float(x) for x in bbox],  # Ensure bbox values are float
-                'confidence': float(confidence),
-                'embedding_quality': float(embedding_quality),
-                'embedding_factor': float(history['embedding_factor']),
-                'age': int(self.track_ages[track_id]),
-                'temporal_consistency': float(history['temporal_consistency']),
-                'track_quality': float(history['track_quality']),
-                'size_score': float(history['size_score']),
-                'movement_score': float(history['movement_score']),
-                'behavior_score': float(history.get('behavior_score', 0.0))
+            # Create new state entry
+            new_state = {
+                'frame': frame_idx,
+                'time': current_time,
+                'bbox': bbox,
+                'confidence': confidence,
+                'embedding_quality': embedding_quality,
+                'temporal_consistency': temporal_consistency,
+                'track_quality': min(1.0, (confidence + temporal_consistency + embedding_quality) / 3.0),
+                'size_score': size_score,
+                'movement_score': movement_score,
+                'behavior_score': behavior_score,
+                'embedding_factor': track_state.get('embedding_factor', 1.0)
             }
             
             # Update history collections
-            history['history'].append(history_entry)
-            history['embedding_history'].append(embedding)
-            history['confidence_history'].append(float(confidence))
-            history['bbox_history'].append([float(x) for x in bbox])
+            track_state['history'].append(new_state)
+            track_state['confidence_history'].append(confidence)
+            track_state['bbox_history'].append(bbox)
             
-            # Update track age and last seen
-            history['last_seen'] = frame_idx
-            self.track_ages[track_id] = frame_idx - history['created_frame']
+            # Update track state
+            track_state['last_bbox'] = bbox
+            track_state['last_confidence'] = confidence
+            track_state['last_temporal_consistency'] = temporal_consistency
+            track_state['last_track_quality'] = new_state['track_quality']
+            track_state['last_size_score'] = size_score
+            track_state['last_movement_score'] = movement_score
+            track_state['last_behavior_score'] = behavior_score
+            track_state['update_count'] += 1
             
-            # Update confidence metrics
-            history['average_confidence'] = (
-                (history['average_confidence'] * (history['total_updates'] - 1) + confidence) 
-                / history['total_updates']
-            )
-            
-            # Update temporal consistency
-            if len(history['bbox_history']) > 1:
-                prev_bbox = history['bbox_history'][-2]
-                curr_bbox = history['bbox_history'][-1]
-                
-                # Calculate movement score
-                movement = np.linalg.norm(np.array(curr_bbox[:2]) - np.array(prev_bbox[:2]))
-                history['movement_score'] = float(movement)
-                
-                # Calculate size score
-                curr_area = (curr_bbox[2] - curr_bbox[0]) * (curr_bbox[3] - curr_bbox[1])
-                prev_area = (prev_bbox[2] - prev_bbox[0]) * (prev_bbox[3] - prev_bbox[1])
-                size_ratio = min(curr_area, prev_area) / max(curr_area, prev_area)
-                history['size_score'] = float(size_ratio)
-                
-                # Update temporal consistency with weighted factors
-                temporal_consistency = (
-                    0.4 * embedding_quality +  # Embedding similarity
-                    0.3 * size_ratio +        # Size consistency
-                    0.2 * (1.0 - min(1.0, movement / 100.0)) +  # Movement consistency
-                    0.1 * confidence          # Detection confidence
-                )
-                
-                # Apply exponential moving average
-                alpha = 0.7
-                history['temporal_consistency'] = float(
-                    alpha * temporal_consistency + 
-                    (1 - alpha) * history['temporal_consistency']
-                )
-            
-            # Update track quality based on multiple factors
-            track_quality = (
-                0.3 * history['temporal_consistency'] +
-                0.3 * history['average_confidence'] +
-                0.2 * history['embedding_quality'] +
-                0.1 * history['size_score'] +
-                0.1 * (1.0 - min(1.0, history['consecutive_misses'] / self.max_age))
-            )
-            history['track_quality'] = float(track_quality)
-            
-            # Update persistence score
-            persistence_score = (
-                0.4 * track_quality +
-                0.3 * (1.0 - history['consecutive_misses'] / self.max_age) +
-                0.2 * history['average_confidence'] +
-                0.1 * history['embedding_quality']
-            )
-            history['persistence_score'] = float(persistence_score)
-            
-            # Update track ID changes
-            changes.update(history)
-            
-            # Store last update state
-            history['last_bbox'] = [float(x) for x in bbox]
-            history['last_confidence'] = float(confidence)
-            history['last_embedding_quality'] = float(embedding_quality)
-            history['last_temporal_consistency'] = float(history['temporal_consistency'])
-            history['last_track_quality'] = float(track_quality)
-            history['last_size_score'] = float(history['size_score'])
-            history['last_movement_score'] = float(history['movement_score'])
+            # Update track ID changes if needed
+            if track_id in self.track_id_changes:
+                self.track_id_changes[track_id].update(track_state)
             
             return True
             
         except Exception as e:
-            self.logger.error(f"Error updating track {track_id}: {str(e)}", exc_info=True)
-            # Store error in track history
+            self.logger.error(f"Error updating track {track_id}: {str(e)}")
+            # Add error to history
             if track_id in self.track_history:
                 self.track_history[track_id]['errors'].append({
                     'frame': frame_idx,
-                    'error': str(e),
-                    'time': time.time()
+                    'time': time.time(),
+                    'error': str(e)
                 })
             return False
 
-    def _is_occluded(self, track, bbox):
-        """Check if a track is occluded based on its history."""
+    def _cleanup_track(self, track_id):
+        """Clean up a single track and its resources."""
         try:
-            if len(track['history']) < 2:
-                return False
-            
-            # Get recent bboxes
-            recent_bboxes = track['history'][-5:]  # Look at last 5 frames
-            
-            # Calculate IoU with current bbox
-            ious = [iou(bbox, b['bbox']) for b in recent_bboxes]
-            max_iou = max(ious)
-            
-            # Check for significant overlap with other tracks
-            for other_id, other_track in self.track_history.items():
-                if other_id == track['id']:
-                    continue
+            if track_id in self.track_history:
+                # Log final state
+                history = self.track_history[track_id]
+                self.logger.debug(f"Cleaning up track {track_id} with age {self.track_ages.get(track_id, 0)}")
                 
-                if not other_track['history']:
-                    continue
+                # Clear embeddings
+                if track_id in self.track_embeddings:
+                    for emb in self.track_embeddings[track_id]:
+                        if isinstance(emb, torch.Tensor):
+                            emb.cpu()
+                            del emb
+                    self.track_embeddings.pop(track_id)
                 
-                other_bbox = other_track['history'][-1]['bbox']
-                other_iou = iou(bbox, other_bbox)
+                if track_id in self.track_head_embeddings:
+                    for emb in self.track_head_embeddings[track_id]:
+                        if isinstance(emb, torch.Tensor):
+                            emb.cpu()
+                            del emb
+                    self.track_head_embeddings.pop(track_id)
                 
-                if other_iou > self.iou_threshold:
-                    return True
-            
-            # Check for sudden size changes
-            if len(track['history']) >= 2:
-                prev_size = (track['history'][-2]['bbox'][2] - track['history'][-2]['bbox'][0]) * \
-                           (track['history'][-2]['bbox'][3] - track['history'][-2]['bbox'][1])
-                curr_size = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-                size_ratio = curr_size / prev_size
+                # Clear history collections
+                for collection in ['history', 'behaviors', 'embedding_history', 
+                                 'confidence_history', 'bbox_history', 'behavior_sequence']:
+                    if collection in history:
+                        history[collection].clear()
                 
-                if size_ratio < 0.5 or size_ratio > 2.0:
-                    return True
-            
-            return False
-            
+                # Remove from all collections
+                self.track_history.pop(track_id, None)
+                self.track_id_changes.pop(track_id, None)
+                self.track_ages.pop(track_id, None)
+                self.active_tracks.discard(track_id)
+                
+                # Force CUDA cache clear if needed
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
         except Exception as e:
-            self.logger.error(f"Occlusion check failed: {str(e)}")
-            return False
+            self.logger.error(f"Error cleaning up track {track_id}: {str(e)}", exc_info=True)
 
     def _cleanup_old_tracks(self):
         """Clean up old tracks and free memory with improved persistence handling."""
@@ -871,208 +688,88 @@ class EnhancedTracker:
                 track_age = current_frame - history['created_frame']
                 frames_since_seen = current_frame - history['last_seen']
                 
-                # Calculate track health score
+                # Calculate track health score with improved weighting
                 health_score = (
-                    0.3 * history['temporal_consistency'] +
-                    0.3 * history['average_confidence'] +
-                    0.2 * history['embedding_quality'] +
-                    0.1 * history['size_score'] +
-                    0.1 * (1.0 - min(1.0, history['consecutive_misses'] / self.max_age))
+                    0.4 * history['temporal_consistency'] +  # Increased weight for temporal consistency
+                    0.3 * history['average_confidence'] +    # Keep high weight for confidence
+                    0.2 * history['embedding_quality'] +     # Keep moderate weight for embedding quality
+                    0.1 * (1.0 - min(1.0, history['consecutive_misses'] / self.max_age))  # Reduced weight for misses
                 )
                 
-                # Remove tracks based on multiple criteria
+                # Remove tracks based on multiple criteria with improved thresholds
                 should_remove = False
                 reason = []
                 
-                if track_age > self.max_age:
+                # Only remove if significantly past max age and health score is low
+                if track_age > self.max_age * 1.5 and health_score < 0.3:
                     should_remove = True
-                    reason.append(f"age={track_age}")
-                if frames_since_seen > self.max_age:
+                    reason.append(f"age={track_age} health={health_score:.2f}")
+                
+                # Only remove if many frames since last seen and health score is low
+                if frames_since_seen > self.max_age and health_score < 0.3:
                     should_remove = True
-                    reason.append(f"unseen={frames_since_seen}")
-                if health_score < 0.3 and track_age > self.max_age // 2:
+                    reason.append(f"unseen={frames_since_seen} health={health_score:.2f}")
+                
+                # Remove if track quality is very poor
+                if history['track_quality'] < 0.1 and track_age > self.max_age:
                     should_remove = True
-                    reason.append(f"health={health_score:.2f}")
-                if len(self.active_tracks) > self.max_tracks:
-                    should_remove = True
-                    reason.append("track_limit")
-                if history['consecutive_misses'] > self.max_age:
-                    should_remove = True
-                    reason.append(f"misses={history['consecutive_misses']}")
+                    reason.append(f"quality={history['track_quality']:.2f}")
                 
                 if should_remove:
+                    self.logger.debug(f"Marking track {track_id} for removal: {', '.join(reason)}")
                     tracks_to_remove.add(track_id)
-                    self.logger.debug(
-                        f"Marking track {track_id} for removal: {', '.join(reason)}, "
-                        f"age={track_age}, last_seen={frames_since_seen}, "
-                        f"health={health_score:.2f}"
-                    )
             
-            # If we're over the track limit, prioritize keeping healthy tracks
-            if len(self.active_tracks) > self.max_tracks:
-                # Sort tracks by health score
-                track_health = {
-                    tid: (
-                        0.3 * self.track_history[tid]['temporal_consistency'] +
-                        0.3 * self.track_history[tid]['average_confidence'] +
-                        0.2 * self.track_history[tid]['embedding_quality'] +
-                        0.1 * self.track_history[tid]['size_score'] +
-                        0.1 * (1.0 - min(1.0, self.track_history[tid]['consecutive_misses'] / self.max_age))
-                    )
-                    for tid in self.active_tracks
-                }
-                sorted_tracks = sorted(
-                    self.active_tracks,
-                    key=lambda x: (track_health.get(x, 0), -self.track_history[x]['created_frame'])
-                )
-                excess_tracks = sorted_tracks[:len(self.active_tracks) - self.max_tracks]
-                tracks_to_remove.update(excess_tracks)
-                self.logger.debug(f"Removing excess tracks based on health: {excess_tracks}")
-            
-            # Second pass: remove identified tracks and clean up resources
+            # Second pass: remove marked tracks
             for track_id in tracks_to_remove:
-                try:
-                    # Log final state before removal
-                    history = self.track_history[track_id]
-                    final_state = {
-                        'age': current_frame - history['created_frame'],
-                        'last_seen': history['last_seen'],
-                        'embedding_count': len(history['embedding_history']),
-                        'behavior_count': len(history['behaviors']),
-                        'temporal_consistency': history['temporal_consistency'],
-                        'average_confidence': history['average_confidence'],
-                        'embedding_quality': history['embedding_quality'],
-                        'health_score': (
-                            0.3 * history['temporal_consistency'] +
-                            0.3 * history['average_confidence'] +
-                            0.2 * history['embedding_quality'] +
-                            0.1 * history['size_score'] +
-                            0.1 * (1.0 - min(1.0, history['consecutive_misses'] / self.max_age))
-                        )
-                    }
-                    self.logger.debug(f"Removing track {track_id} with final state: {final_state}")
-                    
-                    # Clear embeddings from GPU memory
-                    if track_id in self.track_embeddings:
-                        for emb in self.track_embeddings[track_id]:
-                            if isinstance(emb, torch.Tensor):
-                                emb.cpu()
-                                del emb
-                        self.track_embeddings.pop(track_id)
-                    
-                    if track_id in self.track_head_embeddings:
-                        for emb in self.track_head_embeddings[track_id]:
-                            if isinstance(emb, torch.Tensor):
-                                emb.cpu()
-                                del emb
-                        self.track_head_embeddings.pop(track_id)
-                    
-                    # Clear last valid embedding
-                    if 'last_valid_embedding' in history:
-                        emb = history['last_valid_embedding']
-                        if isinstance(emb, torch.Tensor):
-                            emb.cpu()
-                            del emb
-                    
-                    # Clear history collections
-                    for collection in ['history', 'behaviors', 'embedding_history', 
-                                     'confidence_history', 'bbox_history', 'behavior_sequence']:
-                        if collection in history:
-                            history[collection].clear()
-                    
-                    # Remove from all collections
-                    self.track_history.pop(track_id, None)
-                    self.track_id_changes.pop(track_id, None)
-                    self.track_ages.pop(track_id, None)
-                    self.active_tracks.discard(track_id)
-                    
-                except Exception as e:
-                    self.logger.error(f"Error cleaning up track {track_id}: {str(e)}", exc_info=True)
+                self._cleanup_track(track_id)
             
-            # Force CUDA cache clear if needed
-            if torch.cuda.is_available() and tracks_to_remove:
-                torch.cuda.empty_cache()
-                self.logger.debug("Cleared CUDA cache after track cleanup")
-            
-            # Update last cleanup frame
+            # Update cleanup frame counter
             self.last_cleanup_frame = current_frame
-                
+            
         except Exception as e:
             self.logger.error(f"Error in track cleanup: {str(e)}", exc_info=True)
-            # Try to recover by forcing CUDA cache clear
-            if torch.cuda.is_available():
-                try:
-                    torch.cuda.empty_cache()
-                    self.logger.debug("Forced CUDA cache clear after cleanup error")
-                except Exception as cache_error:
-                    self.logger.error(f"Failed to clear CUDA cache: {str(cache_error)}")
 
     def _initialize_track(self, track_id, frame_idx):
-        """Initialize a new track with improved persistence and state management."""
+        """Initialize a new track with proper history management."""
         try:
-            # Initialize track history with all required fields and proper type casting
+            # Initialize track history with proper collections
             self.track_history[track_id] = {
-                'created_frame': int(frame_idx),
-                'last_seen': int(frame_idx),
-                'history': deque(maxlen=self.max_track_history),  # Use deque for automatic size limiting
-                'behaviors': deque(maxlen=self.max_behavior_history),
-                'views': set(),
-                'temporal_consistency': float(1.0),
-                'device_transitions': [],
-                'errors': [],
-                'occlusion_count': int(0),
-                'last_occlusion_frame': None,
-                'behavioral_markers': set(),
-                'embedding_history': deque(maxlen=self.max_embedding_history),
+                'history': deque(maxlen=self.max_track_history),
                 'confidence_history': deque(maxlen=self.max_track_history),
                 'bbox_history': deque(maxlen=self.max_track_history),
-                'persistence_score': float(1.0),
-                'last_valid_embedding': torch.zeros(512, dtype=torch.float32, device=self.device),
-                'embedding_quality': float(1.0),
-                'embedding_factor': float(1.0),
-                'movement_score': float(0.0),
+                'embedding_history': deque(maxlen=self.max_embedding_history),
                 'behavior_sequence': deque(maxlen=self.max_behavior_history),
-                'last_behavior': None,
-                'behavior_duration': int(0),
-                'behavior_transitions': int(0),
-                'track_quality': float(1.0),
-                'size_score': float(1.0),
-                'frame_size': (int(1), int(1)),
-                'device': str(self.device),
-                'device_type': str(self.device.type),
-                'track_id': int(track_id),  # Store original track ID
-                'id_changes': [],  # Track ID change history
-                'last_update_time': time.time(),
-                'update_count': int(0),
-                'consecutive_misses': int(0),
-                'max_consecutive_misses': int(0),
-                'total_updates': int(0),
-                'total_misses': int(0),
-                'average_confidence': float(0.0),
-                'average_embedding_quality': float(0.0),
+                'errors': deque(maxlen=self.max_track_history),
+                'behavioral_markers': set(),
+                'behavior_transitions': 0,
+                'behavior_duration': 0,
+                'update_count': 0,
+                'temporal_consistency': 1.0,
+                'size_score': 1.0,
+                'movement_score': 0.0,
+                'average_embedding_quality': 1.0,
+                'last_valid_embedding': None,
                 'last_bbox': None,
-                'last_confidence': float(0.0),
-                'last_embedding_quality': float(0.0),
-                'last_temporal_consistency': float(1.0),
-                'last_track_quality': float(1.0),
-                'last_size_score': float(1.0),
-                'last_movement_score': float(0.0),
-                'last_behavior_score': float(0.0),
-                'last_update_frame': int(frame_idx),
-                'last_update_bbox': None,
-                'last_update_confidence': float(0.0),
-                'last_update_embedding_quality': float(0.0),
-                'last_update_temporal_consistency': float(1.0),
-                'last_update_track_quality': float(1.0),
-                'last_update_size_score': float(1.0),
-                'last_update_movement_score': float(0.0),
-                'last_update_behavior_score': float(0.0)
+                'last_confidence': 1.0,
+                'last_embedding_quality': 1.0,
+                'last_temporal_consistency': 1.0,
+                'last_track_quality': 1.0,
+                'last_size_score': 1.0,
+                'last_movement_score': 0.0,
+                'last_behavior_score': 0.0,
+                'last_behavior': None,
+                'embedding_factor': 1.0,  # Add embedding factor for temporal consistency
+                'created_frame': frame_idx,  # Add created_frame for track age calculation
+                'last_seen': frame_idx,  # Add last_seen for track cleanup
+                'average_confidence': 1.0,  # Add average_confidence for track health calculation
+                'consecutive_misses': 0,  # Add consecutive_misses for track health calculation
+                'track_quality': 1.0  # Add track_quality for track health calculation
             }
             
             # Initialize track ID change history with same fields
             self.track_id_changes[track_id] = self.track_history[track_id].copy()
             
-            # Initialize embeddings collections with proper device handling and size limits
+            # Initialize embeddings collections with proper device handling
             self.track_embeddings[track_id] = deque(maxlen=self.max_embedding_history)
             self.track_head_embeddings[track_id] = deque(maxlen=self.max_embedding_history)
             
@@ -1081,19 +778,43 @@ class EnhancedTracker:
             self.track_embeddings[track_id].append(zero_emb)
             self.track_head_embeddings[track_id].append(zero_emb)
             
+            # Store initial embedding as last valid
+            self.track_history[track_id]['last_valid_embedding'] = zero_emb.clone()
+            self.track_id_changes[track_id]['last_valid_embedding'] = zero_emb.clone()
+            
             # Add to active tracks and initialize age
             self.active_tracks.add(track_id)
-            self.track_ages[track_id] = int(0)
+            self.track_ages[track_id] = 0
             
-            # Log initialization with detailed state
-            self.logger.debug(
-                f"Initialized track {track_id} at frame {frame_idx} on device {self.device} "
-                f"with max history {self.max_track_history}, max embeddings {self.max_embedding_history}, "
-                f"max behaviors {self.max_behavior_history}"
-            )
+            # Initialize history collections with initial values
+            initial_state = {
+                'frame': frame_idx,
+                'time': time.time(),
+                'bbox': None,
+                'confidence': 1.0,
+                'embedding_quality': 1.0,
+                'temporal_consistency': 1.0,
+                'track_quality': 1.0,
+                'size_score': 1.0,
+                'movement_score': 0.0,
+                'behavior_score': 0.0,
+                'embedding_factor': 1.0  # Add embedding factor to initial state
+            }
+            
+            # Add initial state to all history collections
+            self.track_history[track_id]['history'].append(initial_state.copy())
+            self.track_history[track_id]['confidence_history'].append(1.0)
+            self.track_history[track_id]['bbox_history'].append(None)
+            self.track_history[track_id]['behavior_sequence'].append(None)
+            
+            # Ensure track is properly indexed
+            if track_id not in self.track_history:
+                raise ValueError(f"Failed to initialize track {track_id}")
+            
+            return True
             
         except Exception as e:
-            self.logger.error(f"Error initializing track {track_id}: {str(e)}", exc_info=True)
+            self.logger.error(f"Error initializing track {track_id}: {str(e)}")
             # Clean up any partially initialized state
             if track_id in self.track_history:
                 del self.track_history[track_id]
@@ -1103,10 +824,9 @@ class EnhancedTracker:
                 del self.track_embeddings[track_id]
             if track_id in self.track_head_embeddings:
                 del self.track_head_embeddings[track_id]
-            if track_id in self.track_ages:
-                del self.track_ages[track_id]
             self.active_tracks.discard(track_id)
-            raise
+            self.track_ages.pop(track_id, None)
+            return False
 
     def _update_track_behavior(self, track_id, bbox, frame_idx):
         """Update track behavior with improved temporal consistency."""
@@ -1171,143 +891,57 @@ class EnhancedTracker:
         """Update tracks with new detections."""
         try:
             # Validate input
-            if frame is None or not isinstance(frame, np.ndarray):
-                raise ValueError("Invalid frame input")
+            if not isinstance(frame, np.ndarray) or frame.ndim != 3:
+                raise ValueError("Invalid frame format: expected 3D numpy array")
+            if not isinstance(detections, (list, np.ndarray)):
+                raise ValueError("Invalid detections format: expected list or numpy array")
             
-            # Handle empty detections
-            if detections is None or len(detections) == 0:
-                detections = np.empty((0, 5), dtype=np.float32)
-            
-            # Convert detections to proper format if needed
+            # Convert detections to proper format
             if isinstance(detections, list):
-                # Handle list of dictionaries
-                if isinstance(detections[0], dict):
-                    detections = np.array([[float(d['bbox'][0]), float(d['bbox'][1]), 
-                                          float(d['bbox'][2]), float(d['bbox'][3]), 
-                                          float(d.get('score', 1.0))] for d in detections], 
-                                         dtype=np.float32)
-                # Handle list of lists/arrays
-                else:
-                    detections = np.array(detections, dtype=np.float32)
+                # Ensure each detection has required fields
+                for det in detections:
+                    if not isinstance(det, dict):
+                        raise ValueError("Each detection must be a dictionary")
+                    if 'bbox' not in det:
+                        raise ValueError("Each detection must have a 'bbox' field")
+                    if 'score' not in det:
+                        raise ValueError("Each detection must have a 'score' field")
+                    if not isinstance(det['bbox'], (list, np.ndarray)) or len(det['bbox']) != 4:
+                        raise ValueError("Each detection bbox must be a list/array of 4 values")
+                    if not isinstance(det['score'], (int, float)):
+                        raise ValueError("Each detection score must be a number")
+                
+                # Convert to numpy array with proper types
+                detections = np.array([
+                    [float(x) for x in det['bbox']] + [float(det['score'])]
+                    for det in detections
+                ])
             
-            # Ensure detections is 2D array with correct shape
-            if detections.ndim == 1:
-                detections = detections.reshape(1, -1)
+            # Process detections in batches
+            processed_tracks = self._process_detection_batch(frame, detections, self.frame_count)
             
-            # Validate shape and add confidence if missing
-            if detections.shape[1] == 4:  # Only bbox coordinates
-                confidence = np.ones((detections.shape[0], 1), dtype=np.float32)
-                detections = np.hstack([detections, confidence])
-            elif detections.shape[1] != 5:
-                raise ValueError(f"Invalid detections shape: {detections.shape}. Expected (N, 4) or (N, 5)")
-            
-            # Ensure all values are float32
-            detections = detections.astype(np.float32)
-            
-            # Increment frame counter
+            # Update frame count
             self.frame_count += 1
             
-            # Update tracker with retry logic
-            tracked_objects = None
-            for attempt in range(self.max_retries):
-                try:
-                    tracked_objects = self.tracker.update(detections)
-                    break
-                except Exception as e:
-                    if attempt == self.max_retries - 1:
-                        self.logger.error(f"Failed to update tracker after {self.max_retries} attempts: {str(e)}")
-                        raise
-                    time.sleep(self.retry_delay)
+            # Clean up old tracks periodically
+            if self.frame_count - self.last_cleanup_frame >= self.cleanup_interval:
+                self._cleanup_old_tracks()
             
-            if tracked_objects is None or len(tracked_objects) == 0:
-                return np.empty((0, 5), dtype=np.float32)
-            
-            # Process each tracked object
-            active_tracks = []
-            for track in tracked_objects:
-                try:
-                    x1, y1, x2, y2, track_id = track
-                    bbox = [float(x1), float(y1), float(x2), float(y2)]
-                    confidence = float(track[4]) if len(track) > 4 else 1.0
-                    
-                    # Initialize track if needed
-                    if track_id not in self.track_history:
-                        self._initialize_track(track_id, self.frame_count)
-                    
-                    # Update temporal consistency
-                    if track_id in self.track_history:
-                        # Calculate temporal consistency based on embedding history
-                        if len(self.track_embeddings[track_id]) > 1:
-                            prev_emb = self.track_embeddings[track_id][-2]
-                            curr_emb = self.track_embeddings[track_id][-1]
-                            
-                            # Ensure both embeddings are on device and float type
-                            if isinstance(prev_emb, np.ndarray):
-                                prev_emb = torch.from_numpy(prev_emb).float().to(self.device)
-                            elif isinstance(prev_emb, torch.Tensor):
-                                prev_emb = prev_emb.detach().float().to(self.device)
-                            else:
-                                prev_emb = torch.tensor(prev_emb, dtype=torch.float32, device=self.device)
-                                
-                            if isinstance(curr_emb, np.ndarray):
-                                curr_emb = torch.from_numpy(curr_emb).float().to(self.device)
-                            elif isinstance(curr_emb, torch.Tensor):
-                                curr_emb = curr_emb.detach().float().to(self.device)
-                            else:
-                                curr_emb = torch.tensor(curr_emb, dtype=torch.float32, device=self.device)
-                            
-                            # Calculate cosine similarity
-                            similarity = torch.dot(prev_emb, curr_emb) / (torch.norm(prev_emb) * torch.norm(curr_emb))
-                            temporal_consistency = max(0.0, min(1.0, similarity.item()))
-                            
-                            # Update temporal consistency with exponential moving average
-                            alpha = 0.7  # Weight for new value
-                            old_consistency = float(self.track_history[track_id]['temporal_consistency'])
-                            self.track_history[track_id]['temporal_consistency'] = float(
-                                alpha * temporal_consistency + (1 - alpha) * old_consistency
-                            )
-                            
-                            # Update track quality based on temporal consistency
-                            self.track_history[track_id]['track_quality'] = float(self.track_history[track_id]['temporal_consistency'])
-                            self.track_id_changes[track_id]['track_quality'] = float(self.track_history[track_id]['temporal_consistency'])
-                    
-                    # Update track history with proper device handling
-                    history_entry = {
-                        'frame_idx': int(self.frame_count),
-                        'bbox': bbox,
-                        'confidence': float(confidence),
-                        'temporal_consistency': float(self.track_history[track_id]['temporal_consistency']),
-                        'track_quality': float(self.track_history[track_id]['track_quality']),
-                        'age': int(self.track_ages.get(track_id, 0))
-                    }
-                    
-                    # Update history lists with proper limits
-                    if len(self.track_history[track_id]['history']) >= self.max_track_history:
-                        self.track_history[track_id]['history'].pop(0)
-                        self.track_id_changes[track_id]['history'].pop(0)
-                    self.track_history[track_id]['history'].append(history_entry)
-                    self.track_id_changes[track_id]['history'].append(history_entry)
-                    
-                    # Add to active tracks with proper type conversion
-                    active_tracks.append([float(x1), float(y1), float(x2), float(y2), float(track_id)])
-                
-                except Exception as e:
-                    self.logger.error(f"Error processing track: {str(e)}")
-                    continue
-            
-            return np.array(active_tracks, dtype=np.float32)
+            return processed_tracks
             
         except Exception as e:
-            self.logger.error(f"Error in update: {str(e)}")
-            return np.empty((0, 5), dtype=np.float32)
+            self.logger.error(f"Error in update: {str(e)}", exc_info=True)
+            return np.empty((0, 5))
 
-    def extract_crow_image(self, frame, bbox, padding=0.3, min_size=100):
-        """Extract a cropped image of a crow from the frame using robust validation and enhancement logic.
+    def extract_crow_image(self, frame, bbox, padding=0.3, min_size=10):
+        """Extract a cropped image of a crow from the frame.
+        
         Args:
             frame: Input frame (numpy array)
             bbox: Bounding box in [x1, y1, x2, y2] format
             padding: Padding factor around the bbox (default: 0.3)
-            min_size: Minimum size for valid bbox (default: 100)
+            min_size: Minimum size for valid bbox (default: 10)
+            
         Returns:
             Dictionary containing 'full' and 'head' tensors, or None if extraction fails
         """
@@ -1318,110 +952,96 @@ class EnhancedTracker:
             self.logger.error(f"Error extracting crow image: {str(e)}")
             return None
 
-    def _initialize_models(self, model_path=None, strict_mode=False):
-        """Initialize models with improved error handling and device management."""
+    def _initialize_models(self, model_path, strict_mode=False):
+        """Initialize models with proper error handling and strict mode support."""
         try:
-            # Create model on CPU first
-            from models import CrowResNetEmbedder
-            self.model = CrowResNetEmbedder(embedding_dim=512)
+            # Create base model first
+            try:
+                self.model = create_model()
+                if self.model is None:
+                    if strict_mode:
+                        raise ModelError("create_model() returned None")
+                    self.logger.warning("create_model() returned None, using default ResNet18")
+                    import torchvision.models as models
+                    self.model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+                    self.model = torch.nn.Sequential(*list(self.model.children())[:-1])
+            except Exception as e:
+                if strict_mode:
+                    raise ModelError(f"Failed to create base model: {str(e)}")
+                self.logger.warning(f"Failed to create base model, using default ResNet18: {str(e)}")
+                import torchvision.models as models
+                self.model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+                self.model = torch.nn.Sequential(*list(self.model.children())[:-1])
+            
+            self.model = self.model.to(self.device)
+            self.model.eval()  # Set to evaluation mode
+            
+            # Initialize color normalizer
+            try:
+                self.color_normalizer = create_normalizer()
+                if self.color_normalizer is None:
+                    if strict_mode:
+                        raise ModelError("create_normalizer() returned None")
+                    self.logger.warning("create_normalizer() returned None, using default normalization")
+                    self.color_normalizer = lambda x: x / 255.0
+            except Exception as e:
+                if strict_mode:
+                    raise ModelError(f"Failed to create color normalizer: {str(e)}")
+                self.logger.warning(f"Failed to create color normalizer, using default normalization: {str(e)}")
+                self.color_normalizer = lambda x: x / 255.0
             
             if model_path is not None:
-                # Load state dict with improved error handling
                 try:
-                    # Always load to CPU first
-                    state_dict = torch.load(model_path, map_location='cpu')
+                    if not os.path.exists(model_path):
+                        if strict_mode:
+                            raise ModelError(f"Model file not found: {model_path}")
+                        self.logger.warning(f"Model file not found: {model_path}, using default weights")
+                        return
                     
-                    # Handle state dict mismatch
-                    model_state_dict = self.model.state_dict()
-                    filtered_state_dict = {}
+                    state_dict = torch.load(model_path, map_location=self.device)
+                    if not isinstance(state_dict, dict):
+                        if strict_mode:
+                            raise ModelError(f"Invalid model state dict format from {model_path}")
+                        self.logger.warning(f"Invalid model state dict format from {model_path}, using default weights")
+                        return
                     
-                    # Only load matching keys and shapes
-                    for k, v in state_dict.items():
-                        if k in model_state_dict and v.shape == model_state_dict[k].shape:
-                            filtered_state_dict[k] = v
-                        else:
-                            self.logger.warning(f"Skipping incompatible key: {k}")
-                    
-                    if strict_mode:
-                        # In strict mode, require all keys to match
-                        if len(filtered_state_dict) != len(model_state_dict):
-                            raise ModelError(f"Strict mode: Model state dict mismatch. Expected {len(model_state_dict)} parameters, got {len(filtered_state_dict)}")
-                        # Also verify all shapes match
-                        for k, v in filtered_state_dict.items():
-                            if v.shape != model_state_dict[k].shape:
-                                raise ModelError(f"Strict mode: Shape mismatch for key {k}. Expected {model_state_dict[k].shape}, got {v.shape}")
-                        # Load with strict=True in strict mode
-                        self.model.load_state_dict(filtered_state_dict, strict=True)
-                    else:
-                        # In non-strict mode, load what we can
-                        self.model.load_state_dict(filtered_state_dict, strict=False)
-                        self.logger.info(f"Loaded {len(filtered_state_dict)}/{len(model_state_dict)} model parameters")
-                    
+                    self._load_state_dict(state_dict, strict_mode)
                 except Exception as e:
-                    self.logger.error(f"Failed to load state dict: {str(e)}")
                     if strict_mode:
-                        # In strict mode, raise the error and don't fall back
-                        raise ModelError(f"Failed to load state dict in strict mode: {str(e)}")
-                    else:
-                        self.logger.warning("Using randomly initialized model")
-                
-            # Move model to target device
-            self.model = self.model.to(self.device)
+                        raise ModelError(f"Failed to load model from {model_path}: {str(e)}")
+                    self.logger.warning(f"Failed to load model from {model_path}, using default weights: {str(e)}")
             
-            # Set model to eval mode
-            self.model.eval()
+            # Initialize multi-view extractor immediately after model creation
+            self._init_multi_view_extractor(strict_mode)
             
-            # Verify embedding dimension
-            try:
-                test_input = torch.randn(1, 3, 224, 224, device=self.device)
-                with torch.no_grad():
-                    test_output = self.model(test_input)
-                embedding_dim = test_output.shape[1]
-                if embedding_dim != 512:
-                    if strict_mode:
-                        raise ModelError(f"Model embedding dimension mismatch: expected 512, got {embedding_dim}")
-                    else:
-                        self.logger.warning(f"Model embedding dimension mismatch: expected 512, got {embedding_dim}")
-                
-                self.logger.info(f"Model loaded successfully with embedding dimension {embedding_dim}")
-                
-            except Exception as e:
-                self.logger.error(f"Failed to verify embedding dimension: {str(e)}")
-                if strict_mode:
-                    raise ModelError(f"Failed to verify embedding dimension: {str(e)}")
-                else:
-                    self.logger.warning("Skipping embedding dimension verification")
-            
+        except ModelError:
+            # Re-raise ModelError without wrapping
+            raise
         except Exception as e:
             self.logger.error(f"Model initialization failed: {str(e)}")
-            if hasattr(self, 'model'):
-                del self.model
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
             if strict_mode:
                 raise ModelError(f"Model initialization failed: {str(e)}")
-            else:
-                self.logger.warning("Using randomly initialized model")
-                self.model = CrowResNetEmbedder(embedding_dim=512).to(self.device)
+            raise
 
-    def _init_multi_view_extractor(self, strict_mode):
-        """Initialize multi-view extractor if stride > 1."""
+    def _init_multi_view_extractor(self, strict_mode=False):
+        """Initialize multi-view extractor with proper error handling."""
         try:
-            if self.multi_view_stride > 1:
-                if not isinstance(self.multi_view_stride, int) or self.multi_view_stride < 1:
-                    raise ValueError(f"Invalid multi_view_stride: {self.multi_view_stride}")
-                self.multi_view = create_multi_view_extractor(stride=self.multi_view_stride)
-                self.logger.info(f"Multi-view extractor initialized with stride {self.multi_view_stride}")
-            else:
-                self.multi_view = None
-                self.logger.info("Multi-view extractor disabled (stride <= 1)")
+            if not hasattr(self, 'model') or self.model is None:
+                if strict_mode:
+                    raise ModelError("Model required for multi-view extraction")
+                self.logger.warning("Model not available for multi-view extraction")
+                self.multi_view_extractor = None
+                return
+            
+            # Create multi-view extractor without stride parameter
+            self.multi_view_extractor = create_multi_view_extractor()
+            self.logger.info("Multi-view extractor initialized successfully")
+            
         except Exception as e:
             self.logger.error(f"Failed to initialize multi-view extractor: {str(e)}")
-            self.multi_view = None
             if strict_mode:
-                raise ModelError(f"Failed to initialize multi-view extractor: {str(e)}")
-            else:
-                self.logger.warning("Multi-view extractor initialization failed, continuing without it")
+                raise ModelError(f"Multi-view extractor initialization failed: {str(e)}")
+            self.multi_view_extractor = None
 
     def _get_embedding_dim(self, state_dict):
         """Get embedding dimension from state dict."""
@@ -1485,13 +1105,14 @@ class EnhancedTracker:
             for key in unexpected_keys:
                 self.logger.warning(f"  {key}")
 
+    @timeout(5.0)  # 5 second timeout for embedding processing
     def _process_embedding(self, img_tensors, key=None, return_tensor=False):
         """Compute feature embeddings for both head and body regions using the instance's model and device."""
         try:
             if not hasattr(self, 'model') or self.model is None:
                 self.logger.error("Model not initialized")
                 zero_emb = torch.zeros(512, dtype=torch.float32, device=self.device)
-                return zero_emb if return_tensor else zero_emb.detach().cpu().numpy()
+                return zero_emb if return_tensor else {'full': zero_emb.detach().cpu().numpy(), 'head': zero_emb.detach().cpu().numpy()}
 
             with torch.no_grad():
                 if key is not None:
@@ -1501,28 +1122,36 @@ class EnhancedTracker:
                         zero_emb = torch.zeros(512, dtype=torch.float32, device=self.device)
                         return zero_emb if return_tensor else zero_emb.detach().cpu().numpy()
 
-                    # Convert to tensor if needed and ensure proper type
-                    if isinstance(img_tensors, np.ndarray):
-                        img_tensors = torch.from_numpy(img_tensors).float()
-                    elif isinstance(img_tensors, torch.Tensor):
-                        img_tensors = img_tensors.float()
-                    else:
-                        img_tensors = torch.tensor(img_tensors, dtype=torch.float32)
+                    # Convert to numpy array if needed
+                    if isinstance(img_tensors, torch.Tensor):
+                        img_tensors = img_tensors.detach().cpu().numpy()
 
-                    # Ensure tensor is on device and has correct shape
+                    # Ensure uint8 type
+                    if img_tensors.dtype != np.uint8:
+                        if img_tensors.max() <= 1.0:
+                            img_tensors = (img_tensors * 255).astype(np.uint8)
+                        else:
+                            img_tensors = img_tensors.astype(np.uint8)
+
+                    # Convert to tensor and ensure proper shape
+                    img_tensors = torch.from_numpy(img_tensors).float()
                     if img_tensors.dim() != 4:
                         img_tensors = img_tensors.unsqueeze(0)
                     if img_tensors.size(1) != 3:
-                        self.logger.error(f"Invalid channels for {key}: {img_tensors.size(1)}")
-                        zero_emb = torch.zeros(512, dtype=torch.float32, device=self.device)
-                        return zero_emb if return_tensor else zero_emb.detach().cpu().numpy()
+                        img_tensors = img_tensors.permute(0, 3, 1, 2)  # Convert HWC to CHW if needed
 
                     # Move to device and normalize
                     img_tensors = img_tensors.to(self.device)
-                    mean = torch.tensor([0.485, 0.456, 0.406], device=self.device).view(1, 3, 1, 1)
-                    std = torch.tensor([0.229, 0.224, 0.225], device=self.device).view(1, 3, 1, 1)
-                    img_tensors = img_tensors / 255.0
-                    img_tensors = (img_tensors - mean) / std
+                    if hasattr(self, 'color_normalizer'):
+                        # Convert tensor to numpy for normalization
+                        img_np = img_tensors.cpu().numpy().transpose(0, 2, 3, 1)  # Convert to HWC format
+                        normalized = np.stack([self.color_normalizer.normalize(img) for img in img_np])
+                        img_tensors = torch.from_numpy(normalized.transpose(0, 3, 1, 2)).to(self.device)  # Convert back to CHW format
+                    else:
+                        mean = torch.tensor([0.485, 0.456, 0.406], device=self.device).view(1, 3, 1, 1)
+                        std = torch.tensor([0.229, 0.224, 0.225], device=self.device).view(1, 3, 1, 1)
+                        img_tensors = img_tensors / 255.0
+                        img_tensors = (img_tensors - mean) / std
 
                     try:
                         # Ensure model is on correct device
@@ -1590,8 +1219,18 @@ class EnhancedTracker:
                             'head': head_emb.detach().cpu().numpy()
                         }
 
+        except TimeoutError:
+            self.logger.error("Embedding computation timed out")
+            zero_emb = torch.zeros(512, dtype=torch.float32, device=self.device)
+            if key is not None:
+                return zero_emb if return_tensor else zero_emb.detach().cpu().numpy()
+            else:
+                return {'full': zero_emb, 'head': zero_emb} if return_tensor else {
+                    'full': zero_emb.detach().cpu().numpy(),
+                    'head': zero_emb.detach().cpu().numpy()
+                }
         except Exception as e:
-            self.logger.error(f"Error in _process_embedding: {str(e)}")
+            self.logger.error(f"Error in embedding processing: {str(e)}")
             zero_emb = torch.zeros(512, dtype=torch.float32, device=self.device)
             if key is not None:
                 return zero_emb if return_tensor else zero_emb.detach().cpu().numpy()
@@ -1627,20 +1266,225 @@ class EnhancedTracker:
         if len(lst) > maxlen:
             del lst[:-maxlen]
 
+    def _calculate_temporal_consistency(self, track_id, bbox, embedding):
+        """Calculate temporal consistency score for a track update."""
+        try:
+            track_state = self.track_history[track_id]
+            
+            # Get previous state
+            if not track_state['history']:
+                return 1.0
+                
+            prev_state = track_state['history'][-1]
+            prev_bbox = prev_state['bbox']
+            
+            if prev_bbox is None:
+                return 1.0
+                
+            # Calculate movement consistency
+            movement = np.linalg.norm(np.array(bbox[:2]) - np.array(prev_bbox[:2]))
+            movement_score = 1.0 - min(1.0, movement / self.max_movement)
+            
+            # Calculate embedding consistency if available
+            embedding_score = 1.0
+            if embedding is not None and track_state['last_valid_embedding'] is not None:
+                try:
+                    similarity = F.cosine_similarity(
+                        embedding.unsqueeze(0),
+                        track_state['last_valid_embedding'].unsqueeze(0)
+                    )
+                    embedding_score = float(similarity.item())
+                except Exception as e:
+                    self.logger.warning(f"Error calculating embedding similarity: {str(e)}")
+                    embedding_score = 0.0
+            
+            # Combine scores with embedding factor
+            embedding_factor = track_state.get('embedding_factor', 1.0)
+            temporal_consistency = (
+                movement_score * (1.0 - embedding_factor * 0.5) +
+                embedding_score * embedding_factor * 0.5
+            )
+            
+            return float(temporal_consistency)
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating temporal consistency: {str(e)}")
+            return 0.0
+            
+    def _calculate_embedding_quality(self, embedding):
+        """Calculate embedding quality score."""
+        try:
+            if embedding is None:
+                return 0.0
+            
+            # Handle both tensor and numpy array inputs
+            if isinstance(embedding, dict):
+                # If embedding is a dict, use the 'full' embedding
+                if 'full' in embedding:
+                    embedding = embedding['full']
+                else:
+                    return 0.0
+            
+            # Convert to tensor if needed
+            if isinstance(embedding, np.ndarray):
+                embedding = torch.from_numpy(embedding).to(self.device)
+            elif not isinstance(embedding, torch.Tensor):
+                return 0.0
+            
+            # Ensure embedding is on correct device
+            if embedding.device != self.device:
+                embedding = embedding.to(self.device)
+            
+            # Check if embedding is normalized
+            if not torch.allclose(torch.norm(embedding, p=2), torch.tensor(1.0)):
+                embedding = F.normalize(embedding, p=2, dim=0)
+            
+            # Calculate quality based on embedding norm and variance
+            norm = float(torch.norm(embedding, p=2).item())
+            variance = float(torch.var(embedding).item())
+            
+            # Additional quality metrics
+            min_val = float(torch.min(embedding).item())
+            max_val = float(torch.max(embedding).item())
+            range_score = 1.0 - (max_val - min_val) / 2.0  # Penalize if values are too spread out
+            
+            # Quality decreases with high variance, deviates from unit norm, and poor range
+            quality = 1.0 - min(1.0, abs(norm - 1.0) + variance + (1.0 - range_score))
+            return max(0.0, min(1.0, quality))
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating embedding quality: {str(e)}")
+            return 0.0
+            
+    def _calculate_size_score(self, bbox):
+        """Calculate size score based on bbox dimensions."""
+        try:
+            if bbox is None:
+                return 0.0
+                
+            # Calculate area
+            width = bbox[2] - bbox[0]
+            height = bbox[3] - bbox[1]
+            area = width * height
+            
+            # Score based on area relative to expected size
+            expected_area = self.expected_size[0] * self.expected_size[1]
+            size_ratio = area / expected_area
+            
+            # Penalize both too small and too large detections
+            if size_ratio < 0.1:  # Too small
+                return 0.0
+            elif size_ratio > 10.0:  # Too large
+                return 0.0
+            else:
+                # Optimal size is close to expected
+                return float(np.exp(-(size_ratio - 1.0) ** 2))
+                
+        except Exception as e:
+            self.logger.error(f"Error calculating size score: {str(e)}")
+            return 0.0
+            
+    def _calculate_movement_score(self, track_id, bbox):
+        """Calculate movement score based on track history."""
+        try:
+            track_state = self.track_history[track_id]
+            
+            if not track_state['history']:
+                return 0.0
+                
+            prev_state = track_state['history'][-1]
+            prev_bbox = prev_state['bbox']
+            
+            if prev_bbox is None:
+                return 0.0
+                
+            # Calculate movement
+            movement = np.linalg.norm(np.array(bbox[:2]) - np.array(prev_bbox[:2]))
+            
+            # Score based on movement relative to max allowed
+            movement_score = 1.0 - min(1.0, movement / self.max_movement)
+            
+            # Apply temporal smoothing
+            prev_movement_score = track_state.get('last_movement_score', 0.0)
+            smoothed_score = 0.7 * prev_movement_score + 0.3 * movement_score
+            
+            return float(smoothed_score)
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating movement score: {str(e)}")
+            return 0.0
+            
+    def _calculate_behavior_score(self, track_id):
+        """Calculate behavior score based on track history."""
+        try:
+            track_state = self.track_history[track_id]
+            
+            if not track_state['behavior_sequence']:
+                return 0.0
+                
+            # Get recent behaviors
+            recent_behaviors = list(track_state['behavior_sequence'])[-self.behavior_window:]
+            if not recent_behaviors:
+                return 0.0
+                
+            # Calculate behavior stability
+            unique_behaviors = len(set(recent_behaviors))
+            behavior_stability = 1.0 - (unique_behaviors - 1) / len(recent_behaviors)
+            
+            # Calculate behavior duration
+            current_behavior = recent_behaviors[-1]
+            behavior_duration = sum(1 for b in recent_behaviors if b == current_behavior)
+            duration_score = min(1.0, behavior_duration / self.behavior_window)
+            
+            # Combine scores
+            behavior_score = 0.7 * behavior_stability + 0.3 * duration_score
+            
+            return float(behavior_score)
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating behavior score: {str(e)}")
+            return 0.0
+
 def compute_iou(box1, box2):
-    x1, y1, x2, y2 = box1
-    x1g, y1g, x2g, y2g = box2
-    xi1 = max(x1, x1g)
-    yi1 = max(y1, y1g)
-    xi2 = min(x2, x2g)
-    yi2 = min(y2, y2g)
-    inter_width = max(0, xi2 - xi1)
-    inter_height = max(0, yi2 - yi1)
-    intersection = inter_width * inter_height
-    area1 = (x2 - x1) * (y2 - y1)
-    area2 = (x2g - x1g) * (y2g - y1g)
-    union = area1 + area2 - intersection
-    return intersection / union if union > 0 else 0
+    """Compute IoU between two bounding boxes.
+    
+    Args:
+        box1: First bounding box [x1, y1, x2, y2]
+        box2: Second bounding box [x1, y1, x2, y2]
+        
+    Returns:
+        float: IoU score between 0 and 1
+    """
+    # Convert to numpy arrays if needed
+    box1 = np.array(box1)
+    box2 = np.array(box2)
+    
+    # Get coordinates of intersection rectangle
+    x1 = max(box1[0], box2[0])
+    y1 = max(box1[1], box2[1])
+    x2 = min(box1[2], box2[2])
+    y2 = min(box1[3], box2[3])
+    
+    # Calculate intersection area
+    intersection_area = max(0, x2 - x1) * max(0, y2 - y1)
+    
+    # Calculate union area
+    box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    union_area = box1_area + box2_area - intersection_area
+    
+    # Calculate IoU
+    iou = intersection_area / union_area if union_area > 0 else 0.0
+    
+    return float(iou)
+
+def create_model():
+    """Create and return a ResNet18 model for feature extraction."""
+    import torchvision.models as models
+    model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+    # Remove the final classification layer for embedding
+    model = torch.nn.Sequential(*list(model.children())[:-1])
+    return model
 
 def assign_crow_ids(frames, detections_list, video_path=None, max_age=5, min_hits=2, iou_threshold=0.2, embedding_threshold=0.7, return_track_history=False, multi_view_stride=1):
     print("[INFO] Starting enhanced crow tracking...")
@@ -1664,13 +1508,26 @@ def assign_crow_ids(frames, detections_list, video_path=None, max_age=5, min_hit
         frame_tracks = {}
         for track in tracks:
             x1, y1, x2, y2, track_id = map(int, track)
+            track_id = int(track_id)
             if track_id in tracker.track_embeddings and tracker.track_embeddings[track_id]:
                 embedding = tracker.track_embeddings[track_id][-1]
+                # Ensure confidence is a valid float
+                conf = track[4]
+                if isinstance(conf, bytes):
+                    try:
+                        conf = float(conf.decode('utf-8'))
+                    except Exception:
+                        conf = 0.0
+                elif not isinstance(conf, (int, float, np.floating)):
+                    try:
+                        conf = float(conf)
+                    except Exception:
+                        conf = 0.0
                 db_crow_id = save_crow_embedding(
                     embedding,
                     video_path=video_path,
                     frame_number=frame_idx,
-                    confidence=track[4]
+                    confidence=conf
                 )
                 crow_id = crow_ids.get(db_crow_id, db_crow_id)
                 cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 255), 2)
