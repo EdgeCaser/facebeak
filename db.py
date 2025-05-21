@@ -6,6 +6,7 @@ from scipy.spatial.distance import cosine
 from db_security import secure_database_connection
 import logging
 from pathlib import Path
+import torch
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -95,6 +96,15 @@ def save_crow_embedding(embedding, video_path=None, frame_number=None, confidenc
         # Start transaction
         conn.execute("BEGIN TRANSACTION")
         
+        # Convert embedding to numpy array if it's a tensor
+        if isinstance(embedding, torch.Tensor):
+            embedding = embedding.detach().cpu().numpy()
+        elif not isinstance(embedding, np.ndarray):
+            embedding = np.array(embedding, dtype=np.float32)
+        
+        # Ensure embedding is float32
+        embedding = embedding.astype(np.float32)
+        
         # Try to find matching crow
         crow_id = find_matching_crow(
             embedding,
@@ -131,7 +141,7 @@ def save_crow_embedding(embedding, video_path=None, frame_number=None, confidenc
             raise ValueError(f"Crow ID {crow_id} does not exist in database after creation/update")
         
         # Save the embedding
-        embedding_blob = embedding.astype(np.float32).tobytes()
+        embedding_blob = embedding.tobytes()
         c.execute('''
             INSERT INTO crow_embeddings 
             (crow_id, embedding, video_path, frame_number, confidence)
