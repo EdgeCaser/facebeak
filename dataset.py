@@ -136,28 +136,61 @@ class CrowTripletDataset(Dataset):
         img_path, video_path, audio_path, crow_id = self.samples[idx]
         
         # Load and transform image
-        image = Image.open(img_path).convert('RGB')
-        if self.transform:
-            image = self.transform(image)
+        try:
+            image = Image.open(img_path).convert('RGB')
+            if self.transform:
+                image = self.transform(image)
+            else:
+                # Apply default transforms if none provided
+                image = transforms.ToTensor()(image)
+                image = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                          std=[0.229, 0.224, 0.225])(image)
+        except Exception as e:
+            logger.error(f"Error loading image {img_path}: {e}")
+            raise
+        
+        # Initialize audio features as None
+        audio = None
         
         # Load audio features if available
-        audio = None
-        if audio_path is not None:
+        if audio_path is not None and audio_path.exists():
             try:
-                mel_spec, chroma = extract_audio_features(audio_path)
+                # Extract audio features
+                mel_spec, chroma = extract_audio_features(str(audio_path))
+                
+                # Convert to tensors and ensure proper types
+                mel_spec = torch.from_numpy(mel_spec).float()
+                chroma = torch.from_numpy(chroma).float()
+                
+                # Ensure proper shapes and normalization
+                if mel_spec.ndim == 2:
+                    mel_spec = mel_spec.unsqueeze(0)  # Add batch dimension
+                if chroma.ndim == 2:
+                    chroma = chroma.unsqueeze(0)  # Add batch dimension
+                
+                # Normalize features
+                mel_spec = (mel_spec - mel_spec.mean()) / (mel_spec.std() + 1e-6)
+                chroma = (chroma - chroma.mean()) / (chroma.std() + 1e-6)
+                
+                # Create audio dictionary
                 audio = {
-                    'mel_spec': torch.from_numpy(mel_spec).float(),
-                    'chroma': torch.from_numpy(chroma).float()
+                    'mel_spec': mel_spec,
+                    'chroma': chroma
                 }
+                
             except Exception as e:
-                logger.error(f"Error loading audio features from {audio_path}: {e}")
+                logger.warning(f"Error loading audio features from {audio_path}: {e}")
+                # Don't raise the error, just keep audio as None
         
-        return {
+        # Create sample dictionary
+        sample = {
             'image': image,
-            'video_path': video_path,
+            'video_path': str(video_path) if video_path else None,
             'audio': audio,
             'crow_id': crow_id
         }
+        
+        return sample
     
     def collate_fn(self, batch):
         """Collate function for DataLoader.
