@@ -1321,6 +1321,7 @@ class EnhancedTracker:
                 if track_id not in self.track_history:
                     self.track_history[track_id] = {
                         'history': deque(maxlen=self.max_track_history),
+                        'behaviors': deque(maxlen=self.max_behavior_history),
                         'last_valid_embedding': None,
                         'temporal_consistency': 1.0
                     }
