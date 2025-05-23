@@ -219,9 +219,9 @@ def video_test_data(tmp_path_factory):
         
         print("[DEBUG] video_test_data: processing video", video_path, "with crow_id", crow_id)
         crow_dir = base_dir / crow_id
-        images_dir = crow_dir / "images"
+        # Save images directly in crow directory (not in images/ subdirectory)
+        crow_dir.mkdir(parents=True, exist_ok=True)
         audio_dir = crow_dir / "audio"
-        images_dir.mkdir(parents=True, exist_ok=True)
         audio_dir.mkdir(exist_ok=True)
 
         # Initialize metadata for this crow
@@ -280,9 +280,9 @@ def video_test_data(tmp_path_factory):
                             print(f"[DEBUG] video_test_data: failed to extract crop for detection {det}")
                             continue
                             
-                        # Save the crop
-                        crop_np = (crop['full'].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
-                        img_path = images_dir / f"frame_{frame_num:06d}.jpg"
+                        # Save the crop directly in crow directory
+                        crop_np = (crop['full'] * 255).astype(np.uint8)
+                        img_path = crow_dir / f"frame_{frame_num:06d}.jpg"
                         cv2.imwrite(str(img_path), crop_np)
                         
                         # Update metadata
@@ -305,7 +305,7 @@ def video_test_data(tmp_path_factory):
 
         cap.release()
 
-        # If no images were saved for this crow, save up to 5 raw frames
+        # If no images were saved for this crow, save up to 5 raw frames directly in crow directory
         if img_count == 0:
             print(f"[DEBUG] video_test_data: no detections for {crow_id}, saving raw frames instead")
             cap_raw = cv2.VideoCapture(str(video_path))
@@ -314,17 +314,24 @@ def video_test_data(tmp_path_factory):
             while raw_saved < 5:
                 ret, frame = cap_raw.read()
                 if not ret:
+                    print(f"[DEBUG] video_test_data: could not read frame {frame_num} from {video_path}")
                     break
-                img_path = images_dir / f"raw_frame_{frame_num:06d}.jpg"
-                cv2.imwrite(str(img_path), frame)
-                metadata[crow_id]["images"][str(img_path)] = {
-                    "frame": frame_num,
-                    "bbox": None,
-                    "score": None
-                }
-                raw_saved += 1
+                # Save directly in crow directory
+                img_path = crow_dir / f"raw_frame_{frame_num:06d}.jpg"
+                success = cv2.imwrite(str(img_path), frame)
+                if success:
+                    print(f"[DEBUG] video_test_data: saved raw frame {img_path}")
+                    metadata[crow_id]["images"][str(img_path)] = {
+                        "frame": frame_num,
+                        "bbox": None,
+                        "score": None
+                    }
+                    raw_saved += 1
+                else:
+                    print(f"[ERROR] video_test_data: failed to save raw frame {img_path}")
                 frame_num += 1
             cap_raw.release()
+            print(f"[DEBUG] video_test_data: saved {raw_saved} raw frames for {crow_id}")
 
         # Extract audio using ffmpeg
         audio_path = audio_dir / f"{video_path.stem}.wav"
@@ -338,10 +345,15 @@ def video_test_data(tmp_path_factory):
                 "-y",  # Overwrite output file if it exists
                 str(audio_path)
             ], check=True, capture_output=True)
+            print(f"[DEBUG] video_test_data: successfully extracted audio to {audio_path}")
         except subprocess.CalledProcessError as e:
             print("[DEBUG] video_test_data: ffmpeg extraction failed for", video_path, "stderr:", e.stderr.decode())
             continue
 
+    # Verify we have valid data
+    total_images = sum(len(crow_data["images"]) for crow_data in metadata.values())
+    print(f"[DEBUG] video_test_data: created {total_images} total images across {len(metadata)} crows")
+    
     # Save metadata file
     metadata_path = base_dir / "metadata.json"
     with open(metadata_path, "w") as f:
@@ -349,7 +361,7 @@ def video_test_data(tmp_path_factory):
 
     return {
         "base_dir": base_dir,
-        "valid": valid_videos_found,
+        "valid": valid_videos_found and total_images > 0,  # Only valid if we have images
         "metadata": metadata
     }
 
