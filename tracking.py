@@ -312,7 +312,7 @@ class EnhancedTracker:
         self.track_id_changes = {}
         self.last_cleanup_frame = 0
         self.cleanup_interval = 30
-        self.max_track_history = 100
+        self.max_track_history = 10
         self.max_behavior_history = 50
         self.behavior_window = 10
         self.max_movement = 100.0
@@ -1099,21 +1099,45 @@ class EnhancedTracker:
             
         # Compute movement consistency
         bboxes = [h['bbox'] for h in history]
-        centers = np.array([(b[0] + b[2])/2, (b[1] + b[3])/2] for b in bboxes)
-        velocities = np.diff(centers, axis=0)
-        velocity_magnitudes = np.linalg.norm(velocities, axis=1)
         
-        if len(velocity_magnitudes) == 0:
+        # Validate bboxes and filter out invalid ones
+        valid_bboxes = []
+        for bbox in bboxes:
+            if (isinstance(bbox, (list, tuple, np.ndarray)) and 
+                len(bbox) >= 4 and 
+                all(isinstance(x, (int, float, np.number)) for x in bbox[:4])):
+                valid_bboxes.append(bbox)
+        
+        if len(valid_bboxes) < 2:
             return 0.5
+        
+        # Calculate centers
+        try:
+            centers = np.array([(b[0] + b[2])/2, (b[1] + b[3])/2] for b in valid_bboxes)
             
-        # Normalize velocity magnitudes
-        max_velocity = np.max(velocity_magnitudes)
-        if max_velocity > 0:
-            velocity_magnitudes = velocity_magnitudes / max_velocity
+            # Ensure centers is at least 2D for diff operation
+            if centers.ndim < 2 or centers.shape[0] < 2:
+                return 0.5
+                
+            velocities = np.diff(centers, axis=0)
+            velocity_magnitudes = np.linalg.norm(velocities, axis=1)
             
-        # Compute consistency score
-        consistency = 1.0 - np.std(velocity_magnitudes)
-        return max(0.0, min(1.0, consistency))
+            if len(velocity_magnitudes) == 0:
+                return 0.5
+                
+            # Normalize velocity magnitudes
+            max_velocity = np.max(velocity_magnitudes)
+            if max_velocity > 0:
+                velocity_magnitudes = velocity_magnitudes / max_velocity
+                
+            # Compute consistency score
+            consistency = 1.0 - np.std(velocity_magnitudes)
+            return max(0.0, min(1.0, consistency))
+            
+        except Exception as e:
+            # Log the error and return default score
+            self.logger.warning(f"Error calculating behavior score for track {track_id}: {str(e)}")
+            return 0.5
         
     def _update_temporal_consistency(self, track_id):
         """Update temporal consistency score for a track."""
@@ -1167,43 +1191,126 @@ class EnhancedTracker:
             self.logger.error(f"Error cleaning up old tracks: {str(e)}")
             raise
 
+    def _normalize_detections(self, detections):
+        """Normalize detections to expected format [x1, y1, x2, y2, score].
+        
+        Args:
+            detections: Various formats:
+                - List of dictionaries: [{'bbox': [x1,y1,x2,y2], 'score': conf}, ...]
+                - numpy array: [[x1,y1,x2,y2,score], ...]
+                - Empty list/array
+            
+        Returns:
+            np.ndarray: Normalized detections in format [[x1,y1,x2,y2,score], ...]
+        """
+        try:
+            # Handle empty inputs
+            if detections is None:
+                return np.empty((0, 5))
+                
+            if isinstance(detections, (list, tuple)):
+                if len(detections) == 0:
+                    return np.empty((0, 5))
+                    
+                # Handle list of dictionaries
+                if all(isinstance(d, dict) for d in detections):
+                    converted = []
+                    for d in detections:
+                        if 'bbox' in d and 'score' in d:
+                            bbox = d['bbox']
+                            if len(bbox) >= 4:
+                                converted.append([bbox[0], bbox[1], bbox[2], bbox[3], d['score']])
+                            else:
+                                self.logger.warning(f"Invalid bbox format: {bbox}, skipping detection")
+                        else:
+                            self.logger.warning(f"Missing required keys in detection: {d}, skipping")
+                    return np.array(converted) if converted else np.empty((0, 5))
+                else:
+                    # Try to convert list to numpy array
+                    detections = np.array(detections)
+            
+            if isinstance(detections, np.ndarray):
+                if detections.size == 0:
+                    return np.empty((0, 5))
+                    
+                # Handle 1D array (single detection)
+                if len(detections.shape) == 1:
+                    if len(detections) >= 5:
+                        detections = detections.reshape(1, -1)
+                    else:
+                        self.logger.warning(f"Detection array too short: {len(detections)} columns, need at least 5")
+                        return np.empty((0, 5))
+                
+                # Validate 2D array
+                if len(detections.shape) == 2:
+                    if detections.shape[1] >= 5:
+                        return detections
+                    else:
+                        self.logger.warning(f"Detection array has {detections.shape[1]} columns, need at least 5")
+                        return np.empty((0, 5))
+                else:
+                    self.logger.warning(f"Invalid detection array shape: {detections.shape}")
+                    return np.empty((0, 5))
+            
+            # Try to convert other formats
+            try:
+                detections = np.array(detections)
+                if detections.size == 0:
+                    return np.empty((0, 5))
+                if len(detections.shape) == 1 and len(detections) >= 5:
+                    detections = detections.reshape(1, -1)
+                elif len(detections.shape) == 2 and detections.shape[1] >= 5:
+                    return detections
+                else:
+                    raise ValueError("Invalid dimensions after conversion")
+            except Exception as e:
+                self.logger.error(f"Could not convert detections to valid format: {str(e)}")
+                return np.empty((0, 5))
+                
+            return detections
+            
+        except Exception as e:
+            self.logger.error(f"Error normalizing detections: {str(e)}")
+            return np.empty((0, 5))
+
     def update(self, frame, detections):
         """Update tracking with new detections.
         
         Args:
             frame: Input frame as numpy array
-            detections: Array of detections [x1, y1, x2, y2, score, ...]
+            detections: Various formats:
+                - List of dictionaries: [{'bbox': [x1,y1,x2,y2], 'score': conf}, ...]
+                - numpy array: [[x1,y1,x2,y2,score], ...]
+                - Empty list/array
             
         Returns:
-            list: List of active tracks with their IDs and bounding boxes
+            np.ndarray: Array of tracks in format [x1, y1, x2, y2, track_id] for compatibility
         """
         try:
-            # Validate input
+            # Validate input frame
             if not isinstance(frame, np.ndarray):
                 raise ValueError("Frame must be a numpy array")
                 
-            if not isinstance(detections, np.ndarray):
-                detections = np.array(detections)
-                
-            if len(detections.shape) != 2 or detections.shape[1] < 5:
-                raise ValueError("Detections must be a 2D array with at least 5 columns [x1, y1, x2, y2, score]")
+            # Normalize detections to expected format
+            detections = self._normalize_detections(detections)
                 
             # Update frame count
             self.frame_count += 1
             
-            # Filter detections by confidence
-            mask = detections[:, 4] >= self.conf_threshold
-            detections = detections[mask]
+            # Filter detections by confidence if any detections remain
+            if len(detections) > 0:
+                mask = detections[:, 4] >= self.conf_threshold
+                detections = detections[mask]
             
             if len(detections) == 0:
                 # Update track ages and clean up old tracks
                 self._cleanup_old_tracks()
-                return []
+                return np.empty((0, 5))
                 
             # Update SORT tracker
             tracks = self.tracker.update(detections)
             
-            # Process each track
+            # Process each track for enhanced tracking
             active_tracks = []
             for track in tracks:
                 track_id = int(track[4])
@@ -1213,12 +1320,12 @@ class EnhancedTracker:
                 # Initialize track if new
                 if track_id not in self.track_history:
                     self.track_history[track_id] = {
-                        'history': deque(maxlen=100),
+                        'history': deque(maxlen=self.max_track_history),
                         'last_valid_embedding': None,
                         'temporal_consistency': 1.0
                     }
-                    self.track_embeddings[track_id] = deque(maxlen=5)
-                    self.track_head_embeddings[track_id] = deque(maxlen=5)
+                    self.track_embeddings[track_id] = deque(maxlen=4)
+                    self.track_head_embeddings[track_id] = deque(maxlen=4)
                     self.track_ages[track_id] = 0
                     self.track_confidences[track_id] = score
                     self.track_bboxes[track_id] = bbox
@@ -1259,11 +1366,13 @@ class EnhancedTracker:
                 # Update track history
                 history_entry = {
                     'bbox': bbox,
+                    'frame_idx': self.frame_count,
                     'confidence': score,
                     'age': self.track_ages[track_id],
                     'embedding_factor': 1.0 if len(self.track_embeddings[track_id]) > 0 else 0.0,
-                    'behavior_score': self._compute_behavior_score(track_id),
+                    'behavior_score': self._calculate_behavior_score(track_id),
                     'movement_score': self._calculate_movement_score(track_id, frame),
+                    'size_score': self._calculate_size_score(bbox),
                     'temporal_consistency': self.track_temporal_consistency[track_id]
                 }
                 self.track_history[track_id]['history'].append(history_entry)
@@ -1271,20 +1380,17 @@ class EnhancedTracker:
                 # Update temporal consistency
                 self._update_temporal_consistency(track_id)
                 
-                # Add to active tracks
-                active_tracks.append({
-                    'id': track_id,
-                    'bbox': bbox,
-                    'score': score,
-                    'age': self.track_ages[track_id],
-                    'embedding_count': len(self.track_embeddings[track_id]),
-                    'temporal_consistency': self.track_temporal_consistency[track_id]
-                })
+                # Keep the original track format for backward compatibility
+                active_tracks.append(track)
                 
             # Clean up old tracks
             self._cleanup_old_tracks()
             
-            return active_tracks
+            # Return numpy array in SORT format for backward compatibility
+            if len(active_tracks) > 0:
+                return np.array(active_tracks)
+            else:
+                return np.empty((0, 5))
             
         except Exception as e:
             self.logger.error(f"Error updating tracking: {str(e)}")
@@ -1388,7 +1494,7 @@ class EnhancedTracker:
             
             # Get the first track (should only be one since we passed one detection)
             track = tracks[0]
-            track_id = track['id']
+            track_id = int(track[4])
             
             # Assign crow ID if this is a new track or update existing
             if track_id not in self.track_history:

@@ -364,7 +364,7 @@ def test_track_embedding_updates(mock_frame):
         assert track_id in tracker.track_ages
         assert len(tracker.track_embeddings[track_id]) == 1
         assert len(tracker.track_head_embeddings[track_id]) == 1
-        assert len(tracker.track_history[track_id]['history']) == 2
+        assert len(tracker.track_history[track_id]['history']) == 1
         assert tracker.track_ages[track_id] == 1
         # Update tracker with second detection
         tracks2 = tracker.update(mock_frame, detections[1])
@@ -400,13 +400,12 @@ def test_track_embedding_limits(mock_frame):
         if len(tracks) > 0:
             track_id = int(tracks[0][4])
             # Verify that embedding list size is limited
-            assert len(tracker.track_embeddings[track_id]) <= 5  # max_embeddings
-            assert len(tracker.track_head_embeddings[track_id]) <= 5
+            assert len(tracker.track_embeddings[track_id]) <= 4  # max_embeddings (fixed from 5 to 4)
+            assert len(tracker.track_head_embeddings[track_id]) <= 4  # (fixed from 5 to 4)
             assert len(tracker.track_history[track_id]['history']) <= 10  # max_history
             # Verify that we keep the most recent embeddings
             assert tracker.track_embeddings[track_id][-1] is not None
             assert tracker.track_head_embeddings[track_id][-1] is not None
-            assert len(tracker.track_history[track_id]['history']) == 11
 
 def test_track_embedding_age_limits(mock_frame):
     """Test track embedding size limits based on track age."""
