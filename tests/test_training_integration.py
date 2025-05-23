@@ -121,6 +121,10 @@ class TestTrainingIntegration(unittest.TestCase):
             
     def test_training_dataset_statistics_logging(self):
         """Test that training statistics properly reflect manual labeling."""
+        # Create isolated test directory
+        test_dir = os.path.join(self.temp_dir.name, "test_stats_logging")
+        os.makedirs(test_dir, exist_ok=True)
+        
         # Create a more realistic labeling scenario with actual files
         test_labels = [
             ("img1.jpg", "crow", 0.95),
@@ -132,29 +136,38 @@ class TestTrainingIntegration(unittest.TestCase):
             ("img7.jpg", "not_sure", 0.80)
         ]
         
-        # Create test files and apply labels
-        for img_path, label, confidence in test_labels:
-            # Create the test file
+        # Create test files and apply labels in our isolated directory
+        test_paths = []
+        for img_name, label, confidence in test_labels:
+            img_path = os.path.join(test_dir, img_name)
             Path(img_path).touch()
-            try:
-                add_image_label(img_path, label, confidence=confidence)
-            finally:
-                # Clean up test file
-                if os.path.exists(img_path):
-                    os.remove(img_path)
+            test_paths.append(img_path)
+            add_image_label(img_path, label, confidence=confidence)
         
-        # Get training statistics
-        stats = get_training_data_stats()
-        
-        # Verify counts match expected values
-        self.assertEqual(stats['crow']['count'], 3)
-        self.assertEqual(stats['not_a_crow']['count'], 2)  
-        self.assertEqual(stats['not_sure']['count'], 2)
-        self.assertEqual(stats['total_labeled'], 7)
-        self.assertEqual(stats['total_excluded'], 2)  # Only not_a_crow should be excluded
+        try:
+            # Get training statistics from our test directory
+            stats = get_training_data_stats(from_directory=test_dir)
+            
+            # Verify counts match expected values
+            self.assertEqual(stats['crow']['count'], 3)
+            self.assertEqual(stats['not_a_crow']['count'], 2)  
+            self.assertEqual(stats['not_sure']['count'], 2)
+            self.assertEqual(stats['total_labeled'], 7)
+            self.assertEqual(stats['total_excluded'], 2)  # Only not_a_crow should be excluded
+        finally:
+            # Clean up test files
+            for test_path in test_paths:
+                if os.path.exists(test_path):
+                    os.remove(test_path)
+            if os.path.exists(test_dir):
+                shutil.rmtree(test_dir)
         
     def test_innocent_until_proven_guilty_filtering(self):
         """Test the core philosophy: include unless explicitly marked as not_a_crow."""
+        # Create isolated test directory
+        test_dir = os.path.join(self.temp_dir.name, "test_philosophy")
+        os.makedirs(test_dir, exist_ok=True)
+        
         test_scenarios = [
             # (label, should_be_included_in_training)
             (None, True),           # Unlabeled - innocent until proven guilty
@@ -166,7 +179,7 @@ class TestTrainingIntegration(unittest.TestCase):
         test_files = []
         try:
             for i, (label, should_include) in enumerate(test_scenarios):
-                img_path = f"test_scenario_{i}.jpg"
+                img_path = os.path.join(test_dir, f"test_scenario_{i}.jpg")
                 test_files.append(img_path)
                 
                 # Create test file
@@ -191,31 +204,40 @@ class TestTrainingIntegration(unittest.TestCase):
             for img_path in test_files:
                 if os.path.exists(img_path):
                     os.remove(img_path)
+            if os.path.exists(test_dir):
+                shutil.rmtree(test_dir)
                     
     def test_manual_labeling_affects_training_exclusions(self):
         """Test that manual labeling actually changes what gets excluded from training."""
+        # Create isolated test directory
+        test_dir = os.path.join(self.temp_dir.name, "test_exclusions")
+        os.makedirs(test_dir, exist_ok=True)
+        
         # Start with some images
         initial_images = ["good1.jpg", "good2.jpg", "false_pos1.jpg", "false_pos2.jpg"]
         
-        # Create test files
-        for img_path in initial_images:
+        # Create test files in our isolated directory
+        test_paths = []
+        for img_name in initial_images:
+            img_path = os.path.join(test_dir, img_name)
             Path(img_path).touch()
+            test_paths.append(img_path)
         
         try:
             # Initially, no exclusions (all images are "innocent")
-            stats = get_training_data_stats()
+            stats = get_training_data_stats(from_directory=test_dir)
             initial_excluded = stats.get('total_excluded', 0)
             
             # Mark some as false positives
-            add_image_label("false_pos1.jpg", "not_a_crow", confidence=0.90)
-            add_image_label("false_pos2.jpg", "not_a_crow", confidence=0.85)
+            add_image_label(test_paths[2], "not_a_crow", confidence=0.90)  # false_pos1.jpg
+            add_image_label(test_paths[3], "not_a_crow", confidence=0.85)  # false_pos2.jpg
             
             # Confirm some as good crows
-            add_image_label("good1.jpg", "crow", confidence=0.95)
-            add_image_label("good2.jpg", "crow", confidence=0.93)
+            add_image_label(test_paths[0], "crow", confidence=0.95)  # good1.jpg
+            add_image_label(test_paths[1], "crow", confidence=0.93)  # good2.jpg
             
             # Check that exclusions increased
-            updated_stats = get_training_data_stats()
+            updated_stats = get_training_data_stats(from_directory=test_dir)
             final_excluded = updated_stats.get('total_excluded', 0)
             
             self.assertGreater(final_excluded, initial_excluded, 
@@ -224,10 +246,12 @@ class TestTrainingIntegration(unittest.TestCase):
                             "Should exclude exactly 2 false positives")
         finally:
             # Clean up test files
-            for img_path in initial_images:
+            for img_path in test_paths:
                 if os.path.exists(img_path):
                     os.remove(img_path)
-                        
+            if os.path.exists(test_dir):
+                shutil.rmtree(test_dir)
+            
     @patch('train_triplet_resnet.logger')
     def test_training_dataset_logging_includes_manual_stats(self, mock_logger):
         """Test that training initialization logs manual labeling statistics."""

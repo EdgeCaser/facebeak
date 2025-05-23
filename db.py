@@ -639,52 +639,55 @@ def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_
             conn.close()
 
 def get_unlabeled_images(limit=20, from_directory=None):
-    """Get unlabeled images for review."""
-    conn = None
+    """
+    Get a list of unlabeled crow images from the crops directory.
+    
+    Args:
+        limit (int): Maximum number of images to return
+        from_directory (str, optional): Specific directory to scan instead of default crow_crops
+        
+    Returns:
+        list: List of image file paths that don't have labels in the database
+    """
     try:
+        # Use specified directory or default to crow_crops
+        search_dir = from_directory if from_directory else "crow_crops"
+        
+        if not os.path.exists(search_dir):
+            logger.warning(f"Directory {search_dir} does not exist")
+            return []
+        
+        # Get all image files from the directory
+        image_files = []
+        for root, dirs, files in os.walk(search_dir):
+            for file in files:
+                if file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    # Normalize path separators for consistent matching
+                    full_path = os.path.join(root, file).replace('\\', '/')
+                    image_files.append(full_path)
+        
+        # Get already labeled images from database (only for images in our directory)
         conn = get_connection()
         cursor = conn.cursor()
         
-        # If no directory specified, scan the default crop directories
-        if from_directory is None:
-            crop_dirs = ['crow_crops', 'crow_crops/crows']
+        if image_files:
+            placeholders = ','.join('?' * len(image_files))
+            cursor.execute(f"SELECT image_path FROM image_labels WHERE image_path IN ({placeholders})", image_files)
+            labeled_paths = {row[0] for row in cursor.fetchall()}
         else:
-            crop_dirs = [from_directory]
-            
-        unlabeled_images = []
+            labeled_paths = set()
         
-        for crop_dir in crop_dirs:
-            if not os.path.exists(crop_dir):
-                continue
-                
-            # Find all image files
-            for root, dirs, files in os.walk(crop_dir):
-                for file in files:
-                    if file.lower().endswith(('.jpg', '.jpeg', '.png')):
-                        image_path = os.path.join(root, file)
-                        
-                        # Check if already labeled
-                        cursor.execute('SELECT id FROM image_labels WHERE image_path = ?', (image_path,))
-                        if not cursor.fetchone():
-                            unlabeled_images.append(image_path)
-                            
-                        if len(unlabeled_images) >= limit:
-                            break
-                            
-                if len(unlabeled_images) >= limit:
-                    break
-                    
-        # Shuffle to get random selection
+        # Filter out labeled images
+        unlabeled = [path for path in image_files if path not in labeled_paths]
+        
+        # Shuffle and limit results
         import random
-        random.shuffle(unlabeled_images)
-        return unlabeled_images[:limit]
+        random.shuffle(unlabeled)
+        return unlabeled[:limit]
         
     except Exception as e:
         logger.error(f"Error getting unlabeled images: {e}")
         return []
-    finally:
-        if conn:
-            conn.close()
 
 def get_image_label(image_path):
     """Get the label for a specific image."""
@@ -721,96 +724,131 @@ def remove_from_training_data(image_path):
     """Mark an image as not suitable for training data."""
     return add_image_label(image_path, 'not_a_crow', is_training_data=False)
 
-def get_training_data_stats():
-    """Get statistics about labeled training data."""
-    conn = None
+def get_training_data_stats(from_directory=None):
+    """
+    Get statistics about manually labeled training data.
+    
+    Args:
+        from_directory (str, optional): Specific directory to scan instead of default crow_crops
+        
+    Returns:
+        dict: Statistics about labeled images
+    """
     try:
+        # Use specified directory or default to crow_crops
+        search_dir = from_directory if from_directory else "crow_crops"
+        
+        # Get all image files from the directory
+        all_images = set()
+        if os.path.exists(search_dir):
+            for root, dirs, files in os.walk(search_dir):
+                for file in files:
+                    if file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        all_images.add(os.path.join(root, file))
+        
         conn = get_connection()
         cursor = conn.cursor()
         
-        # Get stats for all labeled images (both training and excluded)
-        cursor.execute('''
-            SELECT 
-                label,
-                COUNT(*) as count,
-                AVG(confidence) as avg_confidence
-            FROM image_labels 
-            GROUP BY label
-        ''')
-        
-        stats = {}
-        for row in cursor.fetchall():
-            stats[row[0]] = {
-                'count': row[1],
-                'avg_confidence': row[2] if row[2] else 0
+        # Get all labels for images in our search directory
+        if all_images:
+            placeholders = ','.join('?' * len(all_images))
+            cursor.execute(f"""
+                SELECT label, confidence, is_training_data 
+                FROM image_labels 
+                WHERE image_path IN ({placeholders})
+            """, list(all_images))
+        else:
+            # If no directory or images, return empty stats
+            return {
+                'crow': {'count': 0, 'avg_confidence': 0.0},
+                'not_a_crow': {'count': 0, 'avg_confidence': 0.0},
+                'not_sure': {'count': 0, 'avg_confidence': 0.0},
+                'total_labeled': 0,
+                'total_excluded': 0
             }
-            
-        # Get total counts
-        cursor.execute('SELECT COUNT(*) FROM image_labels')
-        stats['total_labeled'] = cursor.fetchone()[0]
         
-        cursor.execute('SELECT COUNT(*) FROM image_labels WHERE is_training_data = 0')
-        stats['total_excluded'] = cursor.fetchone()[0]
+        # Process results
+        stats = {
+            'crow': {'count': 0, 'total_confidence': 0.0},
+            'not_a_crow': {'count': 0, 'total_confidence': 0.0},
+            'not_sure': {'count': 0, 'total_confidence': 0.0},
+            'total_labeled': 0,
+            'total_excluded': 0
+        }
+        
+        for label, confidence, is_training_data in cursor.fetchall():
+            if label in stats:
+                stats[label]['count'] += 1
+                stats[label]['total_confidence'] += confidence or 0.0
+                stats['total_labeled'] += 1
+                
+                if not is_training_data:
+                    stats['total_excluded'] += 1
+        
+        # Calculate averages
+        for label in ['crow', 'not_a_crow', 'not_sure']:
+            count = stats[label]['count']
+            if count > 0:
+                stats[label]['avg_confidence'] = stats[label]['total_confidence'] / count
+            else:
+                stats[label]['avg_confidence'] = 0.0
+            # Remove total_confidence as it's not needed in final output
+            del stats[label]['total_confidence']
         
         return stats
         
     except Exception as e:
         logger.error(f"Error getting training data stats: {e}")
-        return {}
-    finally:
-        if conn:
-            conn.close()
+        return {
+            'crow': {'count': 0, 'avg_confidence': 0.0},
+            'not_a_crow': {'count': 0, 'avg_confidence': 0.0},
+            'not_sure': {'count': 0, 'avg_confidence': 0.0},
+            'total_labeled': 0,
+            'total_excluded': 0
+        }
 
-def get_training_suitable_images(directory=None):
-    """Get images that are suitable for training (not labeled as 'not_a_crow')."""
-    conn = None
+def get_training_suitable_images(from_directory=None):
+    """
+    Get images suitable for training (not explicitly marked as not_a_crow).
+    Implements "innocent until proven guilty" philosophy.
+    
+    Args:
+        from_directory (str, optional): Specific directory to scan instead of default crow_crops
+        
+    Returns:
+        list: List of image paths suitable for training
+    """
     try:
+        # Use specified directory or default to crow_crops
+        search_dir = from_directory if from_directory else "crow_crops"
+        
+        if not os.path.exists(search_dir):
+            logger.warning(f"Directory {search_dir} does not exist")
+            return []
+        
+        # Get all image files from the directory
+        all_images = []
+        for root, dirs, files in os.walk(search_dir):
+            for file in files:
+                if file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    all_images.append(os.path.join(root, file))
+        
+        # Get excluded images (labeled as not_a_crow)
         conn = get_connection()
         cursor = conn.cursor()
+        cursor.execute("""
+            SELECT image_path FROM image_labels 
+            WHERE label = 'not_a_crow'
+        """)
+        excluded_paths = {row[0] for row in cursor.fetchall()}
         
-        # If no directory specified, scan the default crop directories
-        if directory is None:
-            crop_dirs = ['crow_crops', 'crow_crops/crows']
-        else:
-            crop_dirs = [directory]
-            
-        suitable_images = []
-        
-        for crop_dir in crop_dirs:
-            if not os.path.exists(crop_dir):
-                continue
-                
-            # Find all image files
-            for root, dirs, files in os.walk(crop_dir):
-                for file in files:
-                    if file.lower().endswith(('.jpg', '.jpeg', '.png')):
-                        image_path = os.path.join(root, file)
-                        
-                        # Check if this image is labeled as not suitable for training
-                        cursor.execute('''
-                            SELECT label, is_training_data 
-                            FROM image_labels 
-                            WHERE image_path = ?
-                        ''', (image_path,))
-                        
-                        result = cursor.fetchone()
-                        if result:
-                            label, is_training_data = result
-                            # Include only if it's marked as training data and not labeled as 'not_a_crow'
-                            if is_training_data and label != 'not_a_crow':
-                                suitable_images.append(image_path)
-                        else:
-                            # If not labeled, assume it's suitable (for backward compatibility)
-                            suitable_images.append(image_path)
-                            
-        return suitable_images
+        # Return images that are not excluded
+        suitable = [path for path in all_images if path not in excluded_paths]
+        return suitable
         
     except Exception as e:
         logger.error(f"Error getting training suitable images: {e}")
         return []
-    finally:
-        if conn:
-            conn.close()
 
 def is_image_training_suitable(image_path):
     """Check if a specific image is suitable for training."""
