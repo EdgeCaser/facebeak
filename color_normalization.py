@@ -118,17 +118,46 @@ class AdaptiveNormalizer(ColorNormalizer):
         
         return normalized
     
-    def normalize(self, img: np.ndarray) -> np.ndarray:
+    def normalize(self, img: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
         """Normalize an image using adaptive color normalization.
         
         Args:
-            img: Input image as numpy array of shape (H, W, 3) with dtype uint8
+            img: Input image as either:
+                - numpy array of shape (H, W, 3) with dtype uint8
+                - torch.Tensor of shape (C, H, W) or (B, C, H, W) with values in [0, 1]
             
         Returns:
-            Normalized image as numpy array of same shape and dtype
+            Normalized image in the same format as input
         """
+        # Handle tensor input
+        if isinstance(img, torch.Tensor):
+            # Convert tensor to numpy for normalization
+            if img.dim() == 4:  # Batch of images
+                # Convert from (B, C, H, W) to (B, H, W, C)
+                img_np = img.permute(0, 2, 3, 1).cpu().numpy()
+                # Scale from [0, 1] to [0, 255]
+                img_np = (img_np * 255).astype(np.uint8)
+                # Normalize each image in the batch
+                normalized = np.stack([self.normalize(img) for img in img_np])
+                # Convert back to tensor format
+                normalized = torch.from_numpy(normalized).float() / 255.0
+                normalized = normalized.permute(0, 3, 1, 2)  # Back to (B, C, H, W)
+                return normalized.to(img.device)
+            else:  # Single image
+                # Convert from (C, H, W) to (H, W, C)
+                img_np = img.permute(1, 2, 0).cpu().numpy()
+                # Scale from [0, 1] to [0, 255]
+                img_np = (img_np * 255).astype(np.uint8)
+                # Normalize
+                normalized = self.normalize(img_np)
+                # Convert back to tensor format
+                normalized = torch.from_numpy(normalized).float() / 255.0
+                normalized = normalized.permute(2, 0, 1)  # Back to (C, H, W)
+                return normalized.to(img.device)
+        
+        # Handle numpy array input
         if not isinstance(img, np.ndarray):
-            raise AttributeError("Input must be a numpy array")
+            raise AttributeError("Input must be a numpy array or torch.Tensor")
         if img.size == 0:
             raise IndexError("Input array is empty")
         if len(img.shape) != 3 or img.shape[2] != 3:

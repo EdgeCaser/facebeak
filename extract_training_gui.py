@@ -6,8 +6,8 @@ import os
 import cv2
 import numpy as np
 from tqdm import tqdm
-from detection import detect_crows_parallel as parallel_detect_birds
-from tracking import extract_crow_image, load_faster_rcnn
+from detection import detect_crows_parallel
+from tracking import extract_normalized_crow_crop, load_faster_rcnn
 from crow_tracking import CrowTracker
 import torch
 from pathlib import Path
@@ -460,7 +460,7 @@ class CrowExtractorGUI:
             
             # Detect crows with timeout
             try:
-                detections = parallel_detect_birds(
+                detections = detect_crows_parallel(
                     [frame],
                     score_threshold=self.min_confidence_var.get(),
                     multi_view_yolo=self.mv_yolo_var.get(),

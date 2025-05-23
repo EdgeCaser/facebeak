@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torchvision
 import logging
+import torchvision.models as models
 
 class AudioFeatureExtractor(nn.Module):
     def __init__(self, input_dim=128, hidden_dim=256, output_dim=256):
@@ -203,3 +204,23 @@ class CrowResNetEmbedder(nn.Module):
         x = self.fc(x)
         x = nn.functional.normalize(x, p=2, dim=1)  # L2 normalize for triplet loss
         return x 
+
+def create_model(embedding_dim=512, device=None):
+    """Create and return a ResNet18 model for feature extraction.
+    
+    Args:
+        embedding_dim: Dimension of the output embedding
+        device: Device to place the model on
+        
+    Returns:
+        CrowResNetEmbedder: Model for feature extraction
+    """
+    try:
+        model = CrowResNetEmbedder(embedding_dim=embedding_dim, device=device)
+        if device is not None:
+            model = model.to(device)
+        model.eval()  # Set to evaluation mode
+        return model
+    except Exception as e:
+        logging.error(f"Failed to create model: {str(e)}")
+        raise 

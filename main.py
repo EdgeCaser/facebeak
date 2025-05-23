@@ -1,7 +1,7 @@
 import os
 import argparse
 import sys
-from detection import detect_crows, detect_crows_cascade, detect_crows_parallel
+from detection import detect_crows_legacy, detect_crows_cascade, detect_crows_parallel
 from tracking import assign_crow_ids, Sort
 from utils import extract_frames, save_video_with_labels
 from db import get_all_crows

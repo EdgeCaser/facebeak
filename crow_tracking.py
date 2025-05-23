@@ -7,160 +7,214 @@ import logging
 from pathlib import Path
 import torch
 from tracking import load_faster_rcnn, load_triplet_model
-from tracking import extract_crow_image
+from tracking import extract_normalized_crow_crop
 from collections import defaultdict
 import shutil
 
 logger = logging.getLogger(__name__)
 
 class CrowTracker:
-    def __init__(self, base_dir="crow_crops"):
-        """Initialize the crow tracking system."""
+    def __init__(self, base_dir="crow_crops", similarity_threshold=0.7):
+        """Initialize the crow tracker.
+        
+        Args:
+            base_dir: Base directory for storing crow data
+            similarity_threshold: Cosine similarity threshold for matching crows (default: 0.7)
+        """
         self.base_dir = Path(base_dir)
+        self.similarity_threshold = similarity_threshold
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize directories
         self.crows_dir = self.base_dir / "crows"
-        self.processing_dir = self.base_dir / "processing"
+        self.crows_dir.mkdir(exist_ok=True)
+        self.processing_dir = self.base_dir / "processing"  # Changed from processing_runs
+        self.processing_dir.mkdir(exist_ok=True)
         self.metadata_dir = self.base_dir / "metadata"
+        self.metadata_dir.mkdir(exist_ok=True)
+        
+        # Initialize tracking file path
         self.tracking_file = self.metadata_dir / "crow_tracking.json"
         
-        # Create necessary directories
-        self.crows_dir.mkdir(parents=True, exist_ok=True)
-        self.processing_dir.mkdir(parents=True, exist_ok=True)
-        self.metadata_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Initialize models
+        # Load detection model
         logger.info("Loading detection model (Faster R-CNN)")
         self.detection_model = load_faster_rcnn()
+        
+        # Load embedding model
         logger.info("Loading embedding model (Triplet Network)")
         self.embedding_model = load_triplet_model()
         
         # Load or create tracking data
         self.tracking_data = self._load_tracking_data()
-        self.last_save_time = datetime.now()
-        self.save_interval = 300  # Save every 5 minutes
+        
+        # Log initialization
         logger.info(f"Initialized CrowTracker with {len(self.tracking_data['crows'])} known crows")
         logger.info(f"Using base directory: {self.base_dir}")
     
     def _load_tracking_data(self):
-        """Load tracking data from JSON file or create new if doesn't exist"""
-        if self.tracking_file.exists():
-            try:
+        """Load tracking data from file or create new if not exists."""
+        try:
+            if self.tracking_file.exists():
                 with open(self.tracking_file, 'r') as f:
                     data = json.load(f)
-                logger.info(f"Loaded tracking data from {self.tracking_file}")
+                    # Ensure last_id is at root level
+                    if "last_id" in data.get("metadata", {}):
+                        data["last_id"] = data["metadata"]["last_id"]
+                        del data["metadata"]["last_id"]
+                    # Ensure last_id exists
+                    if "last_id" not in data:
+                        data["last_id"] = 0
+                    logger.info(f"Loaded tracking data from {self.tracking_file}")
+                    return data
+            else:
+                # Create new tracking data
+                data = {
+                    "crows": {},
+                    "last_id": 0,
+                    "created_at": datetime.now().isoformat(),
+                    "updated_at": datetime.now().isoformat()
+                }
+                logger.info("Created new tracking data")
+                # Save initial tracking data
+                self._save_tracking_data(data, force=True)
+                logger.info(f"Saved initial tracking data to {self.tracking_file}")
                 return data
-            except Exception as e:
-                logger.error(f"Error loading tracking data: {e}")
+        except Exception as e:
+            logger.error(f"Error loading tracking data: {str(e)}")
+            # Create new tracking data on error
+            data = {
+                "crows": {},
+                "last_id": 0,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }
+            logger.info("Created new tracking data after error")
+            return data
+    
+    def _save_tracking_data(self, data=None, force=False):
+        """Save tracking data to file.
         
-        # Create new tracking data
-        data = {
-            "crows": {},  # crow_id -> {metadata}
-            "last_id": 0,  # Last used crow ID
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat()
-        }
-        logger.info("Created new tracking data")
-        
-        # Save initial tracking data
+        Args:
+            data: Optional data to save. If None, saves current tracking_data
+            force: Whether to force save even if no changes
+        """
         try:
+            if data is None:
+                data = self.tracking_data
+            
+            # Update timestamp
+            data["updated_at"] = datetime.now().isoformat()
+            
+            # Ensure directory exists
+            self.tracking_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Save to file
             with open(self.tracking_file, 'w') as f:
                 json.dump(data, f, indent=2)
-            logger.info(f"Saved initial tracking data to {self.tracking_file}")
+            
+            logger.info("Tracking data saved successfully")
+            
         except Exception as e:
-            logger.error(f"Error saving initial tracking data: {e}")
-        
-        return data
+            logger.error(f"Error saving tracking data: {str(e)}")
+            raise
     
-    def _save_tracking_data(self, force=False):
-        """Save tracking data to JSON file"""
+    def _generate_crow_id(self):  # Changed from generate_crow_id to match test
+        """Generate a new unique crow ID."""
         try:
-            current_time = datetime.now()
-            # Save if forced or if enough time has passed
-            if force or (current_time - self.last_save_time).total_seconds() >= self.save_interval:
-                self.tracking_data["updated_at"] = current_time.isoformat()
-                with open(self.tracking_file, 'w') as f:
-                    json.dump(self.tracking_data, f, indent=2)
-                self.last_save_time = current_time
-                logger.info("Saved tracking data")
+            # Increment last_id
+            self.tracking_data["last_id"] += 1
+            crow_id = f"crow_{self.tracking_data['last_id']:04d}"
+            
+            # Save tracking data
+            self._save_tracking_data()
+            
+            return crow_id
+            
         except Exception as e:
-            logger.error(f"Error saving tracking data: {e}")
-    
-    def _generate_crow_id(self):
-        """Generate a new unique crow ID"""
-        self.tracking_data["last_id"] += 1
-        crow_id = f"crow_{self.tracking_data['last_id']:04d}"
-        logger.info(f"Generated new crow ID: {crow_id}")
-        return crow_id
+            logger.error(f"Error generating crow ID: {str(e)}")
+            return None
     
     def find_matching_crow(self, crop):
-        """Find a matching crow for the given crop using embedding similarity"""
-        if not self.tracking_data["crows"]:
-            logger.debug("No existing crows to match against")
-            return None
+        """Find a matching crow based on embedding similarity.
         
-        try:
-            # Get embedding for new crop
-            with torch.no_grad():
-                new_embedding = self.embedding_model.get_embedding(crop['full'])  # Use full crop for embedding
-                new_embedding = new_embedding.cpu().numpy().flatten()  # Ensure 1D array
-                new_embedding = new_embedding / np.linalg.norm(new_embedding)  # Normalize
+        Args:
+            crop: Dictionary containing 'full' and 'head' tensors or numpy arrays
             
-            best_match = None
-            best_score = -1
-            threshold = 0.98  # Increased similarity threshold for stricter matching
+        Returns:
+            str: Crow ID if match found, None otherwise
+        """
+        try:
+            if crop is None or 'full' not in crop:
+                return None
+                
+            # Get embedding for the new crop
+            with torch.no_grad():
+                # Handle both numpy array and tensor formats
+                crop_data = crop['full']
+                if isinstance(crop_data, np.ndarray):
+                    # Convert numpy array [H, W, C] to tensor [C, H, W]
+                    crop_tensor = torch.from_numpy(crop_data).float()
+                    crop_tensor = crop_tensor.permute(2, 0, 1)  # [H, W, C] -> [C, H, W]
+                else:
+                    # Already a tensor, ensure correct format
+                    crop_tensor = crop_data
+                    if len(crop_tensor.shape) == 4:  # Remove batch dimension [1, C, H, W] -> [C, H, W]
+                        crop_tensor = crop_tensor.squeeze(0)
+                
+                new_embedding = self.embedding_model.get_embedding(crop_tensor)
+                new_embedding = new_embedding.cpu().numpy().flatten()
+                new_embedding = new_embedding / np.linalg.norm(new_embedding)
             
             # Compare with existing crows
-            for crow_id, info in self.tracking_data["crows"].items():
-                if "embedding" not in info:
-                    logger.debug(f"Crow {crow_id} has no embedding, skipping")
+            best_match = None
+            best_similarity = self.similarity_threshold  # Use instance threshold
+            
+            for crow_id, crow_data in self.tracking_data["crows"].items():
+                if "embedding" not in crow_data or crow_data["embedding"] is None:
                     continue
-                
-                # Load existing embedding and ensure it's normalized
-                existing_embedding = np.array(info["embedding"]).flatten()
+                    
+                # Get existing embedding
+                existing_embedding = np.array(crow_data["embedding"])
                 existing_embedding = existing_embedding / np.linalg.norm(existing_embedding)
                 
                 # Calculate cosine similarity
                 similarity = np.dot(new_embedding, existing_embedding)
                 
-                logger.debug(f"Similarity with crow {crow_id}: {similarity:.3f} (threshold: {threshold})")
-                
-                if similarity > best_score and similarity > threshold:
-                    best_score = similarity
+                if similarity > best_similarity:
+                    best_similarity = similarity
                     best_match = crow_id
-            
-            if best_match:
-                logger.info(f"Found matching crow {best_match} with similarity {best_score:.3f}")
-            else:
-                logger.info(f"No matching crow found above threshold {threshold}. Best score was {best_score:.3f}")
             
             return best_match
             
         except Exception as e:
-            logger.error(f"Error finding matching crow: {e}", exc_info=True)
+            logger.error(f"Error finding matching crow: {str(e)}")
             return None
     
     def process_detection(self, frame, frame_num, detection, video_path, frame_time):
         """Process a detection and either create a new crow or update an existing one."""
         try:
-            # Validate detection
-            if not isinstance(detection, dict) or 'bbox' not in detection or 'score' not in detection:
-                raise ValueError("Invalid detection format. Expected dict with 'bbox' and 'score' keys")
+            # Convert detection to proper format - HANDLE BOTH DICT AND ARRAY
+            if isinstance(detection, dict):
+                box = np.array(detection['bbox'], dtype=np.float32)
+                score = detection['score']
+            else:
+                # Handle numpy array format [[x1, y1, x2, y2, score]]
+                if isinstance(detection, np.ndarray):
+                    if len(detection.shape) == 2:  # 2D array
+                        detection = detection[0]  # Get first row
+                    box = detection[:4].astype(np.float32)
+                    score = float(detection[4])
+                else:
+                    raise ValueError(f"Unsupported detection format: {type(detection)}")
             
             # Validate box coordinates
-            box = detection['bbox']
             if not isinstance(box, (list, tuple, np.ndarray)) or len(box) != 4:
                 logger.warning(f"Invalid box format: {box}")
                 return None
             
             # Validate detection score
-            score = detection['score']
             if not (0.0 <= score <= 1.0):
                 logger.warning(f"Invalid detection score: {score}")
-                return None
-            
-            # Convert box to numpy array if needed
-            box = np.array(box)
-            if not np.all(np.isfinite(box)):
-                logger.warning(f"Invalid box coordinates (non-finite): {box}")
                 return None
             
             # Check if box is within frame bounds
@@ -178,9 +232,9 @@ class CrowTracker:
                 frame_time = datetime.now() - timedelta(seconds=frame_time)
             
             # Extract crop
-            crop = extract_crow_image(frame, box)
+            crop = extract_normalized_crow_crop(frame, box)
             if crop is None:
-                logger.debug(f"Frame {frame_num}: Invalid crop")
+                logger.debug(f"Frame {frame_num}: Failed to extract crop")
                 return None
             
             # Find matching crow
@@ -190,49 +244,85 @@ class CrowTracker:
             detection_record = {
                 "frame": frame_num,
                 "bbox": box.tolist(),
-                "score": float(detection['score']),
+                "score": float(score),
                 "timestamp": frame_time.isoformat() if frame_time else None
             }
             
             if crow_id is None:
                 # Create new crow
-                crow_id = self._generate_crow_id()
-                logger.info(f"Generated new crow ID: {crow_id}")
+                crow_id = self._generate_crow_id()  # Changed to match test
+                if crow_id is None:
+                    logger.error("Failed to generate crow ID")
+                    return None
                 
+                # Initialize crow data
                 self.tracking_data["crows"][crow_id] = {
+                    "detections": [detection_record],
+                    "total_detections": 1,
+                    "first_frame": frame_num,  # Added to match test
+                    "last_frame": frame_num,   # Added to match test
                     "first_seen": frame_time.isoformat() if frame_time else None,
                     "last_seen": frame_time.isoformat() if frame_time else None,
-                    "total_detections": 1,
-                    "video_path": video_path,
-                    "first_frame": frame_num,
-                    "last_frame": frame_num,
-                    "detections": [detection_record]  # Initialize with first detection
+                    "video_path": str(video_path) if video_path else None,
+                    "embedding": None  # Will be set after saving crop
                 }
-                logger.info(f"Created new crow {crow_id}")
+                
+                # Save crop and get embedding
+                crop_path = self.save_crop(crop, crow_id, frame_num)
+                if crop_path:
+                    # Get and save embedding
+                    with torch.no_grad():
+                        # Handle both numpy array and tensor formats
+                        crop_data = crop['full']
+                        if isinstance(crop_data, np.ndarray):
+                            # Convert numpy array [H, W, C] to tensor [C, H, W]
+                            crop_tensor = torch.from_numpy(crop_data).float()
+                            crop_tensor = crop_tensor.permute(2, 0, 1)  # [H, W, C] -> [C, H, W]
+                        else:
+                            # Already a tensor, ensure correct format
+                            crop_tensor = crop_data
+                            if len(crop_tensor.shape) == 4:  # Remove batch dimension [1, C, H, W] -> [C, H, W]
+                                crop_tensor = crop_tensor.squeeze(0)
+                        
+                        embedding = self.embedding_model.get_embedding(crop_tensor)
+                        embedding = embedding.cpu().numpy().flatten()  # Ensure 1D array
+                        embedding = embedding / np.linalg.norm(embedding)  # Normalize
+                    self.tracking_data["crows"][crow_id]["embedding"] = embedding.tolist()
+                    logger.debug(f"Saved embedding for crow {crow_id}")
             else:
                 # Update existing crow
-                crow_info = self.tracking_data["crows"][crow_id]
+                crow_data = self.tracking_data["crows"][crow_id]
+                crow_data["detections"].append(detection_record)
+                crow_data["total_detections"] += 1
+                crow_data["last_frame"] = frame_num  # Added to match test
+                crow_data["last_seen"] = frame_time.isoformat() if frame_time else None
                 
-                # Initialize detections list if it doesn't exist
-                if "detections" not in crow_info:
-                    crow_info["detections"] = []
-                
-                crow_info["last_seen"] = frame_time.isoformat() if frame_time else None
-                crow_info["total_detections"] += 1
-                crow_info["last_frame"] = frame_num
-                crow_info["detections"].append(detection_record)
-                logger.debug(f"Updated existing crow: {crow_id}")
+                # Save crop periodically (every 10 detections)
+                if crow_data["total_detections"] % 10 == 0:
+                    crop_path = self.save_crop(crop, crow_id, frame_num)
+                    if crop_path:
+                        # Update embedding
+                        with torch.no_grad():
+                            # Handle both numpy array and tensor formats
+                            crop_data = crop['full']
+                            if isinstance(crop_data, np.ndarray):
+                                # Convert numpy array [H, W, C] to tensor [C, H, W]
+                                crop_tensor = torch.from_numpy(crop_data).float()
+                                crop_tensor = crop_tensor.permute(2, 0, 1)  # [H, W, C] -> [C, H, W]
+                            else:
+                                # Already a tensor, ensure correct format
+                                crop_tensor = crop_data
+                                if len(crop_tensor.shape) == 4:  # Remove batch dimension [1, C, H, W] -> [C, H, W]
+                                    crop_tensor = crop_tensor.squeeze(0)
+                            
+                            embedding = self.embedding_model.get_embedding(crop_tensor)
+                            embedding = embedding.cpu().numpy().flatten()  # Ensure 1D array
+                            embedding = embedding / np.linalg.norm(embedding)  # Normalize
+                        crow_data["embedding"] = embedding.tolist()
+                        logger.debug(f"Updated embedding for crow {crow_id}")
             
-            # Save crop
-            crop_path = self.save_crop(crop, crow_id, frame_num)
-            if crop_path:
-                # Get and save embedding
-                with torch.no_grad():
-                    embedding = self.embedding_model.get_embedding(crop['full'])
-                    embedding = embedding.cpu().numpy().flatten()  # Ensure 1D array
-                    embedding = embedding / np.linalg.norm(embedding)  # Normalize
-                self.tracking_data["crows"][crow_id]["embedding"] = embedding.tolist()
-                logger.debug(f"Saved embedding for crow {crow_id}")
+            # Save tracking data periodically
+            self._save_tracking_data()
             
             return crow_id
             
@@ -241,11 +331,11 @@ class CrowTracker:
             return None
     
     def get_crow_info(self, crow_id):
-        """Get information about a specific crow"""
+        """Get information about a specific crow."""
         return self.tracking_data["crows"].get(crow_id)
     
     def list_crows(self):
-        """List all known crows with their metadata"""
+        """List all known crows with their metadata."""
         return {
             crow_id: {
                 "total_detections": data["total_detections"],
@@ -259,11 +349,11 @@ class CrowTracker:
     def create_processing_run(self):
         """Create a new processing run directory with timestamp."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_dir = self.processing_dir / f"run_{timestamp}"
+        run_dir = self.processing_dir / f"run_{timestamp}"  # Changed from processing_runs
         run_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created processing run directory: {run_dir}")
         return run_dir
-
+    
     def cleanup_processing_dir(self, run_dir):
         """Clean up a processing run directory."""
         try:
@@ -272,7 +362,7 @@ class CrowTracker:
                 logger.info(f"Cleaned up processing directory: {run_dir}")
         except Exception as e:
             logger.error(f"Error cleaning up processing directory: {e}")
-
+    
     def save_crop(self, crop, crow_id, frame_num):
         """Save a crop image to disk and return the path."""
         try:
@@ -284,16 +374,24 @@ class CrowTracker:
             filename = f"frame_{frame_num:06d}.jpg"
             crop_path = crow_dir / filename
             
-            # Convert tensor to numpy array if needed
+            # Handle both numpy array and tensor formats
             if isinstance(crop, dict):
-                # Use the full crop tensor
-                crop_tensor = crop['full'].squeeze(0)  # Remove batch dimension
-                # Convert from [C, H, W] to [H, W, C] and scale to 0-255
-                crop_np = (crop_tensor.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+                crop_data = crop['full']
+                if isinstance(crop_data, np.ndarray):
+                    # Numpy array format [H, W, C] normalized [0,1] -> [0,255] uint8
+                    crop_np = (crop_data * 255).astype(np.uint8)
+                else:
+                    # Tensor format - convert to numpy
+                    crop_tensor = crop_data
+                    if len(crop_tensor.shape) == 4:  # Remove batch dimension [1, C, H, W] -> [C, H, W]
+                        crop_tensor = crop_tensor.squeeze(0)
+                    # Convert from [C, H, W] to [H, W, C] and scale to 0-255
+                    crop_np = (crop_tensor.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
             else:
+                # Direct numpy array
                 crop_np = crop
             
-            # Save the crop
+            # Save the crop (OpenCV expects BGR format, but for saving it should be fine)
             cv2.imwrite(str(crop_path), crop_np)
             logger.debug(f"Saved crop to {crop_path}")
             

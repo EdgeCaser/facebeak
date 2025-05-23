@@ -2,8 +2,8 @@ import os
 import cv2
 import numpy as np
 from tqdm import tqdm
-from detection import detect_crows_parallel as parallel_detect_birds
-from tracking import extract_crow_image
+from detection import detect_crows_parallel
+from tracking import extract_normalized_crow_crop
 import torch
 from pathlib import Path
 import shutil
@@ -55,7 +55,7 @@ def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detect
             if not frames:
                 break
             
-            detections = parallel_detect_birds(frames, score_threshold=min_confidence)
+            detections = detect_crows_parallel(frames, score_threshold=min_confidence)
             logger.info(f"Batch of {len(frames)} frames: found {sum(len(d) for d in detections)} total detections")
             
             for frame_idx, frame_dets in enumerate(detections):
