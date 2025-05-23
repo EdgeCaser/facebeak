@@ -345,3 +345,18 @@ crow_resnet_triplet.pth
 # Generated output (but not source data)
 output.mp4
 temp_*.mp4
+
+# Large test output files that shouldn't be committed
+test_output.txt
+test_results*.txt
+coverage_report.txt
+changes_since_last_commit.diff
+
+# Processing run metadata directories
+run_*/
+processing_runs/
+processing/
+
+# Additional generated files
+*.diff
+*_report.txt
