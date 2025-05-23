@@ -1,11 +1,15 @@
 import unittest
-from unittest.mock import MagicMock, patch, call
-import pytest
-import sqlite3
 import os
 import tempfile
+import shutil
 from pathlib import Path
+from unittest.mock import patch, MagicMock
+import sqlite3
 import numpy as np
+
+# Import the database module
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db import (
     initialize_database,
     get_connection,
@@ -23,42 +27,64 @@ from db import (
     get_image_label,
     get_unlabeled_images,
     get_training_data_stats,
-    get_training_suitable_images
+    get_training_suitable_images,
+    is_image_training_suitable
 )
 from db_security import get_encryption_key, secure_database_connection
 
 class TestDatabaseOperations(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        """Set up test fixtures that are shared across all tests."""
-        # Create a temporary directory for test database
-        cls.temp_dir = tempfile.TemporaryDirectory()
-        cls.db_path = os.path.join(cls.temp_dir.name, "test_crow_embeddings.db")
-        
-        # Set environment variable for test database
-        os.environ['CROW_DB_PATH'] = cls.db_path
+        """Set up test environment."""
+        # Create a temporary directory for test databases
+        cls.test_dir = tempfile.mkdtemp()
+        cls.original_db_path = None
         
     def setUp(self):
-        """Set up test fixtures that are run before each test."""
-        # Initialize fresh database for each test
-        initialize_database()
+        """Set up each test with a fresh database."""
+        # Create a unique test database for this test
+        self.test_db_path = os.path.join(self.test_dir, f"test_db_{id(self)}.db")
         
-        # Clear any existing markers
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM behavioral_markers")
-        conn.commit()
-        conn.close()
+        # Create the database file first (required by secure_database_connection)
+        Path(self.test_db_path).touch()
+        
+        # Patch the database path for this test
+        self.db_patcher = patch('db.DB_PATH', Path(self.test_db_path))
+        self.db_patcher.start()
+        
+        # Initialize the test database
+        initialize_database()
         
     def tearDown(self):
         """Clean up after each test."""
-        # Clear database after each test
-        clear_database()
+        # Close any open database connections to avoid file locks
+        try:
+            # Try to close any connections that might be open
+            import gc
+            gc.collect()  # Force garbage collection to close connections
+        except:
+            pass
+            
+        # Stop the patches
+        self.db_patcher.stop()
         
+        # Remove the test database file if it exists
+        try:
+            if os.path.exists(self.test_db_path):
+                # On Windows, wait a bit for file handles to release
+                import time
+                time.sleep(0.1)
+                os.remove(self.test_db_path)
+        except PermissionError:
+            # If still locked, mark for cleanup later
+            pass
+            
     @classmethod
     def tearDownClass(cls):
-        """Clean up test fixtures."""
-        cls.temp_dir.cleanup()
+        """Clean up test environment."""
+        # Remove the temporary test directory
+        if os.path.exists(cls.test_dir):
+            shutil.rmtree(cls.test_dir)
         
     def test_database_initialization(self):
         """Test database initialization."""
@@ -222,11 +248,12 @@ class TestDatabaseOperations(unittest.TestCase):
     def test_get_unlabeled_images(self):
         """Test fetching unlabeled images with various filters."""
         # Create some test image paths (simulating real crop directory structure)
+        test_dir = "test_crow_crops_unique"
         test_images = [
-            "crow_crops/123/test1.jpg",
-            "crow_crops/124/test2.jpg", 
-            "crow_crops/125/test3.jpg",
-            "crow_crops/126/test4.jpg"
+            f"{test_dir}/123/test1.jpg",
+            f"{test_dir}/124/test2.jpg", 
+            f"{test_dir}/125/test3.jpg",
+            f"{test_dir}/126/test4.jpg"
         ]
         
         # Create mock files for testing
@@ -240,8 +267,8 @@ class TestDatabaseOperations(unittest.TestCase):
             add_image_label(test_images[1], "not_a_crow")
             # Leave test_images[2] and test_images[3] unlabeled
             
-            # Test getting unlabeled images
-            unlabeled = get_unlabeled_images(limit=10, from_directory="crow_crops")
+            # Test getting unlabeled images from our test directory
+            unlabeled = get_unlabeled_images(limit=10, from_directory=test_dir)
             
             # Should only return unlabeled images
             unlabeled_basenames = [os.path.basename(path) for path in unlabeled]
@@ -251,7 +278,7 @@ class TestDatabaseOperations(unittest.TestCase):
             self.assertNotIn("test2.jpg", unlabeled_basenames)  # Labeled as not_a_crow
             
             # Test limit functionality
-            limited = get_unlabeled_images(limit=1, from_directory="crow_crops")
+            limited = get_unlabeled_images(limit=1, from_directory=test_dir)
             self.assertLessEqual(len(limited), 1)
             
         finally:
@@ -265,12 +292,16 @@ class TestDatabaseOperations(unittest.TestCase):
                 except OSError:
                     pass  # Directory not empty, that's ok
             try:
-                os.rmdir("crow_crops")
+                os.rmdir(test_dir)
             except OSError:
                 pass  # Directory not empty or doesn't exist
                 
     def test_training_data_stats(self):
         """Test manual labeling statistics calculation."""
+        # Create a test directory for this test
+        test_dir = os.path.join(self.test_dir, "test_stats")
+        os.makedirs(test_dir, exist_ok=True)
+        
         # Add various labels
         test_images = [
             ("img1.jpg", "crow", 0.95),
@@ -281,25 +312,44 @@ class TestDatabaseOperations(unittest.TestCase):
             ("img6.jpg", "crow", 0.92)
         ]
         
-        for img_path, label, confidence in test_images:
-            add_image_label(img_path, label, confidence=confidence)
+        # Create test image files in the test directory
+        test_paths = []
+        for img_name, _, _ in test_images:
+            img_path = os.path.join(test_dir, img_name)
+            Path(img_path).touch()
+            test_paths.append(img_path)
         
-        # Get statistics
-        stats = get_training_data_stats()
-        
-        # Verify counts
-        self.assertEqual(stats['crow']['count'], 3)
-        self.assertEqual(stats['not_a_crow']['count'], 2)
-        self.assertEqual(stats['not_sure']['count'], 1)
-        self.assertEqual(stats['total_labeled'], 6)
-        self.assertEqual(stats['total_excluded'], 2)  # Only not_a_crow are excluded
-        
-        # Verify average confidences
-        self.assertAlmostEqual(stats['crow']['avg_confidence'], (0.95 + 0.90 + 0.92) / 3, places=2)
-        self.assertAlmostEqual(stats['not_a_crow']['avg_confidence'], (0.85 + 0.88) / 2, places=2)
+        try:
+            for img_path, label, confidence in zip(test_paths, [t[1] for t in test_images], [t[2] for t in test_images]):
+                add_image_label(img_path, label, confidence=confidence)
+            
+            # Get statistics from our test directory
+            stats = get_training_data_stats(from_directory=test_dir)
+            
+            # Verify counts
+            self.assertEqual(stats['crow']['count'], 3)
+            self.assertEqual(stats['not_a_crow']['count'], 2)
+            self.assertEqual(stats['not_sure']['count'], 1)
+            self.assertEqual(stats['total_labeled'], 6)
+            self.assertEqual(stats['total_excluded'], 2)  # Only not_a_crow are excluded
+            
+            # Verify average confidences
+            self.assertAlmostEqual(stats['crow']['avg_confidence'], (0.95 + 0.90 + 0.92) / 3, places=2)
+            self.assertAlmostEqual(stats['not_a_crow']['avg_confidence'], (0.85 + 0.88) / 2, places=2)
+        finally:
+            # Clean up test files
+            for test_path in test_paths:
+                if os.path.exists(test_path):
+                    os.remove(test_path)
+            if os.path.exists(test_dir):
+                shutil.rmtree(test_dir)
         
     def test_get_training_suitable_images(self):
         """Test filtering logic for training data based on manual labels."""
+        # Create a test directory for this test
+        test_dir = os.path.join(self.test_dir, "test_training_suitable")
+        os.makedirs(test_dir, exist_ok=True)
+        
         test_images = [
             "good_crow_1.jpg",
             "good_crow_2.jpg", 
@@ -308,26 +358,45 @@ class TestDatabaseOperations(unittest.TestCase):
             "unlabeled.jpg"
         ]
         
-        # Label images with different classifications
-        add_image_label(test_images[0], "crow", confidence=0.95)
-        add_image_label(test_images[1], "crow", confidence=0.90)
-        add_image_label(test_images[2], "not_a_crow", confidence=0.85)  # Should be excluded
-        add_image_label(test_images[3], "not_sure", confidence=0.70)   # Should be included
-        # test_images[4] remains unlabeled - should be included
+        # Create test image files in the test directory
+        test_paths = []
+        for img_name in test_images:
+            img_path = os.path.join(test_dir, img_name)
+            Path(img_path).touch()
+            test_paths.append(img_path)
         
-        # Get training suitable images
-        suitable = get_training_suitable_images()
-        suitable_basenames = [os.path.basename(path) for path in suitable]
-        
-        # Verify inclusion/exclusion logic
-        self.assertIn("good_crow_1.jpg", suitable_basenames)
-        self.assertIn("good_crow_2.jpg", suitable_basenames)
-        self.assertNotIn("false_positive.jpg", suitable_basenames)  # Excluded
-        self.assertIn("uncertain.jpg", suitable_basenames)  # Included (benefit of doubt)
-        # Note: unlabeled.jpg won't appear unless it exists in the filesystem
+        try:
+            # Label images with different classifications
+            add_image_label(test_paths[0], "crow", confidence=0.95)
+            add_image_label(test_paths[1], "crow", confidence=0.90)
+            add_image_label(test_paths[2], "not_a_crow", confidence=0.85)  # Should be excluded
+            add_image_label(test_paths[3], "not_sure", confidence=0.70)   # Should be included
+            # test_paths[4] remains unlabeled - should be included
+            
+            # Get training suitable images from our test directory
+            suitable = get_training_suitable_images(from_directory=test_dir)
+            suitable_basenames = [os.path.basename(path) for path in suitable]
+            
+            # Verify inclusion/exclusion logic
+            self.assertIn("good_crow_1.jpg", suitable_basenames)
+            self.assertIn("good_crow_2.jpg", suitable_basenames)
+            self.assertNotIn("false_positive.jpg", suitable_basenames)  # Excluded
+            self.assertIn("uncertain.jpg", suitable_basenames)  # Included (benefit of doubt)
+            self.assertIn("unlabeled.jpg", suitable_basenames)  # Unlabeled = included
+        finally:
+            # Clean up test files
+            for test_path in test_paths:
+                if os.path.exists(test_path):
+                    os.remove(test_path)
+            if os.path.exists(test_dir):
+                shutil.rmtree(test_dir)
         
     def test_innocent_until_proven_guilty_philosophy(self):
         """Test that images are included unless explicitly marked as not_a_crow."""
+        # Create a test directory for this test
+        test_dir = os.path.join(self.test_dir, "test_philosophy")
+        os.makedirs(test_dir, exist_ok=True)
+        
         test_cases = [
             ("unlabeled.jpg", None, True),  # No label = included
             ("confirmed_crow.jpg", "crow", True),  # Labeled crow = included
@@ -335,25 +404,44 @@ class TestDatabaseOperations(unittest.TestCase):
             ("false_positive.jpg", "not_a_crow", False),  # Not a crow = excluded
         ]
         
-        # Apply labels (skip unlabeled case)
-        for img_path, label, should_include in test_cases:
-            if label is not None:
-                add_image_label(img_path, label, confidence=0.8)
+        # Create test image files in the test directory
+        test_paths = []
+        for img_name, _, _ in test_cases:
+            img_path = os.path.join(test_dir, img_name)
+            Path(img_path).touch()
+            test_paths.append((img_path, img_name))
         
-        # Check training suitability for labeled images
-        suitable = get_training_suitable_images()
-        suitable_basenames = [os.path.basename(path) for path in suitable]
-        
-        # Test labeled images
-        for img_path, label, should_include in test_cases[1:]:  # Skip unlabeled test
-            if should_include:
-                # Note: Image won't appear in suitable list unless it exists in filesystem
-                # But we can test the database logic
-                label_info = get_image_label(img_path)
-                if label_info:
-                    expected_training_status = label != "not_a_crow"
-                    self.assertEqual(label_info['is_training_data'], expected_training_status)
+        try:
+            # Apply labels (skip unlabeled case)
+            for (img_path, img_name), (_, label, should_include) in zip(test_paths, test_cases):
+                if label is not None:
+                    add_image_label(img_path, label, confidence=0.8)
+            
+            # Check training suitability for labeled images
+            suitable = get_training_suitable_images(from_directory=test_dir)
+            suitable_basenames = [os.path.basename(path) for path in suitable]
+            
+            # Test all images
+            for (img_path, img_name), (_, label, should_include) in zip(test_paths, test_cases):
+                if should_include:
+                    self.assertIn(img_name, suitable_basenames)
+                else:
+                    self.assertNotIn(img_name, suitable_basenames)
                     
+                # Test database logic for labeled images
+                if label is not None:
+                    label_info = get_image_label(img_path)
+                    if label_info:
+                        expected_training_status = label != "not_a_crow"
+                        self.assertEqual(label_info['is_training_data'], expected_training_status)
+        finally:
+            # Clean up test files
+            for img_path, _ in test_paths:
+                if os.path.exists(img_path):
+                    os.remove(img_path)
+            if os.path.exists(test_dir):
+                shutil.rmtree(test_dir)
+        
     def test_image_label_edge_cases(self):
         """Test edge cases for image labeling."""
         # Test empty path - should raise exception

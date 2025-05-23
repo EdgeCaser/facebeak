@@ -74,9 +74,9 @@ class TestFacebeak(unittest.TestCase):
     def test_merge_overlapping_detections_multi_view(self):
         """Test merging overlapping detections with multi-view information."""
         detections = [
-            {'bbox': [100, 100, 200, 200], 'score': 0.9, 'view': 'front', 'class': 'crow'},
-            {'bbox': [105, 105, 205, 205], 'score': 0.8, 'view': 'side', 'class': 'crow'},
-            {'bbox': [300, 300, 400, 400], 'score': 0.7, 'view': 'front', 'class': 'crow'}
+            {'bbox': [100, 100, 200, 200], 'score': 0.9, 'view': 'front', 'class': 'crow', 'model': 'yolo'},
+            {'bbox': [105, 105, 205, 205], 'score': 0.8, 'view': 'side', 'class': 'crow', 'model': 'rcnn'},
+            {'bbox': [300, 300, 400, 400], 'score': 0.7, 'view': 'front', 'class': 'crow', 'model': 'yolo'}
         ]
         merged = merge_overlapping_detections(detections, iou_threshold=0.4)
         self.assertLessEqual(len(merged), len(detections))

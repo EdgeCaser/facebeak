@@ -252,18 +252,11 @@ def test_detect_crows_parallel_memory_usage(monkeypatch):
 
 # Patch all test detection dicts to use 'bbox' instead of 'box'
 def patch_bbox_in_tests():
-    import builtins
-    orig_print = print
-    def patched_print(*args, **kwargs):
-        if args and isinstance(args[0], dict):
-            d = args[0]
-            if 'box' in d:
-                d['bbox'] = d.pop('box')
-        orig_print(*args, **kwargs)
-    builtins.print = patched_print
+    # This function is no longer needed since we're using 'bbox' consistently
+    pass
 
-# Apply patch to all test detection dicts
-patch_bbox_in_tests()
+# Remove the global print patching that was causing test isolation issues
+# patch_bbox_in_tests()
 
 def test_detect_crows_legacy(monkeypatch):
     """Test the legacy detect_crows function."""
