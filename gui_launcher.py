@@ -178,7 +178,11 @@ class FacebeakGUI:
         
         # Image review button
         self.review_button = ttk.Button(review_frame, text="Launch Image Reviewer", command=self.launch_image_reviewer)
-        self.review_button.grid(row=1, column=0, columnspan=2, pady=5)
+        self.review_button.grid(row=1, column=0, pady=5, padx=(0, 5), sticky="w")
+
+        # Suspect lineup button
+        self.suspect_lineup_button = ttk.Button(review_frame, text="Launch Suspect Lineup", command=self.launch_suspect_lineup)
+        self.suspect_lineup_button.grid(row=1, column=1, pady=5, sticky="w")
 
         # Output box with scrollbar (made taller)
         output_frame = ttk.Frame(root)
@@ -564,6 +568,28 @@ class FacebeakGUI:
             
         except Exception as e:
             error_msg = f"Failed to launch Image Reviewer: {str(e)}"
+            self._update_output(f"ERROR: {error_msg}\n")
+            messagebox.showerror("Error", error_msg)
+
+    def launch_suspect_lineup(self):
+        """Launch the suspect lineup tool."""
+        try:
+            python_path = get_venv_python()
+            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'suspect_lineup.py')
+            
+            # Check if the script exists
+            if not os.path.exists(script_path):
+                messagebox.showerror("Error", f"Suspect lineup script not found: {script_path}")
+                return
+            
+            # Launch in separate process
+            subprocess.Popen([python_path, script_path], 
+                           creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
+            
+            self._update_output("Launched Suspect Lineup tool\n")
+            
+        except Exception as e:
+            error_msg = f"Failed to launch Suspect Lineup: {str(e)}"
             self._update_output(f"ERROR: {error_msg}\n")
             messagebox.showerror("Error", error_msg)
 
