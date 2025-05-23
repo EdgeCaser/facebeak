@@ -36,8 +36,8 @@ class FacebeakGUI:
         # Configure grid weights for resizing
         root.grid_columnconfigure(0, weight=1)
         root.grid_rowconfigure(11, weight=1)  # Make the output box row expandable
-        root.grid_rowconfigure(13, weight=2)  # Make the output box row even more expandable
-        root.grid_rowconfigure(14, weight=0)  # Database section (no expansion)
+        root.grid_rowconfigure(14, weight=2)  # Make the output box row even more expandable
+        root.grid_rowconfigure(15, weight=0)  # Database section (no expansion)
 
         # Create main frame for controls
         control_frame = ttk.Frame(root, padding="10")
@@ -169,9 +169,20 @@ class FacebeakGUI:
         self.cluster_button = ttk.Button(clustering_frame, text="Run Clustering", command=self.run_clustering)
         self.cluster_button.grid(row=2, column=0, columnspan=3, pady=5)
 
+        # Image Review section
+        review_frame = ttk.LabelFrame(control_frame, text="Image Review", padding="5")
+        review_frame.grid(row=13, column=0, columnspan=3, sticky="ew", pady=5)
+        
+        ttk.Label(review_frame, text="Review and label crow images for training data quality", 
+                 font=("Arial", 8)).grid(row=0, column=0, columnspan=2, sticky="w")
+        
+        # Image review button
+        self.review_button = ttk.Button(review_frame, text="Launch Image Reviewer", command=self.launch_image_reviewer)
+        self.review_button.grid(row=1, column=0, columnspan=2, pady=5)
+
         # Output box with scrollbar (made taller)
         output_frame = ttk.Frame(root)
-        output_frame.grid(row=13, column=0, sticky="nsew", padx=10, pady=5)
+        output_frame.grid(row=14, column=0, sticky="nsew", padx=10, pady=5)
         output_frame.grid_columnconfigure(0, weight=1)
         output_frame.grid_rowconfigure(0, weight=1)
 
@@ -186,7 +197,7 @@ class FacebeakGUI:
 
         # Add database management section at the bottom
         db_frame = ttk.LabelFrame(root, text="Database Management", padding="5")
-        db_frame.grid(row=14, column=0, sticky="ew", padx=10, pady=5)
+        db_frame.grid(row=15, column=0, sticky="ew", padx=10, pady=5)
         
         # Add warning label
         warning_label = ttk.Label(db_frame, 
@@ -533,6 +544,28 @@ class FacebeakGUI:
         finally:
             # Re-enable clustering button
             self.root.after(0, lambda: self.cluster_button.configure(state='normal'))
+
+    def launch_image_reviewer(self):
+        """Launch the image reviewer tool."""
+        try:
+            python_path = get_venv_python()
+            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'image_reviewer.py')
+            
+            # Check if the script exists
+            if not os.path.exists(script_path):
+                messagebox.showerror("Error", f"Image reviewer script not found: {script_path}")
+                return
+            
+            # Launch in separate process
+            subprocess.Popen([python_path, script_path], 
+                           creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
+            
+            self._update_output("Launched Image Reviewer tool\n")
+            
+        except Exception as e:
+            error_msg = f"Failed to launch Image Reviewer: {str(e)}"
+            self._update_output(f"ERROR: {error_msg}\n")
+            messagebox.showerror("Error", error_msg)
 
 if __name__ == "__main__":
     # Ensure all requirements are installed before starting the GUI

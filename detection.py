@@ -339,4 +339,4 @@ def detect_crows_cascade(frames, score_threshold=0.5, yolo_threshold=0.3):
 
 def detect_crows(*args, **kwargs):
     """Deprecated function. Use detect_crows_parallel instead."""
-    raise NotImplementedError("detect_crows is deprecated, use detect_crows_parallel instead.")
+    return detect_crows_parallel(*args, **kwargs)

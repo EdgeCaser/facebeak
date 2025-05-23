@@ -340,6 +340,26 @@ class EnhancedTracker:
         # Assign extract_normalized_crow_crop as instance method
         self.extract_normalized_crow_crop = extract_normalized_crow_crop
 
+    def extract_crow_image(self, frame, bbox, padding=0.0, min_size=10):
+        """Extract crow image from frame using bounding box.
+        
+        This is a wrapper around extract_normalized_crow_crop for compatibility.
+        
+        Args:
+            frame: Input frame (numpy array)
+            bbox: Bounding box [x1, y1, x2, y2] or [x1, y1, width, height]
+            padding: Padding around the bounding box (default: 0.0)
+            min_size: Minimum size for the extracted crop (default: 10)
+            
+        Returns:
+            Dictionary with 'full' and 'head' crops, or None if extraction fails
+        """
+        try:
+            return self.extract_normalized_crow_crop(frame, bbox, expected_size=(224, 224))
+        except Exception as e:
+            self.logger.error(f"Failed to extract crow image: {str(e)}")
+            return None
+
     def _configure_logger(self, level=logging.DEBUG):
         """Configure logger with specified level."""
         self.logger = logging.getLogger(__name__)
@@ -1338,7 +1358,7 @@ class EnhancedTracker:
                 self.track_bboxes[track_id] = bbox
                 
                 # Extract and process crops if possible
-                crops = extract_normalized_crow_crop(frame, bbox)
+                crops = self.extract_normalized_crow_crop(frame, bbox)
                 if crops is not None:
                     try:
                         # Validate crop dimensions before tensor conversion
