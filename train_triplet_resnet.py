@@ -82,8 +82,15 @@ class CrowTripletDataset(Dataset):
             logger.info(f"Loaded audio for {len(self.crow_to_audio)} crows")
             
     def _load_samples(self, crop_dir):
-        """Load image samples from directory."""
+        """Load image samples from directory, filtering based on manual labels."""
         crop_dir = Path(crop_dir)
+        
+        # Import here to avoid circular imports
+        try:
+            from db import get_image_label
+        except ImportError:
+            logger.warning("Could not import manual labeling functions. Using all images.")
+            get_image_label = None
         
         # Handle different directory structures
         if (crop_dir / "crows").exists():
@@ -97,6 +104,9 @@ class CrowTripletDataset(Dataset):
             # If no subdirectories, treat all images as one crow
             crow_dirs = [crop_dir]
             
+        excluded_count = 0
+        total_found = 0
+            
         for crow_dir in crow_dirs:
             crow_id = crow_dir.name
             img_files = list(crow_dir.glob("*.jpg")) + list(crow_dir.glob("*.png"))
@@ -104,11 +114,39 @@ class CrowTripletDataset(Dataset):
             if not img_files:
                 logger.warning(f"No images found for crow {crow_id}")
                 continue
-                
-            self.crow_to_imgs[crow_id] = img_files
+            
+            # Filter images based on manual labels (innocent until proven guilty)
+            suitable_img_files = []
             for img_file in img_files:
-                self.samples.append((img_file, crow_id))
+                total_found += 1
                 
+                # Check if image has been manually labeled
+                if get_image_label:
+                    label_info = get_image_label(str(img_file))
+                    if label_info and label_info['label'] == 'not_a_crow':
+                        # Image has been explicitly marked as not a crow - exclude it
+                        excluded_count += 1
+                        logger.debug(f"Excluding manually labeled non-crow: {img_file.name}")
+                        continue
+                
+                # Include the image (unlabeled, labeled as crow, or labeled as not_sure)
+                suitable_img_files.append(img_file)
+            
+            if suitable_img_files:
+                self.crow_to_imgs[crow_id] = suitable_img_files
+                for img_file in suitable_img_files:
+                    self.samples.append((img_file, crow_id))
+            else:
+                logger.warning(f"No suitable images found for crow {crow_id} after filtering")
+        
+        # Log filtering results
+        included_count = total_found - excluded_count
+        if excluded_count > 0:
+            logger.info(f"Manual labeling filter: {included_count}/{total_found} images included "
+                       f"({excluded_count} excluded as 'not_a_crow')")
+        else:
+            logger.info(f"No manual labeling exclusions found. Using all {total_found} images.")
+        
     def _load_audio_samples(self, audio_dir):
         """Load audio samples from directory."""
         audio_dir = Path(audio_dir)
@@ -516,7 +554,29 @@ def main():
     
     # Create datasets
     logger.info("Initializing datasets...")
+    logger.info("=" * 60)
+    logger.info("TRAINING DATA LOADING WITH MANUAL LABEL FILTERING")
+    logger.info("Images are 'innocent until proven guilty' - included unless marked as 'not_a_crow'")
+    logger.info("=" * 60)
+    
     full_dataset = CrowTripletDataset(CROP_DIR, AUDIO_DIR)
+    
+    # Get manual labeling statistics
+    try:
+        from db import get_training_data_stats
+        label_stats = get_training_data_stats()
+        if label_stats and label_stats.get('total_excluded', 0) > 0:
+            logger.info("\nMANUAL LABELING STATISTICS:")
+            logger.info(f"  • Images labeled as crows: {label_stats.get('crow', {}).get('count', 0)}")
+            logger.info(f"  • Images labeled as not_a_crow: {label_stats.get('not_a_crow', {}).get('count', 0)}")
+            logger.info(f"  • Images labeled as not_sure: {label_stats.get('not_sure', {}).get('count', 0)}")
+            logger.info(f"  • Total excluded from training: {label_stats.get('total_excluded', 0)}")
+            logger.info("  → Only manually verified crows and unlabeled images are used for training")
+        else:
+            logger.info("No manual labeling found - using all images for training")
+    except ImportError:
+        logger.info("Manual labeling not available - using all images for training")
+    
     val_size = int(len(full_dataset) * VAL_SPLIT)
     train_size = len(full_dataset) - val_size
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])

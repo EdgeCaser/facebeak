@@ -331,10 +331,32 @@ class TrainingGUI:
             
             # Create datasets
             self.logger.info(f"Loading dataset from: {config['crop_dir']}")
+            self.logger.info("=" * 60)
+            self.logger.info("TRAINING DATA LOADING WITH MANUAL LABEL FILTERING")
+            self.logger.info("Images are 'innocent until proven guilty' - included unless marked as 'not_a_crow'")
+            self.logger.info("=" * 60)
+            
             full_dataset = CrowTripletDataset(
                 config['crop_dir'],
                 audio_dir=config['audio_dir'] if config['audio_dir'] else None
             )
+            
+            # Get manual labeling statistics
+            try:
+                from db import get_training_data_stats
+                label_stats = get_training_data_stats()
+                if label_stats and label_stats.get('total_excluded', 0) > 0:
+                    self.logger.info("\nMANUAL LABELING STATISTICS:")
+                    self.logger.info(f"  • Images labeled as crows: {label_stats.get('crow', {}).get('count', 0)}")
+                    self.logger.info(f"  • Images labeled as not_a_crow: {label_stats.get('not_a_crow', {}).get('count', 0)}")
+                    self.logger.info(f"  • Images labeled as not_sure: {label_stats.get('not_sure', {}).get('count', 0)}")
+                    self.logger.info(f"  • Total excluded from training: {label_stats.get('total_excluded', 0)}")
+                    self.logger.info("  → Training with manually curated, high-quality data")
+                else:
+                    self.logger.info("No manual labeling exclusions found - using all detected images")
+            except ImportError:
+                self.logger.info("Manual labeling not available - using all detected images")
+            
             self.logger.info(f"Total dataset size: {len(full_dataset)}")
             if config['audio_dir']:
                 self.logger.info(f"Crows with audio: {len(full_dataset.crow_to_audio)}")
