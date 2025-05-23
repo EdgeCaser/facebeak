@@ -879,5 +879,492 @@ def is_image_training_suitable(image_path):
         if conn:
             conn.close()
 
+def get_crow_videos(crow_id):
+    """Get all videos where a specific crow appears."""
+    conn = get_connection()
+    c = conn.cursor()
+    
+    # Verify crow exists
+    c.execute('SELECT id FROM crows WHERE id = ?', (crow_id,))
+    if not c.fetchone():
+        raise ValueError(f"Crow ID {crow_id} does not exist")
+    
+    # Try to get videos from embeddings table first
+    c.execute('''
+        SELECT DISTINCT video_path, COUNT(*) as sighting_count,
+               MIN(timestamp) as first_seen_in_video,
+               MAX(timestamp) as last_seen_in_video
+        FROM crow_embeddings
+        WHERE crow_id = ? AND video_path IS NOT NULL
+        GROUP BY video_path
+        ORDER BY first_seen_in_video
+    ''', (crow_id,))
+    
+    rows = c.fetchall()
+    conn.close()
+    
+    # If we found embeddings data, return it
+    if rows:
+        return [{
+            'video_path': row[0],
+            'sighting_count': row[1],
+            'first_seen': row[2],
+            'last_seen': row[3]
+        } for row in rows]
+    
+    # Fallback: scan crop directory directly for video names
+    # This handles cases where crop images exist but no embeddings in database
+    from pathlib import Path
+    import os
+    
+    crop_dir = Path("crow_crops") / str(crow_id)
+    if not crop_dir.exists():
+        return []
+    
+    # Extract video names from image filenames
+    video_counts = {}
+    for image_file in crop_dir.glob("*.jpg"):
+        filename = image_file.name
+        # Expected format: {video_name}_frame{frame_num}_{detection_num}.jpg
+        if '_frame' in filename:
+            video_part = filename.split('_frame')[0]
+            # Try to reconstruct original video name (add common extensions)
+            for ext in ['.mp4', '.mov', '.avi', '.MOV', '.MP4']:
+                video_name = video_part + ext
+                video_counts[video_name] = video_counts.get(video_name, 0) + 1
+    
+    # Return video data based on crop directory contents
+    return [{
+        'video_path': video_path,
+        'sighting_count': count,
+        'first_seen': None,  # Not available from crop directory
+        'last_seen': None    # Not available from crop directory
+    } for video_path, count in video_counts.items()]
+
+def get_first_crow_image(crow_id):
+    """Get the path to the first crop image for a specific crow."""
+    import os
+    from pathlib import Path
+    
+    # Look directly in the crop directory for this crow
+    crop_dir = Path("crow_crops") / str(crow_id)
+    if crop_dir.exists():
+        # Find the first image chronologically by filename
+        image_files = list(crop_dir.glob("*.jpg"))
+        if image_files:
+            # Sort by filename (which should be chronological)
+            image_files.sort()
+            return str(image_files[0])
+    
+    return None
+
+def get_crow_images_from_video(crow_id, video_path):
+    """Get all crop images for a specific crow from a specific video."""
+    import os
+    from pathlib import Path
+    
+    # Look for crop images directly in the crop directory
+    crop_dir = Path("crow_crops") / str(crow_id)
+    if not crop_dir.exists():
+        return []
+    
+    # Extract video name from path (remove extension and clean up)
+    video_name = Path(video_path).stem  # Gets filename without extension
+    
+    # Find images that match this video
+    matching_images = []
+    for image_file in crop_dir.glob("*.jpg"):
+        filename = image_file.name
+        # Check if the video name (without extension) appears in the filename
+        if video_name.replace('.', '_').replace(' ', '_') in filename:
+            matching_images.append(str(image_file))
+    
+    # If we found matching images, return them
+    if matching_images:
+        matching_images.sort()
+        return matching_images
+    
+    # Fallback: if no specific video match, return some images from this crow
+    # This happens when video names don't match exactly
+    all_images = list(crop_dir.glob("*.jpg"))
+    if all_images:
+        all_images.sort()
+        return all_images[:10]  # Return first 10 images
+    
+    return []
+
+def reassign_crow_embeddings(from_crow_id, to_crow_id, embedding_ids=None):
+    """
+    Reassign embeddings from one crow to another.
+    
+    Args:
+        from_crow_id: ID of the crow to move embeddings from
+        to_crow_id: ID of the crow to move embeddings to  
+        embedding_ids: List of specific embedding IDs to move. If None, moves all embeddings.
+    
+    Returns:
+        int: Number of embeddings moved
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        conn.execute("BEGIN TRANSACTION")
+        cursor = conn.cursor()
+        
+        # Verify both crows exist
+        cursor.execute('SELECT id FROM crows WHERE id IN (?, ?)', (from_crow_id, to_crow_id))
+        existing_crows = cursor.fetchall()
+        if len(existing_crows) != 2:
+            raise ValueError(f"One or both crow IDs do not exist: {from_crow_id}, {to_crow_id}")
+        
+        # Get embeddings to move
+        if embedding_ids:
+            # Move specific embeddings
+            placeholders = ','.join(['?'] * len(embedding_ids))
+            cursor.execute(f'''
+                SELECT id FROM crow_embeddings 
+                WHERE crow_id = ? AND id IN ({placeholders})
+            ''', [from_crow_id] + embedding_ids)
+        else:
+            # Move all embeddings from the crow
+            cursor.execute('''
+                SELECT id FROM crow_embeddings 
+                WHERE crow_id = ?
+            ''', (from_crow_id,))
+        
+        embeddings_to_move = [row[0] for row in cursor.fetchall()]
+        
+        if not embeddings_to_move:
+            logger.warning(f"No embeddings found to move from crow {from_crow_id}")
+            return 0
+        
+        # Update the embeddings
+        placeholders = ','.join(['?'] * len(embeddings_to_move))
+        cursor.execute(f'''
+            UPDATE crow_embeddings 
+            SET crow_id = ? 
+            WHERE id IN ({placeholders})
+        ''', [to_crow_id] + embeddings_to_move)
+        
+        moved_count = cursor.rowcount
+        
+        # Update sighting counts
+        # Decrease from_crow sightings
+        cursor.execute('''
+            UPDATE crows 
+            SET total_sightings = total_sightings - ? 
+            WHERE id = ?
+        ''', (moved_count, from_crow_id))
+        
+        # Increase to_crow sightings  
+        cursor.execute('''
+            UPDATE crows 
+            SET total_sightings = total_sightings + ? 
+            WHERE id = ?
+        ''', (moved_count, to_crow_id))
+        
+        # Update timestamps for to_crow
+        cursor.execute('''
+            SELECT MIN(timestamp), MAX(timestamp) 
+            FROM crow_embeddings 
+            WHERE crow_id = ?
+        ''', (to_crow_id,))
+        
+        times = cursor.fetchone()
+        if times and times[0] and times[1]:
+            cursor.execute('''
+                UPDATE crows 
+                SET first_seen = ?, last_seen = ? 
+                WHERE id = ?
+            ''', (times[0], times[1], to_crow_id))
+        
+        # Check if from_crow has any remaining embeddings
+        cursor.execute('SELECT COUNT(*) FROM crow_embeddings WHERE crow_id = ?', (from_crow_id,))
+        remaining_count = cursor.fetchone()[0]
+        
+        if remaining_count == 0:
+            # Update from_crow to have 0 sightings
+            cursor.execute('''
+                UPDATE crows 
+                SET total_sightings = 0 
+                WHERE id = ?
+            ''', (from_crow_id,))
+        else:
+            # Update from_crow timestamps
+            cursor.execute('''
+                SELECT MIN(timestamp), MAX(timestamp) 
+                FROM crow_embeddings 
+                WHERE crow_id = ?
+            ''', (from_crow_id,))
+            
+            times = cursor.fetchone()
+            if times and times[0] and times[1]:
+                cursor.execute('''
+                    UPDATE crows 
+                    SET first_seen = ?, last_seen = ? 
+                    WHERE id = ?
+                ''', (times[0], times[1], from_crow_id))
+        
+        conn.commit()
+        logger.info(f"Successfully reassigned {moved_count} embeddings from crow {from_crow_id} to crow {to_crow_id}")
+        return moved_count
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Error reassigning crow embeddings: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
+
+def create_new_crow_from_embeddings(from_crow_id, embedding_ids, new_crow_name=None):
+    """
+    Create a new crow and move specific embeddings to it.
+    
+    Args:
+        from_crow_id: ID of the crow to move embeddings from
+        embedding_ids: List of embedding IDs to move to the new crow
+        new_crow_name: Optional name for the new crow
+    
+    Returns:
+        int: ID of the newly created crow
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        conn.execute("BEGIN TRANSACTION")
+        cursor = conn.cursor()
+        
+        # Verify from_crow exists
+        cursor.execute('SELECT id FROM crows WHERE id = ?', (from_crow_id,))
+        if not cursor.fetchone():
+            raise ValueError(f"Crow ID {from_crow_id} does not exist")
+        
+        # Verify embeddings exist and belong to from_crow
+        placeholders = ','.join(['?'] * len(embedding_ids))
+        cursor.execute(f'''
+            SELECT id FROM crow_embeddings 
+            WHERE crow_id = ? AND id IN ({placeholders})
+        ''', [from_crow_id] + embedding_ids)
+        
+        valid_embeddings = [row[0] for row in cursor.fetchall()]
+        if len(valid_embeddings) != len(embedding_ids):
+            raise ValueError("Some embedding IDs don't exist or don't belong to the specified crow")
+        
+        # Get timestamp range for the new crow
+        cursor.execute(f'''
+            SELECT MIN(timestamp), MAX(timestamp) 
+            FROM crow_embeddings 
+            WHERE id IN ({placeholders})
+        ''', embedding_ids)
+        
+        times = cursor.fetchone()
+        first_seen = times[0] if times else None
+        last_seen = times[1] if times else None
+        
+        # Create new crow
+        cursor.execute('''
+            INSERT INTO crows (name, first_seen, last_seen, total_sightings) 
+            VALUES (?, ?, ?, ?)
+        ''', (new_crow_name, first_seen, last_seen, len(embedding_ids)))
+        
+        new_crow_id = cursor.lastrowid
+        
+        # Move embeddings to new crow
+        cursor.execute(f'''
+            UPDATE crow_embeddings 
+            SET crow_id = ? 
+            WHERE id IN ({placeholders})
+        ''', [new_crow_id] + embedding_ids)
+        
+        # Update original crow's sighting count and timestamps
+        cursor.execute('''
+            UPDATE crows 
+            SET total_sightings = total_sightings - ? 
+            WHERE id = ?
+        ''', (len(embedding_ids), from_crow_id))
+        
+        # Check if original crow has remaining embeddings
+        cursor.execute('SELECT COUNT(*) FROM crow_embeddings WHERE crow_id = ?', (from_crow_id,))
+        remaining_count = cursor.fetchone()[0]
+        
+        if remaining_count > 0:
+            # Update original crow timestamps
+            cursor.execute('''
+                SELECT MIN(timestamp), MAX(timestamp) 
+                FROM crow_embeddings 
+                WHERE crow_id = ?
+            ''', (from_crow_id,))
+            
+            times = cursor.fetchone()
+            if times and times[0] and times[1]:
+                cursor.execute('''
+                    UPDATE crows 
+                    SET first_seen = ?, last_seen = ? 
+                    WHERE id = ?
+                ''', (times[0], times[1], from_crow_id))
+        else:
+            # Original crow has no embeddings left
+            cursor.execute('''
+                UPDATE crows 
+                SET total_sightings = 0 
+                WHERE id = ?
+            ''', (from_crow_id,))
+        
+        conn.commit()
+        logger.info(f"Created new crow {new_crow_id} with {len(embedding_ids)} embeddings from crow {from_crow_id}")
+        return new_crow_id
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Error creating new crow from embeddings: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
+
+def get_embedding_ids_by_image_paths(image_paths):
+    """
+    Get embedding IDs corresponding to image paths.
+    
+    Args:
+        image_paths: List of image file paths
+    
+    Returns:
+        dict: Mapping of image_path -> embedding_id
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        result = {}
+        
+        for img_path in image_paths:
+            # Extract video name and frame number from image path
+            # Expected format: crow_crops/{crow_id}/{video_name}_frame{frame_num}_{detection_num}.jpg
+            filename = os.path.basename(img_path)
+            
+            # Parse filename to extract video and frame info
+            if '_frame' in filename:
+                parts = filename.split('_frame')
+                if len(parts) >= 2:
+                    video_part = parts[0]
+                    frame_part = parts[1].split('_')[0]  # Get frame number before detection number
+                    
+                    try:
+                        frame_number = int(frame_part)
+                        
+                        # Find matching embedding
+                        cursor.execute('''
+                            SELECT id FROM crow_embeddings 
+                            WHERE video_path LIKE ? AND frame_number = ?
+                            ORDER BY timestamp DESC
+                            LIMIT 1
+                        ''', (f'%{video_part}%', frame_number))
+                        
+                        row = cursor.fetchone()
+                        if row:
+                            result[img_path] = row[0]
+                        else:
+                            logger.warning(f"No embedding found for image: {img_path}")
+                            
+                    except ValueError:
+                        logger.warning(f"Could not parse frame number from: {filename}")
+            else:
+                logger.warning(f"Unexpected filename format: {filename}")
+                
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting embedding IDs by image paths: {e}")
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
+def delete_crow_embeddings(embedding_ids):
+    """
+    Delete specific crow embeddings from the database.
+    
+    Args:
+        embedding_ids: List of embedding IDs to delete
+    
+    Returns:
+        int: Number of embeddings deleted
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        conn.execute("BEGIN TRANSACTION")
+        cursor = conn.cursor()
+        
+        if not embedding_ids:
+            return 0
+            
+        # Get crow IDs that will be affected
+        placeholders = ','.join(['?'] * len(embedding_ids))
+        cursor.execute(f'''
+            SELECT DISTINCT crow_id FROM crow_embeddings 
+            WHERE id IN ({placeholders})
+        ''', embedding_ids)
+        
+        affected_crow_ids = [row[0] for row in cursor.fetchall()]
+        
+        # Delete the embeddings
+        cursor.execute(f'''
+            DELETE FROM crow_embeddings 
+            WHERE id IN ({placeholders})
+        ''', embedding_ids)
+        
+        deleted_count = cursor.rowcount
+        
+        # Update affected crows' statistics
+        for crow_id in affected_crow_ids:
+            # Update sighting count
+            cursor.execute('''
+                SELECT COUNT(*) FROM crow_embeddings WHERE crow_id = ?
+            ''', (crow_id,))
+            
+            remaining_count = cursor.fetchone()[0]
+            
+            if remaining_count > 0:
+                # Update timestamps and count
+                cursor.execute('''
+                    SELECT MIN(timestamp), MAX(timestamp) 
+                    FROM crow_embeddings 
+                    WHERE crow_id = ?
+                ''', (crow_id,))
+                
+                times = cursor.fetchone()
+                if times and times[0] and times[1]:
+                    cursor.execute('''
+                        UPDATE crows 
+                        SET first_seen = ?, last_seen = ?, total_sightings = ? 
+                        WHERE id = ?
+                    ''', (times[0], times[1], remaining_count, crow_id))
+            else:
+                # No embeddings left for this crow
+                cursor.execute('''
+                    UPDATE crows 
+                    SET total_sightings = 0 
+                    WHERE id = ?
+                ''', (crow_id,))
+        
+        conn.commit()
+        logger.info(f"Deleted {deleted_count} embeddings")
+        return deleted_count
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Error deleting crow embeddings: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
+
 # Initialize database on module import
 initialize_database() 

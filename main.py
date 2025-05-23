@@ -551,8 +551,34 @@ def process_frame(frame, detections, tracker):
     return processed_frame, tracks
 
 if __name__ == "__main__":
+    # Check if being run without arguments
+    if len(sys.argv) == 1:
+        print("\n" + "="*80)
+        print("FACEBEAK - Crow Detection and Tracking System")
+        print("="*80)
+        print("\nThis script requires command line arguments. For example:")
+        print("python main.py --video input.mp4 --skip-output skip.mp4 --full-output full.mp4")
+        print("\nRequired arguments:")
+        print("  --video VIDEO        Input video file")
+        print("  --skip-output FILE   Output video file for frame-skipped detection")
+        print("  --full-output FILE   Output video file for full-frame interpolated tracking")
+        print("\nOptional arguments:")
+        print("  --detection-threshold FLOAT    Detection confidence threshold (default: 0.3)")
+        print("  --yolo-threshold FLOAT         YOLO confidence threshold (default: 0.2)")
+        print("  --max-age INT                  Maximum age of a track (default: 5)")
+        print("  --min-hits INT                 Minimum hits to start tracking (default: 2)")
+        print("  --iou-threshold FLOAT          IOU threshold for tracking (default: 0.2)")
+        print("  --embedding-threshold FLOAT    Embedding similarity threshold (default: 0.7)")
+        print("  --skip INT                     Number of frames to skip (default: 5)")
+        print("  --preserve-audio               Preserve audio in output videos")
+        print("\n" + "="*80)
+        print("RECOMMENDED: Use the GUI launcher instead:")
+        print("python gui_launcher.py")
+        print("="*80)
+        sys.exit(1)
+    
     # Initialize logger
-    log_path = "facebeak_Session.log"
+    log_path = "facebeak_session.log"
     logger = TeeLogger(log_path)
     
     try:
