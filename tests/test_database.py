@@ -18,7 +18,12 @@ from db import (
     add_behavioral_marker,
     get_segment_markers,
     backup_database,
-    clear_database
+    clear_database,
+    add_image_label,
+    get_image_label,
+    get_unlabeled_images,
+    get_training_data_stats,
+    get_training_suitable_images
 )
 from db_security import get_encryption_key, secure_database_connection
 
@@ -171,6 +176,262 @@ class TestDatabaseOperations(unittest.TestCase):
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM crows")
         self.assertEqual(cursor.fetchone()[0], 0)
+        conn.close()
+
+    def test_add_image_label(self):
+        """Test adding and updating image labels."""
+        test_path = "test_images/crow_001.jpg"
+        
+        # Create test file
+        os.makedirs(os.path.dirname(test_path), exist_ok=True)
+        Path(test_path).touch()
+        
+        try:
+            # Add initial label
+            result = add_image_label(test_path, "crow", confidence=0.95, 
+                                   reviewer_notes="Confirmed crow")
+            self.assertTrue(result)
+            
+            # Retrieve label
+            label_info = get_image_label(test_path)
+            self.assertIsNotNone(label_info)
+            self.assertEqual(label_info['label'], "crow")
+            self.assertEqual(label_info['confidence'], 0.95)
+            self.assertEqual(label_info['reviewer_notes'], "Confirmed crow")
+            self.assertTrue(label_info['is_training_data'])
+            
+            # Update label
+            result = add_image_label(test_path, "not_a_crow", confidence=0.90,
+                                   reviewer_notes="Actually not a crow")
+            self.assertTrue(result)
+            
+            # Verify update
+            updated_info = get_image_label(test_path)
+            self.assertEqual(updated_info['label'], "not_a_crow")
+            self.assertEqual(updated_info['confidence'], 0.90)
+            self.assertFalse(updated_info['is_training_data'])  # Should be excluded from training
+        finally:
+            # Clean up test file and directory
+            if os.path.exists(test_path):
+                os.remove(test_path)
+            try:
+                os.rmdir(os.path.dirname(test_path))
+            except OSError:
+                pass  # Directory not empty or doesn't exist
+        
+    def test_get_unlabeled_images(self):
+        """Test fetching unlabeled images with various filters."""
+        # Create some test image paths (simulating real crop directory structure)
+        test_images = [
+            "crow_crops/123/test1.jpg",
+            "crow_crops/124/test2.jpg", 
+            "crow_crops/125/test3.jpg",
+            "crow_crops/126/test4.jpg"
+        ]
+        
+        # Create mock files for testing
+        for img_path in test_images:
+            os.makedirs(os.path.dirname(img_path), exist_ok=True)
+            Path(img_path).touch()
+        
+        try:
+            # Label some images
+            add_image_label(test_images[0], "crow")
+            add_image_label(test_images[1], "not_a_crow")
+            # Leave test_images[2] and test_images[3] unlabeled
+            
+            # Test getting unlabeled images
+            unlabeled = get_unlabeled_images(limit=10, from_directory="crow_crops")
+            
+            # Should only return unlabeled images
+            unlabeled_basenames = [os.path.basename(path) for path in unlabeled]
+            self.assertIn("test3.jpg", unlabeled_basenames)
+            self.assertIn("test4.jpg", unlabeled_basenames)
+            self.assertNotIn("test1.jpg", unlabeled_basenames)  # Labeled as crow
+            self.assertNotIn("test2.jpg", unlabeled_basenames)  # Labeled as not_a_crow
+            
+            # Test limit functionality
+            limited = get_unlabeled_images(limit=1, from_directory="crow_crops")
+            self.assertLessEqual(len(limited), 1)
+            
+        finally:
+            # Clean up test files
+            for img_path in test_images:
+                if os.path.exists(img_path):
+                    os.remove(img_path)
+                # Remove directories if empty
+                try:
+                    os.rmdir(os.path.dirname(img_path))
+                except OSError:
+                    pass  # Directory not empty, that's ok
+            try:
+                os.rmdir("crow_crops")
+            except OSError:
+                pass  # Directory not empty or doesn't exist
+                
+    def test_training_data_stats(self):
+        """Test manual labeling statistics calculation."""
+        # Add various labels
+        test_images = [
+            ("img1.jpg", "crow", 0.95),
+            ("img2.jpg", "crow", 0.90), 
+            ("img3.jpg", "not_a_crow", 0.85),
+            ("img4.jpg", "not_a_crow", 0.88),
+            ("img5.jpg", "not_sure", 0.70),
+            ("img6.jpg", "crow", 0.92)
+        ]
+        
+        for img_path, label, confidence in test_images:
+            add_image_label(img_path, label, confidence=confidence)
+        
+        # Get statistics
+        stats = get_training_data_stats()
+        
+        # Verify counts
+        self.assertEqual(stats['crow']['count'], 3)
+        self.assertEqual(stats['not_a_crow']['count'], 2)
+        self.assertEqual(stats['not_sure']['count'], 1)
+        self.assertEqual(stats['total_labeled'], 6)
+        self.assertEqual(stats['total_excluded'], 2)  # Only not_a_crow are excluded
+        
+        # Verify average confidences
+        self.assertAlmostEqual(stats['crow']['avg_confidence'], (0.95 + 0.90 + 0.92) / 3, places=2)
+        self.assertAlmostEqual(stats['not_a_crow']['avg_confidence'], (0.85 + 0.88) / 2, places=2)
+        
+    def test_get_training_suitable_images(self):
+        """Test filtering logic for training data based on manual labels."""
+        test_images = [
+            "good_crow_1.jpg",
+            "good_crow_2.jpg", 
+            "false_positive.jpg",
+            "uncertain.jpg",
+            "unlabeled.jpg"
+        ]
+        
+        # Label images with different classifications
+        add_image_label(test_images[0], "crow", confidence=0.95)
+        add_image_label(test_images[1], "crow", confidence=0.90)
+        add_image_label(test_images[2], "not_a_crow", confidence=0.85)  # Should be excluded
+        add_image_label(test_images[3], "not_sure", confidence=0.70)   # Should be included
+        # test_images[4] remains unlabeled - should be included
+        
+        # Get training suitable images
+        suitable = get_training_suitable_images()
+        suitable_basenames = [os.path.basename(path) for path in suitable]
+        
+        # Verify inclusion/exclusion logic
+        self.assertIn("good_crow_1.jpg", suitable_basenames)
+        self.assertIn("good_crow_2.jpg", suitable_basenames)
+        self.assertNotIn("false_positive.jpg", suitable_basenames)  # Excluded
+        self.assertIn("uncertain.jpg", suitable_basenames)  # Included (benefit of doubt)
+        # Note: unlabeled.jpg won't appear unless it exists in the filesystem
+        
+    def test_innocent_until_proven_guilty_philosophy(self):
+        """Test that images are included unless explicitly marked as not_a_crow."""
+        test_cases = [
+            ("unlabeled.jpg", None, True),  # No label = included
+            ("confirmed_crow.jpg", "crow", True),  # Labeled crow = included
+            ("uncertain_bird.jpg", "not_sure", True),  # Not sure = included (benefit of doubt)
+            ("false_positive.jpg", "not_a_crow", False),  # Not a crow = excluded
+        ]
+        
+        # Apply labels (skip unlabeled case)
+        for img_path, label, should_include in test_cases:
+            if label is not None:
+                add_image_label(img_path, label, confidence=0.8)
+        
+        # Check training suitability for labeled images
+        suitable = get_training_suitable_images()
+        suitable_basenames = [os.path.basename(path) for path in suitable]
+        
+        # Test labeled images
+        for img_path, label, should_include in test_cases[1:]:  # Skip unlabeled test
+            if should_include:
+                # Note: Image won't appear in suitable list unless it exists in filesystem
+                # But we can test the database logic
+                label_info = get_image_label(img_path)
+                if label_info:
+                    expected_training_status = label != "not_a_crow"
+                    self.assertEqual(label_info['is_training_data'], expected_training_status)
+                    
+    def test_image_label_edge_cases(self):
+        """Test edge cases for image labeling."""
+        # Test empty path - should raise exception
+        with self.assertRaises(ValueError):
+            add_image_label("", "crow")
+        
+        # Test invalid label
+        test_file = "test_invalid.jpg"
+        Path(test_file).touch()
+        try:
+            with self.assertRaises(ValueError):
+                add_image_label(test_file, "invalid_label")
+        finally:
+            if os.path.exists(test_file):
+                os.remove(test_file)
+        
+        # Test negative confidence
+        test_file = "test_negative.jpg"
+        Path(test_file).touch()
+        try:
+            with self.assertRaises(ValueError):
+                add_image_label(test_file, "crow", confidence=-0.1)
+        finally:
+            if os.path.exists(test_file):
+                os.remove(test_file)
+        
+        # Test confidence > 1
+        test_file = "test_high_conf.jpg"
+        Path(test_file).touch()
+        try:
+            with self.assertRaises(ValueError):
+                add_image_label(test_file, "crow", confidence=1.5)
+        finally:
+            if os.path.exists(test_file):
+                os.remove(test_file)
+        
+        # Test very long reviewer notes
+        test_file = "test_long_notes.jpg"
+        Path(test_file).touch()
+        try:
+            long_notes = "A" * 2000  # Very long string
+            result = add_image_label(test_file, "crow", reviewer_notes=long_notes)
+            self.assertTrue(result)  # Should still work
+            
+            # Verify notes were stored (possibly truncated)
+            label_info = get_image_label(test_file)
+            self.assertIsNotNone(label_info)
+            self.assertIsNotNone(label_info['reviewer_notes'])
+        finally:
+            if os.path.exists(test_file):
+                os.remove(test_file)
+        
+    def test_database_image_labels_table_structure(self):
+        """Test that the image_labels table has the correct structure."""
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Check table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='image_labels'")
+        self.assertIsNotNone(cursor.fetchone())
+        
+        # Check table structure
+        cursor.execute("PRAGMA table_info(image_labels)")
+        columns = {row[1]: row[2] for row in cursor.fetchall()}  # {column_name: type}
+        
+        expected_columns = {
+            'id': 'INTEGER',
+            'image_path': 'TEXT',
+            'label': 'TEXT', 
+            'confidence': 'FLOAT',
+            'reviewer_notes': 'TEXT',
+            'is_training_data': 'INTEGER',
+            'timestamp': 'TIMESTAMP'
+        }
+        
+        for col_name, col_type in expected_columns.items():
+            self.assertIn(col_name, columns)
+            
         conn.close()
 
 class TestDatabaseSecurity(unittest.TestCase):

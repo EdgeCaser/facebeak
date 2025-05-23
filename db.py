@@ -594,7 +594,7 @@ def clear_database():
             except:
                 pass
 
-def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_training_data=True):
+def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_training_data=None):
     """Add or update an image label."""
     conn = None
     try:
@@ -611,6 +611,11 @@ def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_
             
         if confidence is not None and not 0 <= confidence <= 1:
             raise ValueError("Confidence must be between 0 and 1")
+            
+        # Implement "innocent until proven guilty" philosophy
+        # If is_training_data is not explicitly set, determine based on label
+        if is_training_data is None:
+            is_training_data = (label != 'not_a_crow')  # False only for 'not_a_crow'
             
         # Insert or update label
         cursor.execute('''
@@ -723,13 +728,13 @@ def get_training_data_stats():
         conn = get_connection()
         cursor = conn.cursor()
         
+        # Get stats for all labeled images (both training and excluded)
         cursor.execute('''
             SELECT 
                 label,
                 COUNT(*) as count,
                 AVG(confidence) as avg_confidence
             FROM image_labels 
-            WHERE is_training_data = 1
             GROUP BY label
         ''')
         
@@ -741,7 +746,7 @@ def get_training_data_stats():
             }
             
         # Get total counts
-        cursor.execute('SELECT COUNT(*) FROM image_labels WHERE is_training_data = 1')
+        cursor.execute('SELECT COUNT(*) FROM image_labels')
         stats['total_labeled'] = cursor.fetchone()[0]
         
         cursor.execute('SELECT COUNT(*) FROM image_labels WHERE is_training_data = 0')
