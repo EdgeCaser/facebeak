@@ -1340,27 +1340,34 @@ class EnhancedTracker:
                 # Extract and process crops if possible
                 crops = extract_normalized_crow_crop(frame, bbox)
                 if crops is not None:
-                    # Convert crops to tensors for embedding computation
-                    full_tensor = torch.from_numpy(crops['full']).permute(2, 0, 1).unsqueeze(0)
-                    head_tensor = torch.from_numpy(crops['head']).permute(2, 0, 1).unsqueeze(0)
-                    
-                    # Create tensor dict for compute_embedding
-                    crop_tensors = {
-                        'full': full_tensor,
-                        'head': head_tensor
-                    }
-                    
                     try:
-                        combined_embedding, individual_embeddings = compute_embedding(crop_tensors)
-                        full_embedding = individual_embeddings['full']
-                        head_embedding = individual_embeddings['head']
-                        
-                        if full_embedding is not None:
-                            self.track_embeddings[track_id].append(full_embedding)
-                            self.track_history[track_id]['last_valid_embedding'] = torch.from_numpy(full_embedding).to(self.device)
+                        # Validate crop dimensions before tensor conversion
+                        if (crops['full'].ndim != 3 or crops['head'].ndim != 3 or
+                            crops['full'].shape[2] != 3 or crops['head'].shape[2] != 3):
+                            self.logger.warning(f"Invalid crop dimensions for track {track_id}: "
+                                              f"full={crops['full'].shape}, head={crops['head'].shape}")
+                            # Skip embedding computation for invalid crops
+                        else:
+                            # Convert crops to tensors for embedding computation
+                            full_tensor = torch.from_numpy(crops['full']).permute(2, 0, 1).unsqueeze(0)
+                            head_tensor = torch.from_numpy(crops['head']).permute(2, 0, 1).unsqueeze(0)
                             
-                        if head_embedding is not None:
-                            self.track_head_embeddings[track_id].append(head_embedding)
+                            # Create tensor dict for compute_embedding
+                            crop_tensors = {
+                                'full': full_tensor,
+                                'head': head_tensor
+                            }
+                            
+                            combined_embedding, individual_embeddings = compute_embedding(crop_tensors)
+                            full_embedding = individual_embeddings['full']
+                            head_embedding = individual_embeddings['head']
+                            
+                            if full_embedding is not None:
+                                self.track_embeddings[track_id].append(full_embedding)
+                                self.track_history[track_id]['last_valid_embedding'] = torch.from_numpy(full_embedding).to(self.device)
+                                
+                            if head_embedding is not None:
+                                self.track_head_embeddings[track_id].append(head_embedding)
                     except Exception as e:
                         self.logger.warning(f"Error computing embeddings for track {track_id}: {str(e)}")
                 
