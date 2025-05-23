@@ -1,0 +1,10 @@
+{
+  "timestamp": "20250522_070733",
+  "parameters": {
+    "max_age": 5,
+    "min_hits": 3,
+    "iou_threshold": 0.3,
+    "embedding_threshold": 0.5,
+    "conf_threshold": 0.5
+  }
+}

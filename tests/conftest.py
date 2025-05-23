@@ -11,6 +11,7 @@ import soundfile as sf
 import librosa
 import subprocess
 import json
+from tracking import EnhancedTracker
 
 def create_dummy_image(size=(224, 224), num_channels=3):
     """Create a dummy image for testing."""
@@ -205,7 +206,7 @@ def video_test_data(tmp_path_factory):
 
     # Initialize detection models
     from detection import detect_crows_parallel
-    from tracking import extract_crow_image
+    tracker = EnhancedTracker()
 
     # Initialize metadata dictionary
     metadata = {}
@@ -238,7 +239,7 @@ def video_test_data(tmp_path_factory):
         frame_numbers = []
         frame_count = 0
         max_frames = 30  # Limit to 30 frames per video for testing
-        img_count = 0  # Counter for saved images
+        img_count = 0
         
         while frame_count < max_frames and img_count < 5:  # Save up to 5 images per crow
             frames = []
@@ -273,8 +274,8 @@ def video_test_data(tmp_path_factory):
                         if det['score'] < 0.3:  # Skip low confidence detections
                             continue
                             
-                        # Extract crop using extract_crow_image
-                        crop = extract_crow_image(frame, det['bbox'])
+                        # Extract crop using tracker
+                        crop = tracker.extract_crow_image(frame, det['bbox'])
                         if crop is None:
                             print(f"[DEBUG] video_test_data: failed to extract crop for detection {det}")
                             continue

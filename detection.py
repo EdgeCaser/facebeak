@@ -322,8 +322,12 @@ def detect_crows_parallel(
     return detections
 
 # For backward compatibility
-def detect_crows(frames, score_threshold=0.3):
-    """Legacy function that now uses parallel detection."""
+def detect_crows_legacy(frames, score_threshold=0.3):
+    """Legacy wrapper function that uses parallel detection.
+    
+    This function is maintained for backward compatibility.
+    New code should use detect_crows_parallel directly.
+    """
     return detect_crows_parallel(frames, score_threshold=score_threshold)
 
 # Keep cascade detection for reference but mark as deprecated
@@ -332,3 +336,7 @@ def detect_crows_cascade(frames, score_threshold=0.5, yolo_threshold=0.3):
     import warnings
     warnings.warn("Cascade detection is deprecated. Use detect_crows_parallel instead.", DeprecationWarning)
     # ... rest of cascade implementation ...
+
+def detect_crows(*args, **kwargs):
+    """Deprecated function. Use detect_crows_parallel instead."""
+    raise NotImplementedError("detect_crows is deprecated, use detect_crows_parallel instead.")

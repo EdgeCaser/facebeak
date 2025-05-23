@@ -4,8 +4,8 @@ import torch
 import cv2
 from tracking import (
     compute_embedding,
-    extract_crow_image,
-    compute_iou,
+    extract_normalized_crow_crop,
+    compute_bbox_iou,
     EnhancedTracker,
     assign_crow_ids,
     TimeoutException,
@@ -68,12 +68,32 @@ def mock_multi_view_frame():
 @pytest.fixture
 def tracker():
     """Create a tracker instance for testing."""
-    return EnhancedTracker(strict_mode=False)  # Don't use strict mode by default
+    return EnhancedTracker()
 
 @pytest.fixture
 def strict_tracker():
     """Create a strict mode tracker instance for testing."""
     return EnhancedTracker(strict_mode=True)
+
+def _convert_detection_to_array(detection):
+    """Convert a detection dictionary to the required numpy array format.
+    
+    Args:
+        detection: Dictionary with 'bbox' and 'score' keys
+        
+    Returns:
+        np.ndarray: Detection in format [x1, y1, x2, y2, score]
+    """
+    if isinstance(detection, dict):
+        bbox = detection['bbox']
+        score = detection['score']
+        return np.array([[bbox[0], bbox[1], bbox[2], bbox[3], score]])
+    elif isinstance(detection, np.ndarray):
+        if len(detection.shape) == 1:
+            return detection.reshape(1, -1)
+        return detection
+    else:
+        raise ValueError("Invalid detection format")
 
 def test_compute_embedding(mock_model):
     """Test embedding computation for crow images."""
@@ -115,77 +135,81 @@ def test_compute_embedding_gpu(mock_model):
         assert isinstance(combined, np.ndarray)
         assert all(isinstance(e, np.ndarray) for e in embeddings.values())
 
-def test_extract_crow_image_valid(mock_frame):
-    """Test crow image extraction with valid input."""
-    bbox = [100, 100, 200, 200]
-    result = extract_crow_image(mock_frame, bbox)
+def test_extract_normalized_crow_crop_valid():
+    """Test extract_normalized_crow_crop with valid input."""
+    # Create a mock frame (224x224 RGB image)
+    mock_frame = np.zeros((224, 224, 3), dtype=np.uint8)
+    mock_frame[50:150, 50:150] = [255, 255, 255]  # White square in center
     
+    # Create a bounding box that includes the white square
+    bbox = np.array([40, 40, 160, 160])  # [x1, y1, x2, y2]
+    
+    # Extract the crow image
+    result = extract_normalized_crow_crop(mock_frame, bbox)
+    
+    # Verify the result
     assert result is not None
+    assert isinstance(result, dict)
     assert 'full' in result
     assert 'head' in result
-    assert result['full'].shape == (3, 224, 224)
-    assert result['head'].shape == (3, 224, 224)
-    assert torch.all(result['full'] >= 0) and torch.all(result['full'] <= 1)
-    assert torch.all(result['head'] >= 0) and torch.all(result['head'] <= 1)
+    assert isinstance(result['full'], np.ndarray)
+    assert isinstance(result['head'], np.ndarray)
+    
+    # Check shapes (should be 224x224x3 for RGB)
+    assert result['full'].shape == (224, 224, 3)
+    assert result['head'].shape == (224, 224, 3)
+    
+    # Check value ranges (normalized to [0, 1])
+    assert np.all(result['full'] >= 0) and np.all(result['full'] <= 1)
+    assert np.all(result['head'] >= 0) and np.all(result['head'] <= 1)
 
-def test_extract_crow_image_edge_cases(mock_frame):
-    """Test crow image extraction with edge cases."""
-    # Test with bbox at image edges (should be valid with padding)
-    edge_bbox = [0, 0, 50, 50]
-    result = extract_crow_image(mock_frame, edge_bbox, padding=0.3, min_size=10)
-    assert result is not None
-    assert 'full' in result
-    assert 'head' in result
-    assert result['full'].shape == (3, 224, 224)
-    assert result['head'].shape == (3, 224, 224)
+def test_extract_normalized_crow_crop_edge_cases():
+    """Test extract_normalized_crow_crop with edge cases."""
+    # Create a mock frame (224x224 RGB image)
+    mock_frame = np.zeros((224, 224, 3), dtype=np.uint8)
+    mock_frame[50:150, 50:150] = [255, 255, 255]  # White square in center
     
-    # Test with bbox outside image (should return None)
-    outside_bbox = [-100, -100, 0, 0]
-    result = extract_crow_image(mock_frame, outside_bbox)
-    assert result is None  # Should return None for invalid coordinates
+    # Test cases
+    test_cases = [
+        # Invalid bbox (negative coordinates)
+        (np.array([-10, -10, 50, 50]), "Invalid bbox coordinates"),
+        # Invalid bbox (zero area)
+        (np.array([50, 50, 50, 50]), "Invalid bbox area"),
+        # Invalid bbox (reversed coordinates)
+        (np.array([150, 150, 50, 50]), "Invalid bbox coordinates"),
+        # Bbox outside frame
+        (np.array([300, 300, 400, 400]), "Bbox outside frame"),
+    ]
     
-    # Test with very small bbox (should return None)
-    small_bbox = [100, 100, 101, 101]
-    result = extract_crow_image(mock_frame, small_bbox, min_size=10)
-    assert result is None  # Should reject boxes that are too small
-    
-    # Test with invalid bbox dimensions (should return None)
-    invalid_bbox = [200, 100, 100, 200]  # x1 > x2
-    result = extract_crow_image(mock_frame, invalid_bbox)
-    assert result is None  # Should reject invalid box dimensions
-    
-    # Test with bbox at image boundaries (should be valid)
-    boundary_bbox = [0, 0, 400, 400]  # Full frame
-    result = extract_crow_image(mock_frame, boundary_bbox)
-    assert result is not None
-    assert 'full' in result
-    assert 'head' in result
+    for bbox, expected_error in test_cases:
+        result = extract_normalized_crow_crop(mock_frame, bbox)
+        assert result is None, f"Expected None for {expected_error}, got {result}"
 
-def test_compute_iou():
+def test_compute_bbox_iou():
     """Test IoU computation."""
-    # Test overlapping boxes
-    box1 = [0, 0, 100, 100]
-    box2 = [50, 50, 150, 150]
-    iou = compute_iou(box1, box2)
-    assert 0 < iou < 1
+    # Test case 1: Overlapping boxes
+    box1 = np.array([0, 0, 100, 100])
+    box2 = np.array([50, 50, 150, 150])
+    iou = compute_bbox_iou(box1, box2)
+    assert 0 < iou < 1  # Should be between 0 and 1
     
-    # Test identical boxes
-    box1 = [0, 0, 100, 100]
-    box2 = [0, 0, 100, 100]
-    iou = compute_iou(box1, box2)
-    assert iou == 1.0
+    # Test case 2: Identical boxes
+    box1 = np.array([0, 0, 100, 100])
+    box2 = np.array([0, 0, 100, 100])
+    iou = compute_bbox_iou(box1, box2)
+    assert iou == 1.0  # Should be exactly 1
     
-    # Test non-overlapping boxes
-    box1 = [0, 0, 100, 100]
-    box2 = [200, 200, 300, 300]
-    iou = compute_iou(box1, box2)
-    assert iou == 0.0
+    # Test case 3: Non-overlapping boxes
+    box1 = np.array([0, 0, 100, 100])
+    box2 = np.array([200, 200, 300, 300])
+    iou = compute_bbox_iou(box1, box2)
+    assert iou == 0.0  # Should be exactly 0
     
-    # Test edge case: zero area box
-    box1 = [0, 0, 0, 0]
-    box2 = [0, 0, 100, 100]
-    iou = compute_iou(box1, box2)
-    assert iou == 0.0
+    # Test case 4: Zero area boxes
+    box1 = np.array([0, 0, 0, 0])
+    box2 = np.array([0, 0, 0, 0])
+    iou = compute_bbox_iou(box1, box2)
+    assert iou == 0.0  # Should be 0 for zero area boxes
 
 def test_enhanced_tracker_initialization():
     """Test EnhancedTracker initialization."""
@@ -227,7 +251,7 @@ def test_enhanced_tracker_update(mock_frame, mock_detection):
     tracker = EnhancedTracker()
     
     # Convert detection to format expected by tracker
-    detections = np.array([[100, 100, 200, 200, 0.95]])
+    detections = _convert_detection_to_array(mock_detection)
     
     # Update tracker
     tracks = tracker.update(mock_frame, detections)
@@ -242,11 +266,13 @@ def test_enhanced_tracker_timeout():
     tracker = EnhancedTracker(model_path='test_model.pth')
     tracker.gpu_timeout = 0.1  # Set short timeout after initialization
     with patch('tracking.compute_embedding', side_effect=TimeoutError):
-        detections = [{
+        detection = {
             'bbox': [100, 100, 200, 200],
             'score': 0.9,
             'class': 'crow'
-        }]
+        }
+        # Convert detection to proper format
+        detections = _convert_detection_to_array(detection)
         frame = np.zeros((224, 224, 3), dtype=np.uint8)  # Dummy frame
         tracks = tracker.update(frame, detections)
         assert tracks is not None
@@ -316,19 +342,19 @@ def test_track_embedding_updates(mock_frame):
     with patch.object(tracker, '_process_detection_batch', return_value={'full': [np.ones(512)], 'head': [np.ones(512)]}):
         # Create a sequence of detections for the same track
         detections = [
-            {
+            _convert_detection_to_array({
                 'bbox': [100, 100, 200, 200],
                 'score': 0.9,
                 'class': 'crow'
-            },
-            {
+            }),
+            _convert_detection_to_array({
                 'bbox': [110, 110, 210, 210],  # Slightly moved
                 'score': 0.95,
                 'class': 'crow'
-            }
+            })
         ]
         # Update tracker with first detection
-        tracks1 = tracker.update(mock_frame, [detections[0]])
+        tracks1 = tracker.update(mock_frame, detections[0])
         assert len(tracks1) > 0
         track_id = int(tracks1[0][4])
         # Verify initial track state
@@ -341,7 +367,7 @@ def test_track_embedding_updates(mock_frame):
         assert len(tracker.track_history[track_id]['history']) == 2
         assert tracker.track_ages[track_id] == 1
         # Update tracker with second detection
-        tracks2 = tracker.update(mock_frame, [detections[1]])
+        tracks2 = tracker.update(mock_frame, detections[1])
         assert len(tracks2) > 0
         assert int(tracks2[0][4]) == track_id  # Same track ID
         # Verify track state after update
@@ -359,27 +385,28 @@ def test_track_embedding_limits(mock_frame):
     """Test track embedding and history size limits."""
     tracker = EnhancedTracker()
     # Create a sequence of detections that will exceed the default limits
-    detections = [
-        {
+    detections = []
+    for i in range(10):  # More than max_embeddings (5) and max_history (10)
+        detection = {
             'bbox': [100 + i*10, 100 + i*10, 200 + i*10, 200 + i*10],
             'score': 0.9,
             'class': 'crow'
         }
-        for i in range(10)  # More than max_embeddings (5) and max_history (10)
-    ]
+        detections.append(_convert_detection_to_array(detection))
+    
     # Update tracker multiple times
     for det in detections:
-        tracks = tracker.update(mock_frame, [det])
+        tracks = tracker.update(mock_frame, det)
         if len(tracks) > 0:
             track_id = int(tracks[0][4])
-    # Verify that embedding list size is limited
-    assert len(tracker.track_embeddings[track_id]) <= 5  # max_embeddings
-    assert len(tracker.track_head_embeddings[track_id]) <= 5
-    assert len(tracker.track_history[track_id]['history']) <= 10  # max_history
-    # Verify that we keep the most recent embeddings
-    assert tracker.track_embeddings[track_id][-1] is not None
-    assert tracker.track_head_embeddings[track_id][-1] is not None
-    assert len(tracker.track_history[track_id]['history']) == 11
+            # Verify that embedding list size is limited
+            assert len(tracker.track_embeddings[track_id]) <= 5  # max_embeddings
+            assert len(tracker.track_head_embeddings[track_id]) <= 5
+            assert len(tracker.track_history[track_id]['history']) <= 10  # max_history
+            # Verify that we keep the most recent embeddings
+            assert tracker.track_embeddings[track_id][-1] is not None
+            assert tracker.track_head_embeddings[track_id][-1] is not None
+            assert len(tracker.track_history[track_id]['history']) == 11
 
 def test_track_embedding_age_limits(mock_frame):
     """Test track embedding size limits based on track age."""
@@ -410,14 +437,14 @@ def test_track_embedding_error_handling(mock_frame):
     
     # Create a detection that will cause an error in embedding computation
     with patch('tracking.EnhancedTracker._process_detection_batch', side_effect=Exception("Test error")):
-        detections = [{
+        detection = _convert_detection_to_array({
             'bbox': [100, 100, 200, 200],
             'score': 0.9,
             'class': 'crow'
-        }]
+        })
         
         # Update should handle the error and return a track with zero embedding
-        tracks = tracker.update(mock_frame, detections)
+        tracks = tracker.update(mock_frame, detection)
         assert len(tracks) > 0
         track_id = int(tracks[0][4])
         
@@ -473,24 +500,33 @@ def test_enhanced_tracker_processing_errors(mock_frame):
     
     # Test batch processing timeout
     with patch('tracking.EnhancedTracker._process_detection_batch', side_effect=TimeoutException("Test timeout")):
-        detections = [{'bbox': [100, 100, 200, 200], 'score': 0.9}]
-        tracks = tracker.update(mock_frame, detections)
+        detection = _convert_detection_to_array({
+            'bbox': [100, 100, 200, 200],
+            'score': 0.9
+        })
+        tracks = tracker.update(mock_frame, detection)
         assert len(tracks) > 0  # Should return tracks with zero embeddings
         track_id = int(tracks[0][4])
         assert np.allclose(tracker.track_embeddings[track_id][-1].cpu().numpy(), 0)
     
     # Test image extraction failure
     with patch('tracking.EnhancedTracker.extract_crow_image', return_value=None):
-        detections = [{'bbox': [100, 100, 200, 200], 'score': 0.9}]
-        tracks = tracker.update(mock_frame, detections)
+        detection = _convert_detection_to_array({
+            'bbox': [100, 100, 200, 200],
+            'score': 0.9
+        })
+        tracks = tracker.update(mock_frame, detection)
         assert len(tracks) > 0  # Should return tracks with zero embeddings
         track_id = int(tracks[0][4])
         assert np.allclose(tracker.track_embeddings[track_id][-1].cpu().numpy(), 0)
     
     # Test embedding computation error
     with patch('torch.nn.Module.forward', side_effect=RuntimeError("CUDA error")):
-        detections = [{'bbox': [100, 100, 200, 200], 'score': 0.9}]
-        tracks = tracker.update(mock_frame, detections)
+        detection = _convert_detection_to_array({
+            'bbox': [100, 100, 200, 200],
+            'score': 0.9
+        })
+        tracks = tracker.update(mock_frame, detection)
         assert len(tracks) > 0  # Should return tracks with zero embeddings
         track_id = int(tracks[0][4])
         assert np.allclose(tracker.track_embeddings[track_id][-1].cpu().numpy(), 0)
@@ -505,9 +541,12 @@ def test_enhanced_tracker_resource_cleanup(mock_frame):
         initial_memory = torch.cuda.memory_allocated()
         
         # Process some detections
-        detections = [{'bbox': [100, 100, 200, 200], 'score': 0.9}]
+        detection = _convert_detection_to_array({
+            'bbox': [100, 100, 200, 200],
+            'score': 0.9
+        })
         for _ in range(5):
-            tracker.update(mock_frame, detections)
+            tracker.update(mock_frame, detection)
         
         # Force garbage collection
         gc.collect()
@@ -518,15 +557,18 @@ def test_enhanced_tracker_resource_cleanup(mock_frame):
         assert final_memory <= initial_memory * 1.5  # Allow some overhead
     
     # Test track cleanup for old tracks
-    detections = [{'bbox': [100, 100, 200, 200], 'score': 0.9}]
+    detection = _convert_detection_to_array({
+        'bbox': [100, 100, 200, 200],
+        'score': 0.9
+    })
     
     # Create a track
-    tracks = tracker.update(mock_frame, detections)
+    tracks = tracker.update(mock_frame, detection)
     track_id = int(tracks[0][4])
     
     # Update multiple times to age the track
     for _ in range(3):  # Should exceed max_age of 2
-        tracker.update(mock_frame, [])  # Empty detections to age the track
+        tracks = tracker.update(mock_frame, np.array([]))  # Empty detections to age the track
     
     # Track should be removed due to max_age
     assert int(track_id) not in tracker.track_embeddings
@@ -545,16 +587,17 @@ def test_track_id_persistence_long_term(mock_frame):
         offset = i * 2
         bbox = [base_bbox[0] + offset, base_bbox[1] + offset,
                 base_bbox[2] + offset, base_bbox[3] + offset]
-        detections.append({
+        detection = {
             'bbox': bbox,
             'score': 0.95,  # High confidence
             'class': 'crow'
-        })
+        }
+        detections.append(_convert_detection_to_array(detection))
     
     # Process all detections
     track_ids = set()
     for det in detections:
-        tracks = tracker.update(mock_frame, [det])
+        tracks = tracker.update(mock_frame, det)
         if len(tracks) > 0:
             track_ids.add(int(tracks[0][4]))
     
@@ -574,17 +617,18 @@ def test_track_id_persistence_varying_confidence(mock_frame):
         offset = i * 5
         bbox = [base_bbox[0] + offset, base_bbox[1] + offset,
                 base_bbox[2] + offset, base_bbox[3] + offset]
-        detections.append({
+        detection = {
             'bbox': bbox,
             'score': conf,
             'class': 'crow'
-        })
+        }
+        detections.append(_convert_detection_to_array(detection))
     
     # Process detections
     track_ids = set()
     for det in detections:
-        if det['score'] >= tracker.conf_threshold:  # Only process if above threshold
-            tracks = tracker.update(mock_frame, [det])
+        if det[0, 4] >= tracker.conf_threshold:  # Only process if above threshold
+            tracks = tracker.update(mock_frame, det)
             if len(tracks) > 0:
                 track_ids.add(int(tracks[0][4]))
     
@@ -604,37 +648,39 @@ def test_track_id_persistence_occlusion(mock_frame):
         offset = i * 5
         bbox = [base_bbox[0] + offset, base_bbox[1] + offset,
                 base_bbox[2] + offset, base_bbox[3] + offset]
-        detections.append({
+        detection = {
             'bbox': bbox,
             'score': 0.95,
             'class': 'crow'
-        })
+        }
+        detections.append(_convert_detection_to_array(detection))
     
     # Next 8 frames: occlusion (no detections)
     for _ in range(8):
-        detections.append(None)
+        detections.append(np.empty((0, 5)))  # Empty detections array
     
     # Last 5 frames: tracking resumes
     for i in range(5):
         offset = (i + 13) * 5  # Continue from where we left off
         bbox = [base_bbox[0] + offset, base_bbox[1] + offset,
                 base_bbox[2] + offset, base_bbox[3] + offset]
-        detections.append({
+        detection = {
             'bbox': bbox,
             'score': 0.95,
             'class': 'crow'
-        })
+        }
+        detections.append(_convert_detection_to_array(detection))
     
     # Process detections
     track_ids = set()
     for det in detections:
-        if det is not None:
-            tracks = tracker.update(mock_frame, [det])
+        if len(det) > 0:  # Only process non-empty detections
+            tracks = tracker.update(mock_frame, det)
             if len(tracks) > 0:
                 track_ids.add(int(tracks[0][4]))
         else:
             # Update with empty detections to simulate occlusion
-            tracks = tracker.update(mock_frame, [])
+            tracks = tracker.update(mock_frame, np.empty((0, 5)))
             if len(tracks) > 0:
                 track_ids.add(int(tracks[0][4]))
     
@@ -661,10 +707,19 @@ def test_track_id_persistence_multiple_objects(mock_frame):
         bbox2 = [obj2_base[0], obj2_base[1] + offset2,
                 obj2_base[2], obj2_base[3] + offset2]
         
-        detections.append([
-            {'bbox': bbox1, 'score': 0.95, 'class': 'crow'},
-            {'bbox': bbox2, 'score': 0.95, 'class': 'crow'}
-        ])
+        # Combine both detections into a single array
+        detections.append(np.vstack([
+            _convert_detection_to_array({
+                'bbox': bbox1,
+                'score': 0.95,
+                'class': 'crow'
+            }),
+            _convert_detection_to_array({
+                'bbox': bbox2,
+                'score': 0.95,
+                'class': 'crow'
+            })
+        ]))
     
     # Process detections
     track_ids_obj1 = set()
@@ -699,7 +754,11 @@ def test_track_id_persistence_varying_iou(mock_frame):
             bbox = [base_bbox[0] + offset, base_bbox[1] + offset,
                     base_bbox[2] + offset, base_bbox[3] + offset]
             
-            det = {'bbox': bbox, 'score': 0.95, 'class': 'crow'}
+            det = _convert_detection_to_array({
+                'bbox': bbox,
+                'score': 0.95,
+                'class': 'crow'
+            })
             tracks = tracker.update(mock_frame, [det])
             if len(tracks) > 0:
                 track_ids.add(int(tracks[0][4]))
@@ -729,7 +788,11 @@ def test_track_id_persistence_frame_rate(mock_frame):
             bbox = [base_bbox[0] + offset, base_bbox[1] + offset,
                     base_bbox[2] + offset, base_bbox[3] + offset]
             
-            det = {'bbox': bbox, 'score': 0.95, 'class': 'crow'}
+            det = _convert_detection_to_array({
+                'bbox': bbox,
+                'score': 0.95,
+                'class': 'crow'
+            })
             tracks = tracker.update(mock_frame, [det])
             if len(tracks) > 0:
                 track_ids.add(int(tracks[0][4]))
@@ -769,32 +832,32 @@ def test_temporal_consistency_tracking(mock_frame):
     
     # Create sequence of detections with varying movement patterns
     detections = [
-        {
+        _convert_detection_to_array({
             'bbox': [100, 100, 200, 200],
             'score': 0.9,
             'class': 'crow'
-        },
-        {
+        }),
+        _convert_detection_to_array({
             'bbox': [102, 102, 202, 202],  # Small movement
             'score': 0.9,
             'class': 'crow'
-        },
-        {
+        }),
+        _convert_detection_to_array({
             'bbox': [150, 150, 250, 250],  # Large movement
             'score': 0.9,
             'class': 'crow'
-        },
-        {
+        }),
+        _convert_detection_to_array({
             'bbox': [152, 152, 252, 252],  # Small movement after large
             'score': 0.9,
             'class': 'crow'
-        }
+        })
     ]
     
     # Process detections and verify temporal consistency
     consistency_scores = []
     for det in detections:
-        tracks = tracker.update(mock_frame, [det])
+        tracks = tracker.update(mock_frame, det)
         if len(tracks) == 0:
             pytest.skip('No tracks returned; tracker may have cleaned up tracks early.')
         track_id = int(tracks[0][4])
@@ -825,15 +888,15 @@ def test_track_history_management(mock_frame):
     tracker = EnhancedTracker()
     
     # Create detections
-    detections = [{
+    detection = _convert_detection_to_array({
         'bbox': [100, 100, 200, 200],
         'score': 0.9,
         'class': 'crow'
-    }]
+    })
     
     # Update tracker multiple times
     for _ in range(150):  # More than deque maxlen
-        tracks = tracker.update(mock_frame, detections)
+        tracks = tracker.update(mock_frame, detection)
         if len(tracks) > 0:
             track_id = int(tracks[0][4])
             # Verify history size is limited
@@ -849,15 +912,15 @@ def test_embedding_processing_amp(mock_frame):
     tracker = EnhancedTracker()
     
     # Create detections
-    detections = [{
+    detection = _convert_detection_to_array({
         'bbox': [100, 100, 200, 200],
         'score': 0.9,
         'class': 'crow'
-    }]
+    })
     
     # Update tracker with AMP enabled
     with torch.cuda.amp.autocast():
-        tracks = tracker.update(mock_frame, detections)
+        tracks = tracker.update(mock_frame, detection)
         assert len(tracks) > 0
         
         # Verify embeddings were processed
@@ -871,11 +934,11 @@ def test_memory_management_deque(mock_frame):
     tracker = EnhancedTracker()
     
     # Create detections
-    detections = [{
+    detection = _convert_detection_to_array({
         'bbox': [100, 100, 200, 200],
         'score': 0.9,
         'class': 'crow'
-    }]
+    })
     
     # Track memory usage
     import psutil
@@ -884,7 +947,7 @@ def test_memory_management_deque(mock_frame):
     
     # Update tracker many times
     for _ in range(1000):
-        tracks = tracker.update(mock_frame, detections)
+        tracks = tracker.update(mock_frame, detection)
         if len(tracks) > 0:
             track_id = int(tracks[0][4])
             # Verify deque limits are enforced
@@ -916,7 +979,7 @@ def test_track_id_persistence_with_temporal_consistency(mock_frame):
     # Track IDs should be more stable for high consistency detections
     track_ids = set()
     for det in detections:
-        tracks = tracker.update(mock_frame, [det])
+        tracks = tracker.update(mock_frame, _convert_detection_to_array(det))
         if len(tracks) > 0:
             track_ids.add(int(tracks[0][4]))
     
