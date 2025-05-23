@@ -75,6 +75,18 @@ def initialize_database():
         )
         ''')
         
+        c.execute('''
+        CREATE TABLE IF NOT EXISTS image_labels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            image_path TEXT UNIQUE NOT NULL,
+            label TEXT NOT NULL,
+            confidence FLOAT,
+            reviewer_notes TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_training_data BOOLEAN DEFAULT 1
+        )
+        ''')
+        
         conn.commit()
         conn.close()
         logger.info("Database initialized successfully")
@@ -581,6 +593,248 @@ def clear_database():
                 conn.close()
             except:
                 pass
+
+def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_training_data=True):
+    """Add or update an image label."""
+    conn = None
+    try:
+        conn = get_connection()
+        conn.execute("BEGIN TRANSACTION")
+        cursor = conn.cursor()
+        
+        # Validate inputs
+        if not os.path.exists(image_path):
+            raise ValueError(f"Image path does not exist: {image_path}")
+            
+        if label not in ['crow', 'not_a_crow', 'not_sure']:
+            raise ValueError(f"Invalid label: {label}. Must be 'crow', 'not_a_crow', or 'not_sure'")
+            
+        if confidence is not None and not 0 <= confidence <= 1:
+            raise ValueError("Confidence must be between 0 and 1")
+            
+        # Insert or update label
+        cursor.execute('''
+            INSERT OR REPLACE INTO image_labels 
+            (image_path, label, confidence, reviewer_notes, is_training_data)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (image_path, label, confidence, reviewer_notes, is_training_data))
+        
+        label_id = cursor.lastrowid
+        conn.commit()
+        logger.info(f"Added/updated label for {image_path}: {label}")
+        return label_id
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Error adding image label: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
+
+def get_unlabeled_images(limit=20, from_directory=None):
+    """Get unlabeled images for review."""
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # If no directory specified, scan the default crop directories
+        if from_directory is None:
+            crop_dirs = ['crow_crops', 'crow_crops/crows']
+        else:
+            crop_dirs = [from_directory]
+            
+        unlabeled_images = []
+        
+        for crop_dir in crop_dirs:
+            if not os.path.exists(crop_dir):
+                continue
+                
+            # Find all image files
+            for root, dirs, files in os.walk(crop_dir):
+                for file in files:
+                    if file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        image_path = os.path.join(root, file)
+                        
+                        # Check if already labeled
+                        cursor.execute('SELECT id FROM image_labels WHERE image_path = ?', (image_path,))
+                        if not cursor.fetchone():
+                            unlabeled_images.append(image_path)
+                            
+                        if len(unlabeled_images) >= limit:
+                            break
+                            
+                if len(unlabeled_images) >= limit:
+                    break
+                    
+        # Shuffle to get random selection
+        import random
+        random.shuffle(unlabeled_images)
+        return unlabeled_images[:limit]
+        
+    except Exception as e:
+        logger.error(f"Error getting unlabeled images: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def get_image_label(image_path):
+    """Get the label for a specific image."""
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT label, confidence, reviewer_notes, timestamp, is_training_data
+            FROM image_labels 
+            WHERE image_path = ?
+        ''', (image_path,))
+        
+        row = cursor.fetchone()
+        if row:
+            return {
+                'label': row[0],
+                'confidence': row[1],
+                'reviewer_notes': row[2],
+                'timestamp': row[3],
+                'is_training_data': bool(row[4])
+            }
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error getting image label: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def remove_from_training_data(image_path):
+    """Mark an image as not suitable for training data."""
+    return add_image_label(image_path, 'not_a_crow', is_training_data=False)
+
+def get_training_data_stats():
+    """Get statistics about labeled training data."""
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                label,
+                COUNT(*) as count,
+                AVG(confidence) as avg_confidence
+            FROM image_labels 
+            WHERE is_training_data = 1
+            GROUP BY label
+        ''')
+        
+        stats = {}
+        for row in cursor.fetchall():
+            stats[row[0]] = {
+                'count': row[1],
+                'avg_confidence': row[2] if row[2] else 0
+            }
+            
+        # Get total counts
+        cursor.execute('SELECT COUNT(*) FROM image_labels WHERE is_training_data = 1')
+        stats['total_labeled'] = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM image_labels WHERE is_training_data = 0')
+        stats['total_excluded'] = cursor.fetchone()[0]
+        
+        return stats
+        
+    except Exception as e:
+        logger.error(f"Error getting training data stats: {e}")
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
+def get_training_suitable_images(directory=None):
+    """Get images that are suitable for training (not labeled as 'not_a_crow')."""
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # If no directory specified, scan the default crop directories
+        if directory is None:
+            crop_dirs = ['crow_crops', 'crow_crops/crows']
+        else:
+            crop_dirs = [directory]
+            
+        suitable_images = []
+        
+        for crop_dir in crop_dirs:
+            if not os.path.exists(crop_dir):
+                continue
+                
+            # Find all image files
+            for root, dirs, files in os.walk(crop_dir):
+                for file in files:
+                    if file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        image_path = os.path.join(root, file)
+                        
+                        # Check if this image is labeled as not suitable for training
+                        cursor.execute('''
+                            SELECT label, is_training_data 
+                            FROM image_labels 
+                            WHERE image_path = ?
+                        ''', (image_path,))
+                        
+                        result = cursor.fetchone()
+                        if result:
+                            label, is_training_data = result
+                            # Include only if it's marked as training data and not labeled as 'not_a_crow'
+                            if is_training_data and label != 'not_a_crow':
+                                suitable_images.append(image_path)
+                        else:
+                            # If not labeled, assume it's suitable (for backward compatibility)
+                            suitable_images.append(image_path)
+                            
+        return suitable_images
+        
+    except Exception as e:
+        logger.error(f"Error getting training suitable images: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def is_image_training_suitable(image_path):
+    """Check if a specific image is suitable for training."""
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT label, is_training_data 
+            FROM image_labels 
+            WHERE image_path = ?
+        ''', (image_path,))
+        
+        result = cursor.fetchone()
+        if result:
+            label, is_training_data = result
+            # Suitable if marked as training data and not labeled as 'not_a_crow'
+            return is_training_data and label != 'not_a_crow'
+        else:
+            # If not labeled, assume it's suitable (for backward compatibility)
+            return True
+            
+    except Exception as e:
+        logger.error(f"Error checking if image is training suitable: {e}")
+        return True  # Default to suitable if there's an error
+    finally:
+        if conn:
+            conn.close()
 
 # Initialize database on module import
 initialize_database() 
