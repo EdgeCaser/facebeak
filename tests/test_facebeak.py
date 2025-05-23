@@ -20,27 +20,16 @@ class TestFacebeak(unittest.TestCase):
         self.metadata = video_test_data['metadata']
         self.dataset = CrowTripletDataset(str(self.base_dir), split='train')
         
-        # Get a video file and extract its audio for testing
+        # Get an audio file for testing (already extracted by the fixture)
         for crow_id, crow_data in self.metadata.items():
             crow_dir = self.base_dir / crow_id
-            video_files = list(crow_dir.glob("*.mp4"))
-            if video_files:
-                self.video_path = video_files[0]
-                # Extract audio for testing
-                audio_path = crow_dir / "audio" / f"{self.video_path.stem}.wav"
-                audio_path.parent.mkdir(exist_ok=True)
-                try:
-                    subprocess.run([
-                        "ffmpeg", "-i", str(self.video_path),
-                        "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1", "-y",
-                        str(audio_path)
-                    ], check=True, capture_output=True)
-                    self.audio_path = audio_path
-                    break
-                except subprocess.CalledProcessError:
-                    continue
+            audio_dir = crow_dir / "audio"
+            audio_files = list(audio_dir.glob("*.wav"))
+            if audio_files:
+                self.audio_path = audio_files[0]
+                break
         else:
-            pytest.skip("No valid video files found in test data")
+            pytest.skip("No valid audio files found in test data")
 
     def tearDown(self):
         """Clean up after each test."""
