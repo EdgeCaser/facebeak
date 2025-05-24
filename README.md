@@ -11,16 +11,22 @@ The facebeak system consists of multiple integrated components that work togethe
 1. **Data Extraction** (`extract_training_data.py`, `extract_training_gui.py`)
    - Processes input videos to detect and extract individual crow images
    - Uses Faster R-CNN and YOLOv8 models to identify birds in each frame
+   - **NEW**: Multi-crow detection with IoU-based overlap analysis
+   - **NEW**: Enhanced confidence thresholding and false positive reduction
+   - **NEW**: Multi-view processing for YOLO and Faster R-CNN models
    - Saves high-quality crow crops to the `crow_crops` directory
    - Each crow gets its own subdirectory with multiple images from different frames
    - GUI version provides real-time progress monitoring and parameter tuning
 
-2. **Advanced Model Training** (`train_improved.py`, `improved_dataset.py`, `improved_triplet_loss.py`)
+2. **Advanced Model Training** (`train_improved.py`, `improved_dataset.py`, `improved_triplet_loss.py`, `quick_start_training.py`)
    - **NEW**: Upgraded training system with 512-dimensional embeddings (4x more capacity)
+   - **NEW**: RTX 3080 optimized training with automatic batch size adjustment
+   - **NEW**: `quick_start_training.py` - One-click overnight training setup
    - **NEW**: Advanced triplet loss with adaptive mining strategies
    - **NEW**: Data augmentation and curriculum learning for better performance
    - **NEW**: Real-time training monitoring with separability metrics
    - **NEW**: Automatic checkpointing and early stopping
+   - **NEW**: Multi-crow labeling and filtering for training data quality
    - Trains ResNet-18 models using triplet loss to learn crow visual identities
    - Learns to make similar crows look similar and different crows look different
    - Can be retrained with new data to continuously improve accuracy
@@ -31,6 +37,7 @@ The facebeak system consists of multiple integrated components that work togethe
    - Maintains a comprehensive database of known crows and their sighting history
    - **NEW**: Advanced temporal consistency algorithms
    - **NEW**: Multi-view extraction for improved recognition
+   - **NEW**: Enhanced multi-crow scene handling
    - Outputs annotated videos with crow IDs and tracking information
 
 ### New Advanced Tools & Features
@@ -38,6 +45,7 @@ The facebeak system consists of multiple integrated components that work togethe
 4. **Suspect Lineup Tool** (`suspect_lineup.py`) - **MAJOR NEW FEATURE**
    - Interactive GUI for manual verification and correction of crow identifications
    - Photo lineup interface similar to police identification procedures
+   - **NEW**: Multi-crow labeling support with "multiple crows" option
    - Allows users to confirm, reject, or reassign crow identity classifications
    - Supports splitting misidentified crows into separate individuals
    - Comprehensive testing suite with 95%+ coverage
@@ -45,12 +53,20 @@ The facebeak system consists of multiple integrated components that work togethe
 
 5. **Image Review System** (`image_reviewer.py`) - **NEW QUALITY CONTROL**
    - Manual image labeling tool for training data quality improvement
+   - **NEW**: Multi-crow detection and labeling ("This image contains multiple crows")
+   - **NEW**: Enhanced filtering to exclude multi-crow images from training
    - Batch processing of up to 100 images at a time
-   - Keyboard shortcuts for rapid classification (1=Crow, 2=Not Crow, 3=Unsure)
+   - Keyboard shortcuts for rapid classification (1=Crow, 2=Not Crow, 3=Unsure, 4=Multi-Crow)
    - Automatic exclusion of false positives from training data
    - Progress tracking and statistics reporting
 
-6. **Advanced Clustering Analysis** (`crow_clustering.py`) - **NEW ANALYTICS**
+6. **Advanced Clustering Analysis** (`crow_clustering.py`, `tSNE_ClusterReviewer.py`) - **NEW ANALYTICS**
+   - **NEW**: `tSNE_ClusterReviewer.py` - Comprehensive embedding space analysis
+   - **NEW**: Interactive t-SNE visualizations with Plotly
+   - **NEW**: Multi-perplexity analysis for optimal visualization
+   - **NEW**: Quality issue detection: outliers, duplicates, low-confidence crops
+   - **NEW**: DBSCAN clustering with automatic parameter optimization
+   - **NEW**: Comprehensive analysis reports with actionable recommendations
    - DBSCAN-based clustering to identify potential duplicate crow IDs
    - Parameter optimization with grid search and validation
    - Temporal consistency analysis for video sequences
@@ -60,6 +76,7 @@ The facebeak system consists of multiple integrated components that work togethe
 7. **Database Security & Management** (`db_security.py`, `sync_database.py`) - **NEW SECURITY**
    - **NEW**: Automatic database encryption with secure key management
    - **NEW**: PBKDF2-based password protection for sensitive crow data
+   - **NEW**: Multi-crow label support in database schema
    - **NEW**: Database integrity checking and corruption detection
    - **NEW**: Automatic backup creation during security operations
    - Database synchronization tools for crop directory management
@@ -75,9 +92,11 @@ The facebeak system consists of multiple integrated components that work togethe
 
 9. **Comprehensive Training Suite**
    - **NEW**: `train_improved.py` - Production-ready training with advanced features
-   - **NEW**: `improved_dataset.py` - Smart dataset handling with augmentation
+   - **NEW**: `quick_start_training.py` - RTX 3080 optimized overnight training
+   - **NEW**: `improved_dataset.py` - Smart dataset handling with augmentation and multi-crow filtering
    - **NEW**: `models.py` - Flexible model architectures supporting 128D to 512D embeddings
    - **NEW**: `simple_evaluate.py` - Quick model evaluation and performance metrics
+   - **NEW**: Auto-detection of multi-crow crops and exclusion from training
    - Real-time progress monitoring and visualization
    - Automatic hyperparameter optimization based on dataset size
 
@@ -89,12 +108,16 @@ The facebeak system consists of multiple integrated components that work togethe
     - Continuous integration ready
 
 ## Features
-- **Advanced Detection**: Multi-model bird detection (Faster R-CNN, YOLOv8)
+- **Advanced Detection**: Multi-model bird detection (Faster R-CNN, YOLOv8) with multi-view processing
+- **Multi-Crow Handling**: IoU-based overlap detection and specialized labeling
 - **Persistent Tracking**: Visual embeddings with 512D feature spaces
+- **RTX 3080 Optimized**: Automatic GPU memory management and batch size optimization
+- **Overnight Training**: One-click setup for extended training sessions
+- **Interactive Analysis**: t-SNE visualization with quality issue detection
 - **Secure Database**: Encrypted SQLite with automatic backup systems
 - **Interactive Tools**: GUI-based suspect lineup and image review systems
-- **Quality Control**: Manual verification and false positive filtering
-- **Analytics**: Clustering analysis and duplicate detection
+- **Quality Control**: Manual verification and false positive filtering with multi-crow support
+- **Analytics**: Clustering analysis and duplicate detection with comprehensive reporting
 - **Scalability**: Designed for 1000+ individual crows
 - **Security**: Database encryption and privacy protection
 - **Comprehensive Testing**: 90%+ test coverage with automated validation
@@ -115,6 +138,40 @@ The facebeak system consists of multiple integrated components that work togethe
 
 ### Using the Program
 
+#### **NEW**: Enhanced Video Processing GUI
+1. Run `python extract_training_gui.py` to start the enhanced video processing interface
+2. **NEW Detection Settings**:
+   - **Min Confidence**: Start with 0.5 (higher = fewer false positives)
+   - **Min Detections**: Keep at 3 (ensures quality training data)
+   - **Enable Multi-view for YOLO**: ✅ Recommended for better crow detection
+   - **Enable Multi-view for Faster R-CNN**: ❌ Can cause false positives
+3. Select your video directory and start processing
+4. **NEW**: Real-time preview shows detection quality
+5. **NEW**: Automatic exclusion of multi-crow crops from training data
+
+#### **NEW**: Overnight Training Setup (RTX 3080 Optimized)
+1. After processing videos with the GUI, run:
+   ```bash
+   python quick_start_training.py
+   ```
+2. **Optimized Settings**:
+   - Automatic batch size 32 for RTX 3080
+   - 512D embeddings for maximum capacity
+   - 100 epochs for overnight training
+   - Early stopping to prevent overfitting
+3. Training will run overnight and save the best model automatically
+
+#### **NEW**: Embedding Space Analysis
+1. After training completes, analyze your results:
+   ```bash
+   python tSNE_ClusterReviewer.py
+   ```
+2. **Interactive Features**:
+   - Interactive t-SNE plots with hover details
+   - Quality issue detection and reporting
+   - Outlier identification for manual review
+   - Cluster analysis and validation
+
 #### Main Video Processing
 1. Double-click `gui_launcher.py` to start the program
    - If that doesn't work, right-click the file and select "Open with Python"
@@ -122,43 +179,45 @@ The facebeak system consists of multiple integrated components that work togethe
    - Click "Browse" to select your video file
    - The output video will be saved as "output.mp4" by default
    - Adjust the settings if needed:
-     * Detection Threshold (0.3 is recommended to start)
+     * Detection Threshold (0.5 is now recommended for better quality)
      * Similarity Threshold (0.85 is recommended to start)
      * Frame Skip (1 means process every frame)
 3. Click "Run facebeak" to start processing
 4. Wait for the process to complete - you can monitor progress in the output box
 5. Find your processed video in the same folder as the input video
 
-#### **NEW**: Suspect Lineup Tool (Identity Verification)
+#### **ENHANCED**: Suspect Lineup Tool (Identity Verification)
 1. After processing videos, click "Launch Suspect Lineup" in the GUI launcher
 2. Select a crow ID from the dropdown
-3. Review the photo lineup and mark correct/incorrect identifications
-4. Use the tool to split misidentified crows or merge duplicate entries
-5. Save changes to update the database
+3. **NEW**: Use "This image contains multiple crows" option for multi-crow scenes
+4. Review the photo lineup and mark correct/incorrect identifications
+5. Use the tool to split misidentified crows or merge duplicate entries
+6. Save changes to update the database
 
-#### **NEW**: Image Review Tool (Quality Control)
+#### **ENHANCED**: Image Review Tool (Quality Control)
 1. Click "Launch Image Reviewer" in the GUI launcher
-2. Use keyboard shortcuts to quickly label images:
+2. **NEW Enhanced Shortcuts**:
    - Press `1` for confirmed crows
    - Press `2` for false positives (not crows)
    - Press `3` for uncertain cases
+   - **NEW**: Press `4` for multiple crows (automatically excluded from training)
 3. Review batches of 50-100 images for efficiency
-4. False positives are automatically excluded from training
-
-#### **NEW**: Advanced Training System
-1. Extract training data: Use "Extract Training Data" in the GUI
-2. Start improved training: Run `python train_improved.py --config training_config.json`
-3. Monitor progress in real-time with generated plots and logs
-4. New model will be saved as `crow_resnet_triplet_improved.pth`
+4. **NEW**: Multi-crow images are automatically excluded from training
+5. False positives are automatically excluded from training
 
 ### Tips for Best Results
+- **NEW**: Start with Min Confidence 0.5 instead of 0.3 for cleaner detection
+- **NEW**: Use only YOLO multi-view initially to avoid Faster R-CNN false positives
+- **NEW**: Review detection quality in the GUI preview before full processing
+- **NEW**: Use overnight training for best results with RTX 3080 optimization
 - Use clear, well-lit videos for best detection
 - Keep the camera as steady as possible
 - For faster processing, increase the Frame Skip value
 - **NEW**: Use the Image Review tool to clean up training data
 - **NEW**: Use the Suspect Lineup tool to verify identifications
+- **NEW**: Run t-SNE analysis after training to validate model quality
 - If birds aren't being detected:
-  * Try lowering the Detection Threshold (e.g., to 0.2)
+  * Try lowering the Detection Threshold (e.g., to 0.3)
   * Ensure good lighting and clear video
 - If birds are being misidentified:
   * Try increasing the Similarity Threshold (e.g., to 0.9)
@@ -171,6 +230,8 @@ The facebeak system consists of multiple integrated components that work togethe
   1. Open command prompt (Windows) or terminal (Mac/Linux)
   2. Navigate to the program folder
   3. Type `python gui_launcher.py` and press Enter
+- **NEW**: If you see many false positive detections, increase Min Confidence to 0.6-0.7
+- **NEW**: If Faster R-CNN produces false positives, disable its multi-view option
 - **NEW**: If database issues occur, check the logs in the `logs/` directory
 - **NEW**: Use `python sync_database.py` to fix database/file mismatches
 - For other issues, check the output box for error messages
@@ -179,17 +240,48 @@ The facebeak system consists of multiple integrated components that work togethe
 
 ### Requirements
 - Python 3.11.9
+- RTX 3080 or compatible GPU (recommended for overnight training)
 - See `requirements.txt` for complete dependency list
-- **NEW**: Added cryptography, scikit-learn, librosa, and testing frameworks
+- **NEW**: Added plotly, scikit-learn enhanced for advanced analysis
 
 ### Usage
 
-#### Basic Video Processing
+#### **NEW**: Optimized Video Processing
 ```bash
-python main.py --video sample.mp4 --output output.mp4 --detection-threshold 0.3 --similarity-threshold 0.75 --skip 1
+# Enhanced GUI with multi-crow detection
+python extract_training_gui.py
+
+# Command line with improved settings
+python extract_training_data.py "videos/" --min-confidence 0.5 --min-detections 3 --batch-size 32
 ```
 
-#### **NEW**: Advanced Training
+#### **NEW**: RTX 3080 Optimized Training
+```bash
+# One-click overnight training setup
+python quick_start_training.py
+
+# Advanced training with custom parameters
+python train_improved.py --embedding-dim 512 --batch-size 32 --epochs 100 --early-stopping
+```
+
+#### **NEW**: Advanced Analysis & Quality Control
+```bash
+# Comprehensive embedding analysis
+python tSNE_ClusterReviewer.py
+
+# Multi-crow aware image review
+python image_reviewer.py
+
+# Enhanced suspect lineup with multi-crow support
+python suspect_lineup.py
+```
+
+#### Basic Video Processing
+```bash
+python main.py --video sample.mp4 --output output.mp4 --detection-threshold 0.5 --similarity-threshold 0.75 --skip 1
+```
+
+#### **ENHANCED**: Advanced Training
 ```bash
 # Setup training configuration (analyzes your dataset)
 python setup_improved_training.py
@@ -201,19 +293,22 @@ python train_improved.py --config training_config.json
 python simple_evaluate.py --model-path crow_resnet_triplet_improved.pth
 ```
 
-#### **NEW**: Data Quality Tools
+#### **ENHANCED**: Data Quality Tools
 ```bash
 # Sync database with crop directories
 python sync_database.py
 
-# Launch suspect lineup for identity verification
+# Launch suspect lineup for identity verification (now with multi-crow support)
 python suspect_lineup.py
 
-# Launch image reviewer for quality control
+# Launch image reviewer for quality control (now with multi-crow labeling)
 python image_reviewer.py
 
 # Run clustering analysis
 python crow_clustering.py --crow-id 123 --output clustering_results/
+
+# NEW: Comprehensive embedding space analysis
+python tSNE_ClusterReviewer.py
 ```
 
 #### **NEW**: Testing & Validation
@@ -231,11 +326,13 @@ python -m pytest tests/ --cov=. --cov-report=html
 ### Command Line Options
 - `--video`: Path to input video
 - `--output`: Path to save output video
-- `--detection-threshold`: Detection confidence threshold (lower = more sensitive)
+- `--detection-threshold`: Detection confidence threshold (0.5 recommended for quality)
 - `--similarity-threshold`: Visual similarity threshold for tracking (lower = more tolerant)
 - `--skip`: Frame skip interval (1 = every frame)
-- **NEW**: `--embedding-dim`: Embedding dimension (128, 256, 512)
+- **NEW**: `--embedding-dim`: Embedding dimension (128, 256, 512) - 512 recommended
 - **NEW**: `--model-path`: Path to trained model file
+- **NEW**: `--min-detections`: Minimum detections per crow (3 recommended)
+- **NEW**: `--batch-size`: Training batch size (32 optimal for RTX 3080)
 
 ## Security & Privacy
 
@@ -398,22 +495,5 @@ python -m pytest tests/test_sync_database.py -v
 - **Quality Assurance**: Automated validation of all critical system components
 - **Performance Monitoring**: Continuous benchmarking and optimization verification
 
-## Roadmap
-
-### Current Version Features ✅
-- ✅ Advanced 512D embedding models
-- ✅ Suspect lineup identity verification system
-- ✅ Image review and quality control tools
-- ✅ Database encryption and security
-- ✅ Comprehensive testing suite (95%+ coverage, 8,000+ lines of tests)
-- ✅ Multi-view processing for improved recognition
-- ✅ Clustering analysis and duplicate detection
-- ✅ Advanced training pipeline with curriculum learning
-
-### Planned Features 🚧
-- 🚧 **Audio Analysis**: Crow call recognition and classification
-- 🚧 **UV Support**: Ultraviolet spectrum analysis for enhanced identification 
-- 🚧 **Cloud Integration**: Train on cloud hardware
-- 🚧 **Active Learning**: Automatic identification of challenging cases
-- 🚧 **Behavioral Analysis**: Movement pattern and personality profiling
+## Roadmap### Current Version Features ✅- ✅ Advanced 512D embedding models- ✅ **NEW**: Multi-crow detection and specialized labeling system- ✅ **NEW**: RTX 3080 optimized overnight training pipeline- ✅ **NEW**: Interactive t-SNE embedding space analysis with quality detection- ✅ **NEW**: Enhanced confidence thresholding and false positive reduction- ✅ Suspect lineup identity verification system with multi-crow support- ✅ Image review and quality control tools with multi-crow labeling- ✅ Database encryption and security with multi-crow schema support- ✅ Comprehensive testing suite (95%+ coverage, 8,000+ lines of tests)- ✅ Multi-view processing for improved recognition- ✅ Clustering analysis and duplicate detection with comprehensive reporting- ✅ Advanced training pipeline with curriculum learning and auto-filtering- ✅ **NEW**: One-click training setup with automatic parameter optimization### Planned Features 🚧- 🚧 **Audio Analysis**: Crow call recognition and classification- 🚧 **UV Support**: Ultraviolet spectrum analysis for enhanced identification - 🚧 **Cloud Integration**: Train on cloud hardware- 🚧 **Active Learning**: Automatic identification of challenging cases- 🚧 **Behavioral Analysis**: Movement pattern and personality profiling- 🚧 **Real-time Processing**: Live video stream analysis- 🚧 **Mobile App**: Field data collection and identification
 
