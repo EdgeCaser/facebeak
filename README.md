@@ -412,17 +412,8 @@ python -m pytest tests/test_sync_database.py -v
 
 ### Planned Features 🚧
 - 🚧 **Audio Analysis**: Crow call recognition and classification
-- 🚧 **UV Support**: Ultraviolet spectrum analysis for enhanced identification
-- 🚧 **Mobile App**: Smartphone interface for field researchers
-- 🚧 **Cloud Integration**: Multi-researcher collaboration platform
+- 🚧 **UV Support**: Ultraviolet spectrum analysis for enhanced identification 
+- 🚧 **Cloud Integration**: Train on cloud hardware
 - 🚧 **Active Learning**: Automatic identification of challenging cases
 - 🚧 **Behavioral Analysis**: Movement pattern and personality profiling
-- 🚧 **API Integration**: RESTful API for third-party applications
-- 🚧 **Real-time Processing**: Live video stream analysis
 
-### Future Enhancements 🔮
-- Advanced neural architectures (Vision Transformers, CLIP)
-- Multi-species support expansion
-- Federated learning for privacy-preserving collaboration
-- Edge device deployment (mobile/embedded systems)
-- Integration with citizen science platforms
