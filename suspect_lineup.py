@@ -370,6 +370,8 @@ class SuspectLineup:
                                variable=var, value="different_crow").grid(row=1, column=0, sticky=tk.W)
                 ttk.Radiobutton(radio_frame, text="This not a crow", 
                                variable=var, value="not_crow").grid(row=2, column=0, sticky=tk.W)
+                ttk.Radiobutton(radio_frame, text="Multiple crows in image", 
+                               variable=var, value="multi_crow").grid(row=3, column=0, sticky=tk.W)
                 
                 # Bind change event to track unsaved changes
                 var.trace('w', self.on_selection_change)
@@ -419,6 +421,7 @@ class SuspectLineup:
             # Process image classifications
             images_to_reassign = []
             images_to_remove = []
+            images_multi_crow = []
             
             for img_path, var in self.image_selections.items():
                 selection = var.get()
@@ -426,15 +429,19 @@ class SuspectLineup:
                     images_to_reassign.append(img_path)
                 elif selection == "not_crow":
                     images_to_remove.append(img_path)
+                elif selection == "multi_crow":
+                    images_multi_crow.append(img_path)
                     
             # Handle reassignments and removals
-            if images_to_reassign or images_to_remove:
-                result = self.process_reassignments(images_to_reassign, images_to_remove)
+            total_to_process = images_to_reassign + images_to_remove + images_multi_crow
+            if total_to_process:
+                result = self.process_reassignments(images_to_reassign, images_to_remove, images_multi_crow)
                 if result:
                     messagebox.showinfo("Success", 
                         f"Changes saved successfully!\n"
                         f"Images reassigned: {len(images_to_reassign)}\n"
-                        f"Images marked as not-crow: {len(images_to_remove)}")
+                        f"Images marked as not-crow: {len(images_to_remove)}\n"
+                        f"Images marked as multi-crow: {len(images_multi_crow)}")
                 else:
                     messagebox.showerror("Error", "Failed to save some changes")
             else:
@@ -452,11 +459,11 @@ class SuspectLineup:
             logger.error(f"Error saving changes: {e}")
             messagebox.showerror("Error", f"Failed to save changes: {str(e)}")
             
-    def process_reassignments(self, images_to_reassign, images_to_remove):
+    def process_reassignments(self, images_to_reassign, images_to_remove, images_multi_crow):
         """Process image reassignments and removals."""
         try:
             success_count = 0
-            total_operations = len(images_to_reassign) + len(images_to_remove)
+            total_operations = len(images_to_reassign) + len(images_to_remove) + len(images_multi_crow)
             
             # Handle images to remove (mark as not-crow)
             if images_to_remove:
@@ -513,6 +520,21 @@ class SuspectLineup:
                         logger.info("User cancelled reassignment")
                 else:
                     logger.warning("No embeddings found for images marked for reassignment")
+            
+            # Handle images marked as multi-crow (remove from current crow's embeddings and add appropriate label)
+            if images_multi_crow:
+                logger.info(f"Processing {len(images_multi_crow)} images marked as multi-crow")
+                
+                # Get embedding IDs for images marked as multi-crow
+                multi_crow_embedding_map = get_embedding_ids_by_image_paths(images_multi_crow)
+                multi_crow_embedding_ids = list(multi_crow_embedding_map.values())
+                
+                if multi_crow_embedding_ids:
+                    deleted_count = delete_crow_embeddings(multi_crow_embedding_ids)
+                    logger.info(f"Deleted {deleted_count} embeddings for multi-crow images")
+                    success_count += len(multi_crow_embedding_ids)
+                else:
+                    logger.warning("No embeddings found for images marked as multi-crow")
             
             return success_count == total_operations
             
