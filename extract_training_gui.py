@@ -238,6 +238,10 @@ class CrowExtractorGUI:
         ttk.Checkbutton(settings_frame, text="Enable Multi-View for YOLO", variable=self.mv_yolo_var).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=2)
         ttk.Checkbutton(settings_frame, text="Enable Multi-View for Faster R-CNN", variable=self.mv_rcnn_var).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=2)
         
+        # Orientation correction checkbox
+        self.orientation_correction_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(settings_frame, text="Auto-correct crow orientation", variable=self.orientation_correction_var).grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=2)
+        
         # Audio settings frame
         audio_frame = ttk.LabelFrame(self.left_panel, text="Audio Settings", padding="5")
         audio_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
@@ -386,16 +390,19 @@ class CrowExtractorGUI:
         # Initialize tracker with audio settings
         enable_audio = self.enable_audio_var.get()
         audio_duration = self.audio_duration_var.get()
+        correct_orientation = self.orientation_correction_var.get()
         
         self.tracker = CrowTracker(
             output_dir, 
             enable_audio_extraction=enable_audio,
-            audio_duration=audio_duration
+            audio_duration=audio_duration,
+            correct_orientation=correct_orientation
         )
         
         logger.info(f"Audio extraction: {'enabled' if enable_audio else 'disabled'}")
         if enable_audio:
             logger.info(f"Audio duration: {audio_duration} seconds")
+        logger.info(f"Orientation correction: {'enabled' if correct_orientation else 'disabled'}")
         
         # Enable save button when processing starts
         self.save_button.config(state=tk.NORMAL)

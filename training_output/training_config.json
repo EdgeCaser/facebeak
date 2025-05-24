@@ -3,13 +3,13 @@
   "audio_dir": "crow_audio",
   "output_dir": "training_output",
   "batch_size": 32,
-  "learning_rate": 0.0001,
-  "epochs": 50,
+  "learning_rate": 0.001,
+  "epochs": 10,
   "val_split": 0.2,
   "embed_dim": 512,
   "margin": 1.0,
-  "patience": 5,
+  "patience": 10,
   "device": "cuda",
-  "timestamp": "2025-05-22T09:12:03.639637",
-  "session_id": "b8ca58b2"
+  "timestamp": "2025-05-24T15:47:29.590618",
+  "session_id": "8db04073"
 }

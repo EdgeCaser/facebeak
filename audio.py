@@ -5,135 +5,10 @@ import logging
 import soundfile as sf
 import warnings
 import subprocess
-import tempfile
 from pathlib import Path
+import tempfile
 
 logger = logging.getLogger(__name__)
-
-
-def extract_audio_segment_from_video(video_path, start_time, duration, output_path=None, sr=16000):
-    """
-    Extract audio segment from video file at specific timestamp.
-    
-    Args:
-        video_path: Path to video file
-        start_time: Start time in seconds
-        duration: Duration of audio segment in seconds
-        output_path: Output path for audio file (optional, will create temp file if None)
-        sr: Sample rate for output audio
-    
-    Returns:
-        tuple: (audio_array, sample_rate, output_path) or None if extraction fails
-    """
-    try:
-        # Create temporary output file if none provided
-        if output_path is None:
-            temp_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
-            output_path = temp_file.name
-            temp_file.close()
-        
-        # Use ffmpeg to extract audio segment
-        cmd = [
-            'ffmpeg', '-y',  # Overwrite output file
-            '-i', str(video_path),
-            '-ss', str(start_time),  # Start time
-            '-t', str(duration),     # Duration
-            '-vn',                   # No video
-            '-acodec', 'pcm_s16le',  # PCM 16-bit little endian
-            '-ar', str(sr),          # Sample rate
-            '-ac', '1',              # Mono
-            str(output_path)
-        ]
-        
-        # Run ffmpeg with error handling
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            logger.warning(f"FFmpeg extraction failed: {result.stderr}")
-            return None
-        
-        # Verify the output file exists and has content
-        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            logger.warning(f"Audio extraction produced empty file: {output_path}")
-            return None
-        
-        # Load the extracted audio
-        try:
-            y, sr_actual = sf.read(output_path)
-            if len(y.shape) > 1:  # Convert to mono if stereo
-                y = y.mean(axis=1)
-        except Exception as e:
-            logger.warning(f"Could not read extracted audio with soundfile: {e}")
-            try:
-                y, sr_actual = librosa.load(output_path, sr=sr, mono=True)
-            except Exception as e2:
-                logger.error(f"Could not read extracted audio with librosa: {e2}")
-                return None
-        
-        logger.debug(f"Extracted audio segment: {len(y)} samples at {sr_actual} Hz")
-        return y, sr_actual, output_path
-        
-    except Exception as e:
-        logger.error(f"Error extracting audio segment from {video_path}: {str(e)}")
-        return None
-
-
-def extract_and_save_crow_audio(video_path, frame_time, fps, crow_id, frame_num, audio_dir, duration=2.0):
-    """
-    Extract audio segment corresponding to a crow crop and save it.
-    
-    Args:
-        video_path: Path to source video file
-        frame_time: Time of the frame in seconds (or datetime object)
-        fps: Video frame rate
-        crow_id: ID of the crow
-        frame_num: Frame number
-        audio_dir: Directory to save audio files
-        duration: Duration of audio segment to extract (seconds)
-    
-    Returns:
-        str: Path to saved audio file, or None if extraction failed
-    """
-    try:
-        # Convert frame_time to seconds if it's not already
-        if hasattr(frame_time, 'timestamp'):  # datetime object
-            # For datetime objects, we need to calculate relative time
-            # This is a fallback - ideally frame_time should be in seconds
-            frame_time_seconds = frame_num / fps if fps > 0 else 0
-        elif isinstance(frame_time, (int, float)):
-            frame_time_seconds = float(frame_time)
-        else:
-            # Default to calculating from frame number
-            frame_time_seconds = frame_num / fps if fps > 0 else 0
-        
-        # Create audio directory for this crow
-        audio_dir = Path(audio_dir)
-        crow_audio_dir = audio_dir / crow_id
-        crow_audio_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Generate output filename
-        audio_filename = f"frame_{frame_num:06d}.wav"
-        audio_output_path = crow_audio_dir / audio_filename
-        
-        # Calculate start time (center the audio around the frame time)
-        start_time = max(0, frame_time_seconds - duration / 2)
-        
-        # Extract audio segment
-        result = extract_audio_segment_from_video(
-            video_path, start_time, duration, str(audio_output_path)
-        )
-        
-        if result is None:
-            logger.warning(f"Failed to extract audio for crow {crow_id} at frame {frame_num}")
-            return None
-        
-        _, _, output_path = result
-        logger.debug(f"Saved audio segment for crow {crow_id}: {output_path}")
-        return output_path
-        
-    except Exception as e:
-        logger.error(f"Error extracting crow audio: {str(e)}")
-        return None
 
 
 def extract_audio_features(audio_path, sr=16000, n_fft=512, hop_length=256, n_mels=128):
@@ -211,3 +86,73 @@ def extract_audio_features(audio_path, sr=16000, n_fft=512, hop_length=256, n_me
     except Exception as e:
         logger.error(f"Error processing audio file {audio_path}: {str(e)}")
         raise
+
+def extract_and_save_crow_audio(video_path, frame_time_seconds, fps, crow_id, frame_num, audio_dir, duration=2.0):
+    """
+    Extract audio segment from video when a crow is detected.
+    
+    Args:
+        video_path: Path to the video file
+        frame_time_seconds: Time in video when crow was detected (seconds)
+        fps: Frames per second of the video
+        crow_id: ID of the detected crow
+        frame_num: Frame number where crow was detected
+        audio_dir: Directory to save audio files
+        duration: Duration of audio segment to extract (seconds)
+    
+    Returns:
+        str: Path to saved audio file, or None if extraction failed
+    """
+    try:
+        if not video_path or not os.path.exists(video_path):
+            logger.warning(f"Video file not found: {video_path}")
+            return None
+        
+        # Create audio directory for this crow
+        crow_audio_dir = Path(audio_dir) / crow_id
+        crow_audio_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Calculate start time (center the detection)
+        start_time = max(0, frame_time_seconds - duration/2)
+        
+        # Generate output filename
+        audio_filename = f"frame_{frame_num:06d}_{start_time:.2f}s.wav"
+        output_path = crow_audio_dir / audio_filename
+        
+        # Use ffmpeg to extract audio segment
+        try:
+            cmd = [
+                'ffmpeg',
+                '-i', str(video_path),
+                '-ss', str(start_time),
+                '-t', str(duration),
+                '-acodec', 'pcm_s16le',
+                '-ar', '16000',
+                '-ac', '1',  # Mono
+                '-y',  # Overwrite output file
+                str(output_path)
+            ]
+            
+            # Run ffmpeg with suppressed output
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0 and output_path.exists():
+                logger.debug(f"Extracted audio segment: {output_path}")
+                return str(output_path)
+            else:
+                logger.warning(f"ffmpeg failed to extract audio: {result.stderr}")
+                return None
+                
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Audio extraction timed out for {video_path}")
+            return None
+        except FileNotFoundError:
+            logger.warning("ffmpeg not found. Audio extraction disabled.")
+            return None
+        except Exception as e:
+            logger.warning(f"Error running ffmpeg: {e}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error extracting audio from {video_path}: {e}")
+        return None

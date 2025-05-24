@@ -206,13 +206,14 @@ def compute_embedding(img_tensors):
             raise
         raise EmbeddingError(f"Error in compute_embedding: {str(e)}")
 
-def extract_normalized_crow_crop(frame, bbox, expected_size=(224, 224)):
+def extract_normalized_crow_crop(frame, bbox, expected_size=(224, 224), correct_orientation=True):
     """Extract and normalize a crop of a crow from a frame.
     
     Args:
         frame: Input frame as numpy array
         bbox: Bounding box [x1, y1, x2, y2]
         expected_size: Expected output size (height, width)
+        correct_orientation: Whether to apply orientation correction (default: True)
         
     Returns:
         dict: Dictionary containing normalized full crop and head crop
@@ -237,6 +238,16 @@ def extract_normalized_crow_crop(frame, bbox, expected_size=(224, 224)):
             
         # Extract crop
         crop = frame[y1:y2, x1:x2]
+        
+        # Apply orientation correction if requested
+        if correct_orientation:
+            try:
+                from crow_orientation import correct_crow_crop_orientation
+                crop = correct_crow_crop_orientation(crop)
+            except ImportError:
+                logger.warning("Crow orientation module not available, skipping orientation correction")
+            except Exception as e:
+                logger.warning(f"Error applying orientation correction: {e}")
         
         # Resize to expected size
         crop = cv2.resize(crop, (expected_size[1], expected_size[0]))

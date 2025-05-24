@@ -111,7 +111,7 @@ class ImprovedCrowTripletDataset(Dataset):
         self.crow_to_imgs = {}
         for crow_dir in selected_dirs:
             crow_id = crow_dir.name
-            img_files = list(crow_dir.glob("*.jpg")) + list(crow_dir.glob("*.png"))
+            img_files = list(crow_dir.glob("*.jpg")) + list(crow_dir.glob("*.png")) + list(crow_dir.glob("*.jpeg"))
             
             if len(img_files) >= self.min_samples_per_crow:
                 # Balance the number of samples
@@ -308,7 +308,7 @@ class DatasetStats:
         }
         
         for crow_dir in crow_dirs:
-            img_files = list(crow_dir.glob("*.jpg")) + list(crow_dir.glob("*.png"))
+            img_files = list(crow_dir.glob("*.jpg")) + list(crow_dir.glob("*.png")) + list(crow_dir.glob("*.jpeg"))
             stats['total_images'] += len(img_files)
             stats['images_per_crow'].append(len(img_files))
             

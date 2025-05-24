@@ -15,20 +15,22 @@ from audio import extract_and_save_crow_audio
 logger = logging.getLogger(__name__)
 
 class CrowTracker:
-    def __init__(self, base_dir="crow_crops", similarity_threshold=0.7, enable_audio_extraction=True, audio_duration=2.0):
+    def __init__(self, base_dir="crow_crops", similarity_threshold=0.7, enable_audio_extraction=True, audio_duration=2.0, correct_orientation=True):
         """
-        Initialize CrowTracker with optional audio extraction.
+        Initialize CrowTracker with optional audio extraction and orientation correction.
         
         Args:
             base_dir: Base directory for storing crow data
             similarity_threshold: Threshold for matching crow embeddings
             enable_audio_extraction: Whether to extract audio segments during processing
             audio_duration: Duration of audio segments to extract (seconds)
+            correct_orientation: Whether to auto-correct crow crop orientation
         """
         self.base_dir = Path(base_dir)
         self.similarity_threshold = similarity_threshold
         self.enable_audio_extraction = enable_audio_extraction
         self.audio_duration = audio_duration
+        self.correct_orientation = correct_orientation
         
         # Create directory structure
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -45,6 +47,9 @@ class CrowTracker:
         else:
             self.audio_dir = None
             logger.info("Audio extraction disabled")
+        
+        # Orientation correction
+        logger.info(f"Orientation correction: {'enabled' if self.correct_orientation else 'disabled'}")
         
         # Tracking data file
         self.tracking_file = self.base_dir / "tracking_data.json"
@@ -245,7 +250,7 @@ class CrowTracker:
                 frame_time = datetime.now() - timedelta(seconds=frame_time)
             
             # Extract crop
-            crop = extract_normalized_crow_crop(frame, box)
+            crop = extract_normalized_crow_crop(frame, box, correct_orientation=self.correct_orientation)
             if crop is None:
                 logger.debug(f"Frame {frame_num}: Failed to extract crop")
                 return None

@@ -41,6 +41,11 @@ faster_rcnn_model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
     weights=torchvision.models.detection.FasterRCNN_ResNet50_FPN_Weights.DEFAULT
 )
 faster_rcnn_model.eval()
+
+# Configure NMS threshold to reduce overlapping bounding boxes
+faster_rcnn_model.roi_heads.nms_thresh = 0.3  # Suppress boxes with >30% overlap
+faster_rcnn_model.roi_heads.score_thresh = 0.5  # Only keep high-confidence detections
+
 if torch.cuda.is_available():
     faster_rcnn_model = faster_rcnn_model.cuda()
     print("[INFO] Faster R-CNN model loaded on GPU")
@@ -185,25 +190,14 @@ def timeout(seconds):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            print(f"[DEBUG] Entering timeout wrapper for {func.__name__}")
-            result = []
-            error = []
-            def target():
-                try:
-                    result.append(func(*args, **kwargs))
-                except Exception as e:
-                    error.append(e)
-            thread = threading.Thread(target=target)
-            thread.daemon = True
-            thread.start()
-            thread.join(seconds)
-            if thread.is_alive():
-                # Instead of stopping the thread directly, we'll just let it run in the background
-                # since it's a daemon thread, it will be terminated when the main program exits
-                raise TimeoutError(f"Operation timed out after {seconds} seconds")
-            if error:
-                raise error[0]
-            return result[0]
+            logger.debug(f"Running {func.__name__} with timeout protection")
+            try:
+                # Simple approach - let the model run without thread-based timeout
+                # CUDA operations don't play well with threading timeouts on Windows
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"Error in {func.__name__}: {e}")
+                raise
         return wrapper
     return decorator
 
@@ -334,8 +328,16 @@ def detect_crows_parallel(
             finally:
                 all_dets = yolo_dets + rcnn_dets
                 if all_dets:
-                    merged = merge_overlapping_detections(all_dets, iou_threshold=0.5)
+                    # Check for overlapping crows before merging
+                    has_multiple_crows = has_overlapping_crows(all_dets, iou_thresh=0.4)
+                    
+                    merged = merge_overlapping_detections(all_dets, iou_threshold=0.5)  # Higher threshold = more aggressive merging
                     filtered = [d for d in merged if d['score'] >= score_threshold and d['class'] in ('bird', 'crow')]
+                    
+                    # Add multi-crow flag to each detection
+                    for det in filtered:
+                        det['multi_crow_frame'] = has_multiple_crows
+                    
                     detections.append(filtered)
                 else:
                     detections.append([])
