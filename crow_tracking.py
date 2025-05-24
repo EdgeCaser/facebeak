@@ -10,31 +10,44 @@ from tracking import load_faster_rcnn, load_triplet_model
 from tracking import extract_normalized_crow_crop
 from collections import defaultdict
 import shutil
+from audio import extract_and_save_crow_audio
 
 logger = logging.getLogger(__name__)
 
 class CrowTracker:
-    def __init__(self, base_dir="crow_crops", similarity_threshold=0.7):
-        """Initialize the crow tracker.
+    def __init__(self, base_dir="crow_crops", similarity_threshold=0.7, enable_audio_extraction=True, audio_duration=2.0):
+        """
+        Initialize CrowTracker with optional audio extraction.
         
         Args:
             base_dir: Base directory for storing crow data
-            similarity_threshold: Cosine similarity threshold for matching crows (default: 0.7)
+            similarity_threshold: Threshold for matching crow embeddings
+            enable_audio_extraction: Whether to extract audio segments during processing
+            audio_duration: Duration of audio segments to extract (seconds)
         """
         self.base_dir = Path(base_dir)
         self.similarity_threshold = similarity_threshold
-        self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.enable_audio_extraction = enable_audio_extraction
+        self.audio_duration = audio_duration
         
-        # Initialize directories
+        # Create directory structure
+        self.base_dir.mkdir(parents=True, exist_ok=True)
         self.crows_dir = self.base_dir / "crows"
         self.crows_dir.mkdir(exist_ok=True)
-        self.processing_dir = self.base_dir / "processing"  # Changed from processing_runs
+        self.processing_dir = self.base_dir / "processing"
         self.processing_dir.mkdir(exist_ok=True)
-        self.metadata_dir = self.base_dir / "metadata"
-        self.metadata_dir.mkdir(exist_ok=True)
         
-        # Initialize tracking file path
-        self.tracking_file = self.metadata_dir / "crow_tracking.json"
+        # Audio directory
+        if self.enable_audio_extraction:
+            self.audio_dir = self.base_dir / "audio"
+            self.audio_dir.mkdir(exist_ok=True)
+            logger.info(f"Audio extraction enabled. Audio directory: {self.audio_dir}")
+        else:
+            self.audio_dir = None
+            logger.info("Audio extraction disabled")
+        
+        # Tracking data file
+        self.tracking_file = self.base_dir / "tracking_data.json"
         
         # Load detection model
         logger.info("Loading detection model (Faster R-CNN)")
@@ -248,6 +261,17 @@ class CrowTracker:
                 "timestamp": frame_time.isoformat() if frame_time else None
             }
             
+            # Get FPS for audio extraction
+            fps = None
+            if self.enable_audio_extraction and video_path:
+                try:
+                    cap = cv2.VideoCapture(str(video_path))
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    cap.release()
+                except Exception as e:
+                    logger.warning(f"Could not get FPS from video: {e}")
+                    fps = 30.0  # Default FPS
+            
             if crow_id is None:
                 # Create new crow
                 crow_id = self._generate_crow_id()  # Changed to match test
@@ -289,6 +313,21 @@ class CrowTracker:
                         embedding = embedding / np.linalg.norm(embedding)  # Normalize
                     self.tracking_data["crows"][crow_id]["embedding"] = embedding.tolist()
                     logger.debug(f"Saved embedding for crow {crow_id}")
+                
+                # Extract and save audio if enabled
+                if self.enable_audio_extraction and video_path and fps:
+                    try:
+                        # Calculate frame time in seconds from video start
+                        frame_time_seconds = frame_num / fps
+                        audio_path = extract_and_save_crow_audio(
+                            video_path, frame_time_seconds, fps, crow_id, frame_num, 
+                            self.audio_dir, self.audio_duration
+                        )
+                        if audio_path:
+                            logger.debug(f"Saved audio for new crow {crow_id}: {audio_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to extract audio for new crow {crow_id}: {e}")
+                        
             else:
                 # Update existing crow
                 crow_data = self.tracking_data["crows"][crow_id]
@@ -320,6 +359,20 @@ class CrowTracker:
                             embedding = embedding / np.linalg.norm(embedding)  # Normalize
                         crow_data["embedding"] = embedding.tolist()
                         logger.debug(f"Updated embedding for crow {crow_id}")
+                    
+                    # Extract and save audio if enabled
+                    if self.enable_audio_extraction and video_path and fps:
+                        try:
+                            # Calculate frame time in seconds from video start
+                            frame_time_seconds = frame_num / fps
+                            audio_path = extract_and_save_crow_audio(
+                                video_path, frame_time_seconds, fps, crow_id, frame_num, 
+                                self.audio_dir, self.audio_duration
+                            )
+                            if audio_path:
+                                logger.debug(f"Saved audio for existing crow {crow_id}: {audio_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to extract audio for existing crow {crow_id}: {e}")
             
             # Save tracking data periodically
             self._save_tracking_data()

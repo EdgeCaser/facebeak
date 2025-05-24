@@ -14,7 +14,7 @@ from tqdm import tqdm
 import cv2
 import numpy as np
 from models import CrowResNetEmbedder, CrowMultiModalEmbedder
-from train_triplet_resnet import CrowTripletDataset, TripletLoss, compute_metrics
+from train_triplet_resnet import CrowTripletDataset, TripletLoss, compute_metrics, custom_triplet_collate
 from torchvision import transforms
 import json
 from datetime import datetime
@@ -90,15 +90,20 @@ class TrainingGUI:
         
         # Audio directory
         ttk.Label(dir_frame, text="Audio Directory:").grid(row=1, column=0, sticky=tk.W)
-        self.audio_dir_var = tk.StringVar(value="crow_audio")
+        self.audio_dir_var = tk.StringVar(value="crow_crops/audio")
         ttk.Entry(dir_frame, textvariable=self.audio_dir_var, width=40).grid(row=1, column=1, padx=5)
         ttk.Button(dir_frame, text="Browse", command=self._select_audio_dir).grid(row=1, column=2)
         
+        # Audio info label
+        self.audio_info_label = ttk.Label(dir_frame, text="Audio directory contains synchronized audio segments for each crow crop", 
+                                         foreground="blue", font=("TkDefaultFont", 8))
+        self.audio_info_label.grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=2)
+        
         # Output directory
-        ttk.Label(dir_frame, text="Output Directory:").grid(row=2, column=0, sticky=tk.W)
+        ttk.Label(dir_frame, text="Output Directory:").grid(row=3, column=0, sticky=tk.W)
         self.output_dir_var = tk.StringVar(value="training_output")
-        ttk.Entry(dir_frame, textvariable=self.output_dir_var, width=40).grid(row=2, column=1, padx=5)
-        ttk.Button(dir_frame, text="Browse", command=self._select_output_dir).grid(row=2, column=2)
+        ttk.Entry(dir_frame, textvariable=self.output_dir_var, width=40).grid(row=3, column=1, padx=5)
+        ttk.Button(dir_frame, text="Browse", command=self._select_output_dir).grid(row=3, column=2)
         
         # Training parameters
         params_frame = ttk.LabelFrame(self.left_panel, text="Training Parameters", padding="5")
@@ -379,14 +384,16 @@ class TrainingGUI:
                 batch_size=config['batch_size'], 
                 shuffle=True, 
                 num_workers=0,  # Keep at 0 for stability
-                pin_memory=pin_memory
+                pin_memory=pin_memory,
+                collate_fn=custom_triplet_collate
             )
             val_loader = DataLoader(
                 val_dataset,
                 batch_size=config['batch_size'],
                 shuffle=False,
                 num_workers=0,  # Keep at 0 for stability
-                pin_memory=pin_memory
+                pin_memory=pin_memory,
+                collate_fn=custom_triplet_collate
             )
             
             # Model initialization with improved error handling

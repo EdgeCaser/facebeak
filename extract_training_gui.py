@@ -238,9 +238,24 @@ class CrowExtractorGUI:
         ttk.Checkbutton(settings_frame, text="Enable Multi-View for YOLO", variable=self.mv_yolo_var).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=2)
         ttk.Checkbutton(settings_frame, text="Enable Multi-View for Faster R-CNN", variable=self.mv_rcnn_var).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=2)
         
+        # Audio settings frame
+        audio_frame = ttk.LabelFrame(self.left_panel, text="Audio Settings", padding="5")
+        audio_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        
+        # Enable audio extraction
+        self.enable_audio_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(audio_frame, text="Extract audio segments", variable=self.enable_audio_var).grid(row=0, column=0, sticky=tk.W)
+        
+        # Audio duration
+        ttk.Label(audio_frame, text="Audio duration (seconds):").grid(row=1, column=0, sticky=tk.W)
+        self.audio_duration_var = tk.DoubleVar(value=2.0)
+        ttk.Scale(audio_frame, from_=0.5, to=5.0, variable=self.audio_duration_var, 
+                 orient=tk.HORIZONTAL, length=150).grid(row=1, column=1, padx=5)
+        ttk.Label(audio_frame, textvariable=self.audio_duration_var).grid(row=1, column=2)
+        
         # Control buttons
         control_frame = ttk.Frame(self.left_panel)
-        control_frame.grid(row=4, column=0, columnspan=3, pady=5)
+        control_frame.grid(row=3, column=0, columnspan=3, pady=5)
         
         self.start_button = ttk.Button(control_frame, text="Start Processing", command=self._start_processing)
         self.start_button.grid(row=0, column=0, padx=5)
@@ -259,7 +274,7 @@ class CrowExtractorGUI:
         
         # Progress tracking
         progress_frame = ttk.LabelFrame(self.left_panel, text="Progress", padding="5")
-        progress_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        progress_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
         
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, 
@@ -271,7 +286,7 @@ class CrowExtractorGUI:
         
         # Statistics panel
         stats_frame = ttk.LabelFrame(self.left_panel, text="Statistics", padding="5")
-        stats_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        stats_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
         
         # Initialize statistics
         self.stats = {
@@ -368,8 +383,19 @@ class CrowExtractorGUI:
         logger.info(f"Starting processing in directory: {video_dir}")
         logger.info(f"Output directory: {output_dir}")
         
-        # Initialize tracker with output directory
-        self.tracker = CrowTracker(output_dir)
+        # Initialize tracker with audio settings
+        enable_audio = self.enable_audio_var.get()
+        audio_duration = self.audio_duration_var.get()
+        
+        self.tracker = CrowTracker(
+            output_dir, 
+            enable_audio_extraction=enable_audio,
+            audio_duration=audio_duration
+        )
+        
+        logger.info(f"Audio extraction: {'enabled' if enable_audio else 'disabled'}")
+        if enable_audio:
+            logger.info(f"Audio duration: {audio_duration} seconds")
         
         # Enable save button when processing starts
         self.save_button.config(state=tk.NORMAL)
