@@ -1718,33 +1718,72 @@ def load_faster_rcnn():
         raise
 
 def load_triplet_model():
-    """Load and configure the triplet network model for crow embeddings."""
+    """Load and configure the improved triplet network model for crow embeddings."""
     try:
         # Get device
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         logger.info(f"Using device: {device}")
         
-        # Initialize model
+        # Try to load the improved training model first
+        improved_model_path = 'training_output/best_model.pth'
+        fallback_model_path = 'crow_resnet_triplet.pth'
+        
+        # Initialize model with 512-dimensional embeddings (from improved training)
         model = CrowResNetEmbedder(embedding_dim=512)
         
         # Try to load trained weights
-        try:
-            # Load weights to the appropriate device
-            state_dict = torch.load('crow_resnet_triplet.pth', map_location=device)
-            
-            # Handle state dict mismatch
-            if 'fc.weight' in state_dict:
-                # Remove the fc layer weights if they exist
-                state_dict.pop('fc.weight', None)
-                state_dict.pop('fc.bias', None)
-                logger.info("Removed fc layer weights from state dict")
-            
-            # Load the state dict with strict=False to handle any remaining mismatches
-            model.load_state_dict(state_dict, strict=False)
-            logger.info(f"Loaded trained triplet network model on {device}")
-        except Exception as e:
-            logger.warning(f"Could not load trained model weights: {e}")
-            logger.info("Using untrained model")
+        model_loaded = False
+        
+        # First, try the improved training model
+        if os.path.exists(improved_model_path):
+            try:
+                logger.info(f"Loading improved training model from {improved_model_path}")
+                state_dict = torch.load(improved_model_path, map_location=device)
+                
+                # Handle multi-modal model state dict (extract visual-only components)
+                if 'visual_embedder.feature_extractor.0.weight' in state_dict:
+                    # Extract visual embedder components
+                    visual_state_dict = {}
+                    for key, value in state_dict.items():
+                        if key.startswith('visual_embedder.'):
+                            # Map visual_embedder keys to our model structure
+                            new_key = key.replace('visual_embedder.', '')
+                            visual_state_dict[new_key] = value
+                    
+                    model.load_state_dict(visual_state_dict, strict=False)
+                    logger.info("Loaded visual components from improved multi-modal model")
+                    model_loaded = True
+                    
+                elif 'feature_extractor.0.weight' in state_dict:
+                    # Direct visual-only model
+                    model.load_state_dict(state_dict, strict=False)
+                    logger.info("Loaded improved visual-only model")
+                    model_loaded = True
+                    
+            except Exception as e:
+                logger.warning(f"Could not load improved model: {e}")
+        
+        # Fall back to original model if improved model fails
+        if not model_loaded and os.path.exists(fallback_model_path):
+            try:
+                logger.info(f"Loading fallback model from {fallback_model_path}")
+                state_dict = torch.load(fallback_model_path, map_location=device)
+                
+                # Handle state dict mismatch for fallback model
+                if 'fc.weight' in state_dict:
+                    state_dict.pop('fc.weight', None)
+                    state_dict.pop('fc.bias', None)
+                    logger.info("Removed fc layer weights from fallback state dict")
+                
+                model.load_state_dict(state_dict, strict=False)
+                logger.info("Loaded fallback triplet network model")
+                model_loaded = True
+                
+            except Exception as e:
+                logger.warning(f"Could not load fallback model: {e}")
+        
+        if not model_loaded:
+            logger.warning("No trained model weights found, using randomly initialized model")
         
         # Move model to device
         model = model.to(device)
