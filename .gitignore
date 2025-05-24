@@ -234,6 +234,33 @@ exports/
 backups/
 metadata/
 
+# Large metrics and history files
+*metrics_history.json
+*metrics.json
+*history.json
+*training_metrics.json
+*loss_history.json
+*accuracy_history.json
+*evaluation_results.json
+
+# Orientation correction test outputs
+orientation_correction_test.png
+orientation_verification.png
+
+# Audio extraction outputs
+audio/
+crow_audio/
+
+# Embedding cache files
+*embeddings.npy
+*features.npy
+embedding_cache/
+
+# Large numpy arrays and tensors
+*.npy
+*.npz
+tensor_cache/
+
 # Log files
 *.log
 logs/
