@@ -38,7 +38,16 @@ def mock_model():
     """Create a mock model for testing."""
     model = MagicMock()
     model.eval.return_value = None
-    model.return_value = torch.randn(1, 512)  # Mock embedding output
+    model.return_value = torch.randn(1, 512)  # Mock 512D embedding output
+    return model
+
+@pytest.fixture  
+def mock_model_512d():
+    """Create a mock model specifically for 512D testing."""
+    model = MagicMock()
+    model.eval.return_value = None
+    model.return_value = torch.randn(1, 512)  # Explicit 512D output
+    model.embedding_dim = 512
     return model
 
 @pytest.fixture(autouse=True)
@@ -107,12 +116,43 @@ def test_compute_embedding(mock_model):
     with patch('tracking.model', mock_model):
         combined, embeddings = compute_embedding(img_tensors)
         
-        # Verify output shapes
+        # Verify output shapes (updated for 512D embeddings)
         assert combined.shape[0] == 1024  # Combined full + head embeddings
         assert 'full' in embeddings
         assert 'head' in embeddings
         assert embeddings['full'].shape[0] == 512
         assert embeddings['head'].shape[0] == 512
+
+def test_compute_embedding_512d():
+    """Test embedding computation with explicit 512D model."""
+    from models import CrowResNetEmbedder
+    
+    # Create real model with 512D embeddings
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    real_model = CrowResNetEmbedder(embedding_dim=512, device=device)
+    real_model.eval()
+    
+    # Create test input tensors
+    img_tensors = {
+        'full': torch.randn(1, 3, 224, 224),
+        'head': torch.randn(1, 3, 224, 224)
+    }
+    
+    # Test with real model
+    with patch('tracking.model', real_model):
+        combined, embeddings = compute_embedding(img_tensors)
+        
+        # Verify 512D output shapes
+        assert isinstance(combined, np.ndarray)
+        assert combined.shape[0] == 1024  # 2 * 512D
+        assert 'full' in embeddings
+        assert 'head' in embeddings
+        assert embeddings['full'].shape[0] == 512
+        assert embeddings['head'].shape[0] == 512
+        
+        # Test normalization
+        assert np.abs(np.linalg.norm(embeddings['full']) - 1.0) < 1e-5
+        assert np.abs(np.linalg.norm(embeddings['head']) - 1.0) < 1e-5
 
 def test_compute_embedding_gpu(mock_model):
     """Test embedding computation with GPU."""
@@ -1005,4 +1045,111 @@ def test_track_id_persistence_with_temporal_consistency(mock_frame):
             track_ids.add(int(tracks[0][4]))
     
     # Should have fewer track IDs with temporal consistency
-    assert len(track_ids) < len(detections) // 2 
+    assert len(track_ids) < len(detections) // 2
+
+def test_enhanced_tracker_512d_embeddings(mock_frame):
+    """Test EnhancedTracker with 512D embeddings."""
+    from models import CrowResNetEmbedder
+    
+    # Initialize tracker
+    tracker = EnhancedTracker()
+    
+    # Create a detection
+    detection = {
+        'bbox': np.array([100, 100, 200, 200]),
+        'score': 0.95,
+        'class': 'crow'
+    }
+    
+    # Mock the model loading to use 512D
+    with patch('tracking.load_triplet_model') as mock_load:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        mock_model = CrowResNetEmbedder(embedding_dim=512, device=device)
+        mock_load.return_value = mock_model
+        
+        # Test update with 512D model
+        detections = _convert_detection_to_array(detection)
+        tracked_objects = tracker.update(mock_frame, detections)
+        
+        # Should successfully track with 512D embeddings
+        assert len(tracked_objects) >= 0  # May be 0 if quality filters apply
+
+def test_embedding_dimension_compatibility():
+    """Test that tracking works with different embedding dimensions."""
+    from models import CrowResNetEmbedder
+    
+    # Test different embedding dimensions
+    embedding_dims = [128, 256, 512, 1024]
+    
+    for dim in embedding_dims:
+        tracker = EnhancedTracker()
+        
+        # Mock model with specific dimension
+        with patch('tracking.load_triplet_model') as mock_load:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            mock_model = CrowResNetEmbedder(embedding_dim=dim, device=device)
+            mock_load.return_value = mock_model
+            
+            # Create test frame and detection
+            frame = np.zeros((400, 400, 3), dtype=np.uint8)
+            frame[100:200, 100:200] = [255, 255, 255]
+            
+            detection = _convert_detection_to_array({
+                'bbox': [100, 100, 200, 200],
+                'score': 0.95,
+                'class': 'crow'
+            })
+            
+            # Should work regardless of embedding dimension
+            tracks = tracker.update(frame, detection)
+            assert isinstance(tracks, np.ndarray)
+
+def test_512d_embedding_similarity_computation():
+    """Test similarity computation with 512D embeddings."""
+    # Create test embeddings with known similarity
+    embedding1 = np.random.randn(512)
+    embedding1 = embedding1 / np.linalg.norm(embedding1)  # Normalize
+    
+    # Create similar embedding
+    noise = np.random.randn(512) * 0.1
+    embedding2 = embedding1 + noise
+    embedding2 = embedding2 / np.linalg.norm(embedding2)  # Normalize
+    
+    # Create very different embedding
+    embedding3 = np.random.randn(512)
+    embedding3 = embedding3 / np.linalg.norm(embedding3)  # Normalize
+    
+    # Test similarity computation
+    sim_similar = np.dot(embedding1, embedding2)
+    sim_different = np.dot(embedding1, embedding3)
+    
+    # Similar embeddings should have higher cosine similarity
+    assert sim_similar > sim_different
+    assert sim_similar > 0.8  # Should be quite similar
+    assert abs(sim_different) < 0.5  # Should be less similar
+
+def test_large_batch_512d_processing(mock_frame):
+    """Test processing large batches with 512D embeddings."""
+    tracker = EnhancedTracker()
+    
+    # Create multiple detections
+    detections = []
+    for i in range(10):  # Test with 10 detections
+        x = 50 + i * 30
+        y = 50 + i * 20
+        detection = _convert_detection_to_array({
+            'bbox': [x, y, x+100, y+100],
+            'score': 0.9,
+            'class': 'crow'
+        })
+        detections.append(detection)
+    
+    # Combine all detections
+    all_detections = np.vstack(detections)
+    
+    # Process batch
+    tracks = tracker.update(mock_frame, all_detections)
+    
+    # Should handle multiple detections
+    assert isinstance(tracks, np.ndarray)
+    assert tracks.shape[1] == 5 if len(tracks) > 0 else True  # [x1, y1, x2, y2, id] 

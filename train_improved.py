@@ -55,10 +55,6 @@ class ImprovedTrainer:
         self.model = CrowResNetEmbedder(embedding_dim=config['embedding_dim']).to(self.device)
         logger.info(f"Created model with {config['embedding_dim']}D embeddings")
         
-        # Load existing weights if available
-        if config.get('resume_from') and os.path.exists(config['resume_from']):
-            self._load_checkpoint(config['resume_from'])
-        
         # Initialize loss function with improved mining
         self.criterion = ImprovedTripletLoss(
             margin=config['margin'],
@@ -80,6 +76,10 @@ class ImprovedTrainer:
             T_max=config['epochs'],
             eta_min=config['learning_rate'] * 0.01
         )
+        
+        # Load existing weights if available (after optimizer creation)
+        if config.get('resume_from') and os.path.exists(config['resume_from']):
+            self._load_checkpoint(config['resume_from'])
         
         # Training state
         self.start_epoch = 0
@@ -219,8 +219,18 @@ class ImprovedTrainer:
                 pos_emb = self.model(pos_imgs)
                 neg_emb = self.model(neg_imgs)
                 
+                # Concatenate embeddings and create labels for improved triplet loss
+                all_embeddings = torch.cat([anchor_emb, pos_emb, neg_emb], dim=0)
+                batch_size = anchor_emb.size(0)
+                # Labels: anchor(0), positive(same as anchor), negative(different)
+                all_labels = torch.cat([
+                    labels,  # anchor labels
+                    labels,  # positive labels (same as anchor)
+                    labels + len(torch.unique(labels))  # negative labels (different)
+                ], dim=0).to(self.device)
+                
                 # Compute improved triplet loss
-                loss = self.criterion(anchor_emb, pos_emb, neg_emb)
+                loss, stats = self.criterion(all_embeddings, all_labels)
                 
                 # Backward pass
                 loss.backward()

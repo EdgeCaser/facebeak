@@ -150,7 +150,7 @@ class ImprovedTripletLoss(nn.Module):
             'mining_type': 'hard',
             'n_hard_triplets': len(triplets),
             'avg_positive_dist': np.mean([distances[a, p].item() for a, p, _ in triplets]),
-            'avg_negative_dist': np.mean([distances[a, n].item() for _, _, n in triplets])
+            'avg_negative_dist': np.mean([distances[a, n].item() for a, _, n in triplets])
         }
         
         return triplets, stats
@@ -317,8 +317,8 @@ class ImprovedTripletLoss(nn.Module):
             negative_distances = [(neg, distances[anchor, neg].item()) for neg in negatives]
             negative_distances.sort(key=lambda x: x[1])  # Sort by distance
             
-            # Filter negatives within curriculum margin
-            curriculum_margin = self.margin * (0.5 + 0.5 * difficulty)
+            # Filter negatives within curriculum margin (starts large, gets smaller)
+            curriculum_margin = self.margin * (1.5 - 0.5 * difficulty)
             valid_negatives = [(neg, dist) for neg, dist in negative_distances 
                              if dist < pos_dist + curriculum_margin]
             
@@ -364,9 +364,10 @@ class ImprovedTripletLoss(nn.Module):
     def _compute_triplet_loss(self, distances, triplets):
         """Compute triplet loss for selected triplets."""
         if not triplets:
-            return torch.tensor(0.0, requires_grad=True)
+            # Return zero loss that's connected to the computation graph
+            return torch.zeros(1, device=distances.device, requires_grad=True).squeeze()
         
-        total_loss = 0.0
+        total_loss = torch.tensor(0.0, device=distances.device, requires_grad=True)
         device = distances.device
         
         for anchor, positive, negative in triplets:
