@@ -123,10 +123,10 @@ class CrowTripletDataset(Dataset):
                 # Check if image has been manually labeled
                 if get_image_label:
                     label_info = get_image_label(str(img_file))
-                    if label_info and label_info['label'] == 'not_a_crow':
-                        # Image has been explicitly marked as not a crow - exclude it
+                    if label_info and label_info['label'] in ['not_a_crow', 'multi_crow']:
+                        # Image has been explicitly marked as not a crow or multi-crow - exclude it
                         excluded_count += 1
-                        logger.debug(f"Excluding manually labeled non-crow: {img_file.name}")
+                        logger.debug(f"Excluding manually labeled {label_info['label']}: {img_file.name}")
                         continue
                 
                 # Include the image (unlabeled, labeled as crow, or labeled as not_sure)
@@ -143,7 +143,7 @@ class CrowTripletDataset(Dataset):
         included_count = total_found - excluded_count
         if excluded_count > 0:
             logger.info(f"Manual labeling filter: {included_count}/{total_found} images included "
-                       f"({excluded_count} excluded as 'not_a_crow')")
+                       f"({excluded_count} excluded as 'not_a_crow' or 'multi_crow')")
         else:
             logger.info(f"No manual labeling exclusions found. Using all {total_found} images.")
         

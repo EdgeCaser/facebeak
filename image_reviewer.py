@@ -100,10 +100,12 @@ class ImageReviewer:
                        value="not_a_crow").grid(row=1, column=0, sticky=tk.W)
         ttk.Radiobutton(label_frame, text="Not sure", variable=self.label_var, 
                        value="not_sure").grid(row=2, column=0, sticky=tk.W)
+        ttk.Radiobutton(label_frame, text="Multiple crows", variable=self.label_var, 
+                       value="multi_crow").grid(row=3, column=0, sticky=tk.W)
         
         # Submit button
         ttk.Button(label_frame, text="Submit Label", 
-                  command=self.submit_label).grid(row=3, column=0, pady=(10, 0))
+                  command=self.submit_label).grid(row=4, column=0, pady=(10, 0))
         
         # Statistics
         stats_frame = ttk.LabelFrame(control_panel, text="Statistics", padding="5")
@@ -135,6 +137,7 @@ class ImageReviewer:
         self.root.bind('<Key-1>', lambda e: self.set_label_and_submit("crow"))
         self.root.bind('<Key-2>', lambda e: self.set_label_and_submit("not_a_crow"))
         self.root.bind('<Key-3>', lambda e: self.set_label_and_submit("not_sure"))
+        self.root.bind('<Key-4>', lambda e: self.set_label_and_submit("multi_crow"))
         self.root.bind('<Left>', lambda e: self.previous_image())
         self.root.bind('<Right>', lambda e: self.next_image())
         self.root.bind('<Return>', lambda e: self.submit_label())
@@ -336,6 +339,7 @@ def main():
 1 - Mark as Crow
 2 - Mark as Not a Crow  
 3 - Mark as Not Sure
+4 - Mark as Multiple Crows
 ← → - Navigate images
 Enter - Submit current label"""
     

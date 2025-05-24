@@ -606,8 +606,8 @@ def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_
         if not os.path.exists(image_path):
             raise ValueError(f"Image path does not exist: {image_path}")
             
-        if label not in ['crow', 'not_a_crow', 'not_sure']:
-            raise ValueError(f"Invalid label: {label}. Must be 'crow', 'not_a_crow', or 'not_sure'")
+        if label not in ['crow', 'not_a_crow', 'not_sure', 'multi_crow']:
+            raise ValueError(f"Invalid label: {label}. Must be 'crow', 'not_a_crow', 'not_sure', or 'multi_crow'")
             
         if confidence is not None and not 0 <= confidence <= 1:
             raise ValueError("Confidence must be between 0 and 1")
@@ -615,7 +615,8 @@ def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_
         # Implement "innocent until proven guilty" philosophy
         # If is_training_data is not explicitly set, determine based on label
         if is_training_data is None:
-            is_training_data = (label != 'not_a_crow')  # False only for 'not_a_crow'
+            # Exclude not_a_crow and multi_crow from training data by default
+            is_training_data = (label not in ['not_a_crow', 'multi_crow'])
             
         # Insert or update label
         cursor.execute('''
@@ -763,6 +764,7 @@ def get_training_data_stats(from_directory=None):
                 'crow': {'count': 0, 'avg_confidence': 0.0},
                 'not_a_crow': {'count': 0, 'avg_confidence': 0.0},
                 'not_sure': {'count': 0, 'avg_confidence': 0.0},
+                'multi_crow': {'count': 0, 'avg_confidence': 0.0},
                 'total_labeled': 0,
                 'total_excluded': 0
             }
@@ -772,6 +774,7 @@ def get_training_data_stats(from_directory=None):
             'crow': {'count': 0, 'total_confidence': 0.0},
             'not_a_crow': {'count': 0, 'total_confidence': 0.0},
             'not_sure': {'count': 0, 'total_confidence': 0.0},
+            'multi_crow': {'count': 0, 'total_confidence': 0.0},
             'total_labeled': 0,
             'total_excluded': 0
         }
@@ -786,7 +789,7 @@ def get_training_data_stats(from_directory=None):
                     stats['total_excluded'] += 1
         
         # Calculate averages
-        for label in ['crow', 'not_a_crow', 'not_sure']:
+        for label in ['crow', 'not_a_crow', 'not_sure', 'multi_crow']:
             count = stats[label]['count']
             if count > 0:
                 stats[label]['avg_confidence'] = stats[label]['total_confidence'] / count
@@ -803,6 +806,7 @@ def get_training_data_stats(from_directory=None):
             'crow': {'count': 0, 'avg_confidence': 0.0},
             'not_a_crow': {'count': 0, 'avg_confidence': 0.0},
             'not_sure': {'count': 0, 'avg_confidence': 0.0},
+            'multi_crow': {'count': 0, 'avg_confidence': 0.0},
             'total_labeled': 0,
             'total_excluded': 0
         }

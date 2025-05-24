@@ -81,6 +81,28 @@ def compute_iou(bbox1, bbox2):
     
     return intersection / union if union > 0 else 0
 
+def has_overlapping_crows(detections, iou_thresh=0.4):
+    """
+    Check if multiple crow detections overlap significantly, indicating multiple crows in frame.
+    
+    Args:
+        detections: List of detection dictionaries with 'bbox' keys
+        iou_thresh: IoU threshold above which detections are considered overlapping
+        
+    Returns:
+        bool: True if any two detections overlap above threshold
+    """
+    if not detections or len(detections) < 2:
+        return False
+        
+    for i, det1 in enumerate(detections):
+        for j, det2 in enumerate(detections):
+            if i >= j:  # Avoid duplicate comparisons and self-comparison
+                continue
+            if compute_iou(det1['bbox'], det2['bbox']) > iou_thresh:
+                return True
+    return False
+
 def merge_overlapping_detections(detections, iou_threshold=0.5):
     """
     Merge overlapping detections with improved consistency.
