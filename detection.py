@@ -42,9 +42,9 @@ faster_rcnn_model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
 )
 faster_rcnn_model.eval()
 
-# Configure NMS threshold to reduce overlapping bounding boxes
-faster_rcnn_model.roi_heads.nms_thresh = 0.3  # Suppress boxes with >30% overlap
-faster_rcnn_model.roi_heads.score_thresh = 0.5  # Only keep high-confidence detections
+# Configure more aggressive NMS threshold to reduce overlapping bounding boxes
+faster_rcnn_model.roi_heads.nms_thresh = 0.2  # More aggressive: suppress boxes with >20% overlap (was 0.3)
+faster_rcnn_model.roi_heads.score_thresh = 0.3  # Lower threshold to catch more detections before our own filtering (was 0.5)
 
 if torch.cuda.is_available():
     faster_rcnn_model = faster_rcnn_model.cuda()
@@ -52,10 +52,13 @@ if torch.cuda.is_available():
 else:
     print("[INFO] Faster R-CNN model loaded on CPU")
 
-# COCO dataset class IDs
-COCO_BIRD_CLASS_ID = 16  # General bird class
-COCO_CROW_CLASS_ID = 20  # Specific crow class (if available in the model)
-YOLO_BIRD_CLASS_ID = 14  # YOLO's bird class ID
+# YOLO class IDs for birds
+YOLO_BIRD_CLASS_ID = 14  # bird
+YOLO_AIRPLANE_CLASS_ID = 4  # airplane (sometimes misclassifies birds)
+
+# COCO class IDs for Faster R-CNN
+COCO_BIRD_CLASS_ID = 16  # bird
+COCO_CROW_CLASS_ID = 20  # This might not exist in COCO, but keeping for future
 
 def extract_roi(frame, bbox, padding=0.1):
     """Extract region of interest from frame with padding."""
@@ -211,7 +214,8 @@ def detect_crows_parallel(
     yolo_threshold=0.2,
     multi_view_yolo=False,
     multi_view_rcnn=False,
-    multi_view_params=None
+    multi_view_params=None,
+    nms_threshold=0.3
 ):
     print("[DEBUG] Entered detect_crows_parallel")
     print(f"[DEBUG] detect_crows_parallel: {len(frames)} frames, score_threshold={score_threshold}, yolo_threshold={yolo_threshold}")
@@ -240,10 +244,10 @@ def detect_crows_parallel(
                             print(f"[DEBUG] Frame {idx}: After YOLO model inference (multi-view)")
                             for bbox, score, cls in zip(yolo_results.boxes.xyxy, yolo_results.boxes.conf, yolo_results.boxes.cls):
                                 print(f"[DEBUG] YOLO bbox: {bbox}, score: {score}, cls: {cls}")
-                                if int(cls) == YOLO_BIRD_CLASS_ID:
+                                if int(cls) == YOLO_BIRD_CLASS_ID or int(cls) == YOLO_AIRPLANE_CLASS_ID:
                                     yolo_dets.append({
-                                        'bbox': bbox.cpu().numpy(),
-                                        'score': score.cpu().numpy(),
+                                        'bbox': bbox.cpu().numpy().tolist(),  # Ensure it's a list
+                                        'score': float(score.cpu().numpy()),  # Ensure it's a float
                                         'class': 'bird',
                                         'model': 'yolo',
                                         'view': 'multi'  # Mark as multi-view
@@ -259,10 +263,10 @@ def detect_crows_parallel(
                         print("[DEBUG] YOLO results:", yolo_results)
                         for bbox, score, cls in zip(yolo_results.boxes.xyxy, yolo_results.boxes.conf, yolo_results.boxes.cls):
                             print(f"[DEBUG] YOLO bbox: {bbox}, score: {score}, cls: {cls}")
-                            if int(cls) == YOLO_BIRD_CLASS_ID:
+                            if int(cls) == YOLO_BIRD_CLASS_ID or int(cls) == YOLO_AIRPLANE_CLASS_ID:
                                 yolo_dets.append({
-                                    'bbox': bbox.cpu().numpy(),
-                                    'score': score.cpu().numpy(),
+                                    'bbox': bbox.cpu().numpy().tolist(),  # Ensure it's a list
+                                    'score': float(score.cpu().numpy()),  # Ensure it's a float
                                     'class': 'bird',
                                     'model': 'yolo',
                                     'view': 'single'
@@ -288,8 +292,8 @@ def detect_crows_parallel(
                                 print(f"[DEBUG] RCNN bbox: {bbox}, label: {label}, score: {score}")
                                 if (label == COCO_BIRD_CLASS_ID or label == COCO_CROW_CLASS_ID) and score > score_threshold:
                                     rcnn_dets.append({
-                                        'bbox': bbox.cpu().numpy(),
-                                        'score': score.cpu().numpy(),
+                                        'bbox': bbox.cpu().numpy().tolist(),  # Ensure it's a list
+                                        'score': float(score.cpu().numpy()),  # Ensure it's a float
                                         'class': 'crow' if label == COCO_CROW_CLASS_ID else 'bird',
                                         'model': 'rcnn',
                                         'view': 'multi'  # Mark as multi-view
@@ -311,11 +315,11 @@ def detect_crows_parallel(
                             print(f"[DEBUG] RCNN bbox: {bbox}, label: {label}, score: {score}")
                             if (label == COCO_BIRD_CLASS_ID or label == COCO_CROW_CLASS_ID) and score > score_threshold:
                                 rcnn_dets.append({
-                                    'bbox': bbox.cpu().numpy(),
-                                    'score': score.cpu().numpy(),
+                                    'bbox': bbox.cpu().numpy().tolist(),  # Ensure it's a list
+                                    'score': float(score.cpu().numpy()),  # Ensure it's a float
                                     'class': 'crow' if label == COCO_CROW_CLASS_ID else 'bird',
                                     'model': 'rcnn',
-                                    'view': 'single'
+                                    'view': 'single'  # Mark as single-view
                                 })
                     except TimeoutError:
                         logger.error("RCNN model inference timed out")
@@ -328,10 +332,22 @@ def detect_crows_parallel(
             finally:
                 all_dets = yolo_dets + rcnn_dets
                 if all_dets:
+                    # Debug: Print detections before merging
+                    print(f"[DEBUG] Frame {idx}: {len(all_dets)} detections before merging:")
+                    for i, det in enumerate(all_dets):
+                        print(f"  Detection {i+1}: score={det['score']:.3f}, model={det['model']}, bbox={det['bbox']}")
+                    
                     # Check for overlapping crows before merging
                     has_multiple_crows = has_overlapping_crows(all_dets, iou_thresh=0.4)
                     
-                    merged = merge_overlapping_detections(all_dets, iou_threshold=0.5)  # Higher threshold = more aggressive merging
+                    # More aggressive merging: lower threshold means more boxes get merged
+                    merged = merge_overlapping_detections(all_dets, iou_threshold=nms_threshold)
+                    
+                    # Debug: Print detections after merging
+                    print(f"[DEBUG] Frame {idx}: {len(merged)} detections after merging (threshold={nms_threshold}):")
+                    for i, det in enumerate(merged):
+                        print(f"  Merged {i+1}: score={det['score']:.3f}, model={det['model']}, bbox={det['bbox']}")
+                    
                     filtered = [d for d in merged if d['score'] >= score_threshold and d['class'] in ('bird', 'crow')]
                     
                     # Add multi-crow flag to each detection
