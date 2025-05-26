@@ -3,6 +3,7 @@
 # optionally overlays image thumbnails, and flags clusters or outliers for manual review.
 
 import os
+import sys
 import json
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,6 +19,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db import get_all_crows, get_crow_embeddings
 
 # --- Config ---

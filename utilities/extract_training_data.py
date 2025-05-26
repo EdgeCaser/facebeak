@@ -1,7 +1,9 @@
 import os
+import sys
 import cv2
 import numpy as np
 from tqdm import tqdm
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from detection import detect_crows_parallel
 from tracking import extract_normalized_crow_crop
 import torch
