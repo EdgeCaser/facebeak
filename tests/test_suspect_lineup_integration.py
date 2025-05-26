@@ -10,7 +10,7 @@ import numpy as np
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db import initialize_database, save_crow_embedding, get_connection
-import utilities.sync_database
+from utilities import sync_database
 
 class TestSuspectLineupIntegration(unittest.TestCase):
     @classmethod

@@ -25,9 +25,10 @@ def derive_key_from_password(password, salt=None):
         salt=salt,
         iterations=100000,
     )
-    # Return raw 32-byte key, not base64 encoded
-    key = kdf.derive(password.encode())
-    return key, salt
+    # Derive raw 32-byte key and encode it for Fernet
+    raw_key = kdf.derive(password.encode())
+    fernet_key = base64.urlsafe_b64encode(raw_key)
+    return fernet_key, salt
 
 def get_encryption_key(test_mode=False):
     """Get or create the encryption key."""
@@ -49,15 +50,10 @@ def get_encryption_key(test_mode=False):
             with open(salt_path, 'rb') as f:
                 salt = f.read()
                 
-            # Verify key is valid (must be 32 bytes for Fernet)
+            # Verify key is valid for Fernet (should be base64-encoded)
             try:
-                if len(key) == 32:
-                    # Convert raw key to base64 for Fernet
-                    fernet_key = base64.urlsafe_b64encode(key)
-                    Fernet(fernet_key)
-                    return key
-                else:
-                    raise ValueError("Invalid key length")
+                Fernet(key)
+                return key
             except Exception:
                 logger.warning("Existing key is invalid, generating new key")
                 key_path.unlink()

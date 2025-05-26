@@ -16,7 +16,7 @@ import logging
 # Import the sync_database module and database utilities
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import utilities.sync_database
+from utilities import sync_database
 import db
 
 

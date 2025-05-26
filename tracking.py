@@ -276,8 +276,8 @@ def extract_normalized_crow_crop(frame, bbox, expected_size=(224, 224), correct_
 
 class EnhancedTracker:
     def __init__(self, max_age=30, min_hits=3, iou_threshold=0.3, 
-                 embedding_threshold=0.7, conf_threshold=0.5, # model_path and strict_mode removed
-                 multi_view_stride=5):
+                 embedding_threshold=0.7, conf_threshold=0.5, 
+                 multi_view_stride=5, strict_mode=False):
         self.logger = logging.getLogger(f"{__name__}.EnhancedTracker")
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') # Tracker instance device preference
         self.logger.info(f"EnhancedTracker initialized. Instance preferred device: {self.device}")
@@ -288,7 +288,7 @@ class EnhancedTracker:
         self.embedding_threshold = embedding_threshold
         self.conf_threshold = conf_threshold
         self.multi_view_stride = multi_view_stride
-        # self.strict_mode parameter is removed as it was tied to model_path loading
+        self.strict_mode = strict_mode
         
         # self.model (for embeddings) is no longer initialized here; global CROW_EMBEDDING_MODEL will be used.
         self.multi_view_extractor = None
@@ -332,28 +332,49 @@ class EnhancedTracker:
         # Embedding model (self.model) is no longer handled here. Global CROW_EMBEDDING_MODEL is used directly.
         self.logger.info("EnhancedTracker will use the global CROW_EMBEDDING_MODEL for embeddings.")
         if CROW_EMBEDDING_MODEL is None:
-            self.logger.error("Global CROW_EMBEDDING_MODEL is not available! Embedding functionality will be impaired.")
+            error_msg = "Global CROW_EMBEDDING_MODEL is not available! Embedding functionality will be impaired."
+            self.logger.error(error_msg)
+            if self.strict_mode:
+                raise ModelError(f"Model initialization failed: {error_msg}")
         # No need to move CROW_EMBEDDING_MODEL to self.device, as it's already on _target_device.
         # Calculations using it should ensure tensors are moved to CROW_EMBEDDING_MODEL's device.
 
         self.logger.info("Initializing multi-view extractor for EnhancedTracker...")
-        self.multi_view_extractor = create_multi_view_extractor() # This function should handle its own model loading/config
-        if self.multi_view_extractor is None:
-            self.logger.warning("Multi-view extractor could not be created.")
-        elif hasattr(self.multi_view_extractor, 'to'):
-            self.multi_view_extractor.to(self.device)
-            if hasattr(self.multi_view_extractor, 'eval'): self.multi_view_extractor.eval()
-            self.logger.info("Multi-view extractor configured for EnhancedTracker.")
+        try:
+            self.multi_view_extractor = create_multi_view_extractor() # This function should handle its own model loading/config
+            if self.multi_view_extractor is None:
+                error_msg = "Multi-view extractor could not be created."
+                self.logger.warning(error_msg)
+                if self.strict_mode:
+                    raise ModelError(f"Model initialization failed: {error_msg}")
+            elif hasattr(self.multi_view_extractor, 'to'):
+                self.multi_view_extractor.to(self.device)
+                if hasattr(self.multi_view_extractor, 'eval'): self.multi_view_extractor.eval()
+                self.logger.info("Multi-view extractor configured for EnhancedTracker.")
+        except Exception as e:
+            error_msg = f"Failed to initialize multi-view extractor: {e}"
+            self.logger.error(error_msg)
+            if self.strict_mode:
+                raise ModelError(f"Model initialization failed: {error_msg}")
             
         self.logger.info("Initializing color normalizer for EnhancedTracker...")
-        self.color_normalizer = create_normalizer() # This might return None or a configured object
-        if self.color_normalizer and hasattr(self.color_normalizer, 'to'): # If it's a PyTorch module
-            self.color_normalizer.to(self.device)
-            self.logger.info("Color normalizer (if PyTorch module) moved to device.")
-        elif self.color_normalizer:
-            self.logger.info("Color normalizer initialized (non-PyTorch module or no 'to' method).")
-        else:
-            self.logger.warning("Color normalizer could not be initialized.")
+        try:
+            self.color_normalizer = create_normalizer() # This might return None or a configured object
+            if self.color_normalizer and hasattr(self.color_normalizer, 'to'): # If it's a PyTorch module
+                self.color_normalizer.to(self.device)
+                self.logger.info("Color normalizer (if PyTorch module) moved to device.")
+            elif self.color_normalizer:
+                self.logger.info("Color normalizer initialized (non-PyTorch module or no 'to' method).")
+            else:
+                error_msg = "Color normalizer could not be initialized."
+                self.logger.warning(error_msg)
+                if self.strict_mode:
+                    raise ModelError(f"Model initialization failed: {error_msg}")
+        except Exception as e:
+            error_msg = f"Failed to initialize color normalizer: {e}"
+            self.logger.error(error_msg)
+            if self.strict_mode:
+                raise ModelError(f"Model initialization failed: {error_msg}")
 
     # _load_model_from_path is removed as EnhancedTracker no longer loads its own embedding model.
 
