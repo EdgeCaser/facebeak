@@ -25,6 +25,7 @@ from unsupervised_learning import (
     UnsupervisedTrainingPipeline,
     create_unsupervised_config
 )
+from unsupervised_gui_tools import ClusteringBasedLabelSmoother # Added import
 
 
 class TestSimCLRCrowDataset:
@@ -489,6 +490,113 @@ class TestIntegrationScenarios:
         
         assert isinstance(results['quality_score'], float)
         assert isinstance(results['recommendations'], list)
+
+
+class TestClusteringBasedLabelSmoother:
+    """Test the ClusteringBasedLabelSmoother class, focusing on merge operations."""
+
+    @pytest.fixture
+    def label_smoother(self):
+        """Fixture to create a ClusteringBasedLabelSmoother instance."""
+        return ClusteringBasedLabelSmoother(confidence_threshold=0.8)
+
+    @patch('unsupervised_gui_tools.reassign_crow_embeddings')
+    @patch('unsupervised_gui_tools.get_connection')
+    def test_perform_merge_operation_success(self, mock_get_connection, mock_reassign_embeddings, label_smoother):
+        """Test successful merge operation."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_get_connection.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (0,) # No remaining embeddings after reassign
+
+        mock_reassign_embeddings.return_value = 5  # Simulate 5 embeddings moved
+
+        crow_id_from = 1
+        crow_id_to = 2
+        success, message = label_smoother.perform_merge_operation(crow_id_from, crow_id_to)
+
+        assert success is True
+        assert message == f"Successfully merged crow {crow_id_from} into {crow_id_to}."
+        mock_reassign_embeddings.assert_called_once_with(from_crow_id=crow_id_from, to_crow_id=crow_id_to)
+        
+        # Check SQL delete calls
+        calls = [
+            call("SELECT COUNT(*) FROM crow_embeddings WHERE crow_id = ?", (crow_id_from,)),
+            call("DELETE FROM crows WHERE id = ?", (crow_id_from,))
+        ]
+        mock_cursor.execute.assert_has_calls(calls)
+        mock_conn.commit.assert_called_once()
+        mock_conn.close.assert_called_once()
+
+    @patch('unsupervised_gui_tools.reassign_crow_embeddings')
+    def test_perform_merge_operation_reassign_fails(self, mock_reassign_embeddings, label_smoother):
+        """Test merge operation when reassign_crow_embeddings fails."""
+        mock_reassign_embeddings.side_effect = Exception("DB error during reassign")
+
+        crow_id_from = 1
+        crow_id_to = 2
+        success, message = label_smoother.perform_merge_operation(crow_id_from, crow_id_to)
+
+        assert success is False
+        assert "Merge failed: DB error during reassign" in message
+        mock_reassign_embeddings.assert_called_once_with(from_crow_id=crow_id_from, to_crow_id=crow_id_to)
+
+    @patch('unsupervised_gui_tools.reassign_crow_embeddings')
+    @patch('unsupervised_gui_tools.get_connection')
+    def test_perform_merge_operation_delete_fails(self, mock_get_connection, mock_reassign_embeddings, label_smoother):
+        """Test merge operation when deleting the crow fails."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_get_connection.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (0,) # No remaining embeddings
+
+        # Simulate error on delete
+        mock_cursor.execute.side_effect = [None, Exception("DB error during delete")] 
+
+        mock_reassign_embeddings.return_value = 3
+
+        crow_id_from = 1
+        crow_id_to = 2
+        success, message = label_smoother.perform_merge_operation(crow_id_from, crow_id_to)
+
+        assert success is False
+        assert f"Failed to delete crow {crow_id_from}: DB error during delete" in message
+        mock_reassign_embeddings.assert_called_once_with(from_crow_id=crow_id_from, to_crow_id=crow_id_to)
+        mock_conn.rollback.assert_called_once() # Should rollback if delete fails
+        mock_conn.close.assert_called_once()
+
+    @patch('unsupervised_gui_tools.reassign_crow_embeddings')
+    @patch('unsupervised_gui_tools.get_connection')
+    def test_perform_merge_operation_deletes_remaining_embeddings(self, mock_get_connection, mock_reassign_embeddings, label_smoother):
+        """Test that remaining embeddings are deleted if found before deleting crow."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_get_connection.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+        
+        # Simulate some embeddings remaining after reassign_crow_embeddings (e.g. if it was partial)
+        # First call to fetchone (COUNT(*)) returns 2, then 0 after delete.
+        mock_cursor.fetchone.side_effect = [(2,), (0,)] 
+        mock_reassign_embeddings.return_value = 5 
+
+        crow_id_from = 1
+        crow_id_to = 2
+        success, message = label_smoother.perform_merge_operation(crow_id_from, crow_id_to)
+
+        assert success is True
+        mock_reassign_embeddings.assert_called_once_with(from_crow_id=crow_id_from, to_crow_id=crow_id_to)
+        
+        # Check SQL calls: count, delete embeddings, delete crow
+        calls = [
+            call("SELECT COUNT(*) FROM crow_embeddings WHERE crow_id = ?", (crow_id_from,)),
+            call("DELETE FROM crow_embeddings WHERE crow_id = ?", (crow_id_from,)), # This is the extra delete
+            call("DELETE FROM crows WHERE id = ?", (crow_id_from,))
+        ]
+        mock_cursor.execute.assert_has_calls(calls, any_order=False) # Order matters here
+        mock_conn.commit.assert_called_once()
+        mock_conn.close.assert_called_once()
 
 
 if __name__ == "__main__":

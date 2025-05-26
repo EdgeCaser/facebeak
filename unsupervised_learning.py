@@ -421,6 +421,11 @@ class UnsupervisedTrainingPipeline:
             return results
         
         embeddings_array = np.array(all_embeddings)
+        try:
+            del all_embeddings # Free memory from the list of embeddings as it's now in embeddings_array
+            logger.debug("Deleted all_embeddings list after converting to numpy array.")
+        except NameError:
+            pass # Should exist at this point if code logic is correct
         
         # 1. Generate pseudo-labels
         pseudo_results = self.auto_labeler.generate_pseudo_labels(
@@ -442,7 +447,18 @@ class UnsupervisedTrainingPipeline:
         
         # 4. Generate recommendations
         results['recommendations'] = self._generate_recommendations(results)
-        
+
+        # Clean up large data structures
+        try:
+            # all_embeddings should have been deleted earlier
+            del embeddings_array
+            del embeddings_tensor # Defined in this scope
+            logger.debug("Cleaned up large embedding structures (array and tensor) in apply_unsupervised_techniques")
+        except NameError:
+            # embeddings_tensor might not always be defined if there are no embeddings
+            logger.debug("Some embedding structures (array or tensor) were not defined, skipping cleanup for them.")
+            pass # In case any of them were not defined (e.g. no embeddings found)
+
         return results
     
     def _calculate_embedding_quality(self, embeddings: np.ndarray) -> float:

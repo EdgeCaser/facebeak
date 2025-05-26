@@ -14,9 +14,9 @@ import logging
 from pathlib import Path
 import json
 
-from db import get_all_crows, get_crow_embeddings, update_crow_label
+from db import get_all_crows, get_crow_embeddings, update_crow_label, reassign_crow_embeddings, get_connection
 from unsupervised_learning import (
-    UnsupervisedTrainingPipeline, 
+    UnsupervisedTrainingPipeline,
     AutoLabelingSystem, 
     ReconstructionValidator
 )
@@ -33,6 +33,67 @@ class ClusteringBasedLabelSmoother:
         self.confidence_threshold = confidence_threshold
         self.analyzer = CrowClusterAnalyzer()
         self.auto_labeler = AutoLabelingSystem()
+
+    def perform_merge_operation(self, crow_id_from: int, crow_id_to: int) -> Tuple[bool, str]:
+        """
+        Perform the merge operation: reassign embeddings from crow_id_from to crow_id_to,
+        and then delete crow_id_from.
+
+        Args:
+            crow_id_from: The ID of the crow to merge from.
+            crow_id_to: The ID of the crow to merge into.
+
+        Returns:
+            A tuple (success: bool, message: str).
+        """
+        logger.info(f"Attempting to merge crow {crow_id_from} into crow {crow_id_to}")
+        try:
+            # Step 1: Reassign all embeddings from crow_id_from to crow_id_to
+            # The reassign_crow_embeddings function handles updates to sighting counts and timestamps.
+            moved_count = reassign_crow_embeddings(from_crow_id=crow_id_from, to_crow_id=crow_id_to)
+            logger.info(f"Reassigned {moved_count} embeddings from crow {crow_id_from} to {crow_id_to}")
+
+            # Step 2: Delete the original crow (crow_id_from)
+            # Since db.py doesn't have a dedicated delete_crow, we'll do it here.
+            # Note: This assumes that related data in other tables (e.g., behavioral_markers
+            # linked to embeddings of crow_id_from) are either handled by ON DELETE CASCADE,
+            # or are implicitly handled because all embeddings were moved.
+            # The reassign_crow_embeddings function sets total_sightings of from_crow_id to 0
+            # if all embeddings are moved, but doesn't delete the crow row.
+            
+            conn = None
+            try:
+                conn = get_connection()
+                cursor = conn.cursor()
+                # Ensure there are no remaining embeddings for crow_id_from, just in case.
+                # This should ideally be 0 after reassign_crow_embeddings.
+                cursor.execute("SELECT COUNT(*) FROM crow_embeddings WHERE crow_id = ?", (crow_id_from,))
+                remaining_embeddings = cursor.fetchone()[0]
+                if remaining_embeddings > 0:
+                    # This case should ideally not happen if reassign_crow_embeddings worked as expected for all embeddings.
+                    # However, if reassign_crow_embeddings was called with specific embedding_ids (not the case here),
+                    # or if there's an issue, this is a safeguard.
+                    logger.warning(f"Crow {crow_id_from} still has {remaining_embeddings} embeddings. Deleting them now.")
+                    cursor.execute("DELETE FROM crow_embeddings WHERE crow_id = ?", (crow_id_from,))
+                
+                # Now, delete the crow from the crows table
+                cursor.execute("DELETE FROM crows WHERE id = ?", (crow_id_from,))
+                conn.commit()
+                logger.info(f"Successfully deleted crow {crow_id_from} from crows table.")
+            except Exception as e_db_delete:
+                if conn:
+                    conn.rollback()
+                logger.error(f"Database error while deleting crow {crow_id_from}: {e_db_delete}")
+                return False, f"Failed to delete crow {crow_id_from}: {e_db_delete}"
+            finally:
+                if conn:
+                    conn.close()
+            
+            return True, f"Successfully merged crow {crow_id_from} into {crow_id_to}."
+
+        except Exception as e:
+            logger.error(f"Error during merge operation for {crow_id_from} -> {crow_id_to}: {e}")
+            return False, f"Merge failed: {str(e)}"
         
     def analyze_and_suggest_merges(self) -> Dict:
         """
@@ -95,11 +156,13 @@ class ClusteringBasedLabelSmoother:
         
         logger.info(f"Found {len(merge_suggestions)} potential merges")
         
-        return {
+        output = {
             'suggestions': merge_suggestions,
             'total_crows': len(crow_embeddings),
             'analysis_complete': True
         }
+        del crow_embeddings # Free up memory
+        return output
     
     def suggest_outlier_relabeling(self) -> Dict:
         """Suggest outlier samples that might need relabeling."""
@@ -128,6 +191,11 @@ class ClusteringBasedLabelSmoother:
         # Use reconstruction validator to find outliers
         validator = ReconstructionValidator()
         embeddings_tensor = torch.tensor(all_embeddings, dtype=torch.float32)
+        try:
+            del all_embeddings # Free memory from the list of embeddings
+            logger.debug("Deleted all_embeddings list after converting to tensor in suggest_outlier_relabeling.")
+        except NameError:
+            pass # Should exist
         
         validator.train_autoencoder(embeddings_tensor)
         outlier_indices, threshold = validator.detect_outliers(embeddings_tensor)
@@ -143,11 +211,21 @@ class ClusteringBasedLabelSmoother:
         
         logger.info(f"Found {len(outliers)} potential outliers")
         
-        return {
+        output = {
             'outliers': outliers,
             'threshold': threshold,
             'total_samples': len(all_embeddings)
         }
+        # Clean up large data structures
+        try:
+            # all_embeddings should have been deleted earlier
+            del embeddings_tensor
+            del all_metadata
+            logger.debug("Cleaned up embedding tensor and metadata in suggest_outlier_relabeling")
+        except NameError:
+            logger.debug("Some embedding structures (tensor or metadata) were not defined in suggest_outlier_relabeling.")
+            pass
+        return output
 
 
 class UnsupervisedLearningGUI:
@@ -415,24 +493,37 @@ class UnsupervisedLearningGUI:
         )
         
         if result:
-            try:
-                # Implement merge logic here
-                # This would involve updating the database to merge the two crows
-                self.status_var.set(f"Merging {suggestion['name1']} and {suggestion['name2']}...")
-                
-                # Update tree item
+            self.status_var.set(f"Merging {suggestion['name1']} into {suggestion['name2']}...")
+            self.master.update() # Ensure status bar updates
+
+            crow_id_from = suggestion['crow_id1']
+            crow_id_to = suggestion['crow_id2']
+            
+            # Ensure crow_id_from is the one with fewer sightings or older if equal,
+            # to preserve the more established crow ID if possible.
+            # However, the suggestion already has name1 and name2, id1 and id2.
+            # For simplicity, we'll assume the user is prompted to confirm which ID to keep,
+            # or the suggestion implies id1 is merged into id2.
+            # The current suggestion['crow_id1'] will be merged into suggestion['crow_id2'].
+
+            success, message = self.label_smoother.perform_merge_operation(crow_id_from, crow_id_to)
+
+            if success:
                 self.merge_tree.item(item_id, values=(
-                    suggestion['name1'],
-                    suggestion['name2'],
+                    suggestion['name1'], # Or the name of the merged crow
+                    suggestion['name2'], # Or the name of the merged crow
                     f"{suggestion['confidence']:.3f}",
-                    suggestion['n_comparisons'],
+                    suggestion['n_comparisons'], # This might change or be irrelevant
                     "Applied"
                 ))
-                
-                messagebox.showinfo("Success", "Merge applied successfully")
+                messagebox.showinfo("Success", message)
                 self.status_var.set("Merge completed")
-                
+                # Optional: Refresh merge suggestions list or remove the applied one
+                self.analyze_merges() 
             except Exception as e:
+                # This specific exception catch might be redundant if perform_merge_operation handles all its exceptions
+                # and returns False, message. But kept for safety.
+                logger.error(f"GUI error during merge: {str(e)}")
                 messagebox.showerror("Error", f"Merge failed: {str(e)}")
                 self.status_var.set("Merge failed")
     
@@ -508,6 +599,15 @@ class UnsupervisedLearningGUI:
                 self.auto_label_text.insert(tk.END, "Try lowering the confidence threshold.\n")
             
             self.status_var.set(f"Generated {len(pseudo_labels)} pseudo-labels")
+
+            # Clean up large data structures
+            try:
+                del all_embeddings
+                del all_labels
+                logger.debug("Cleaned up embedding structures in generate_pseudo_labels")
+            except NameError:
+                logger.debug("Some embedding structures were not defined in generate_pseudo_labels.")
+                pass
             
         except Exception as e:
             messagebox.showerror("Error", f"Pseudo-label generation failed: {str(e)}")

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class ImprovedCrowTripletDataset(Dataset):
     def __init__(self, crop_dir, split='train', transform_mode='standard', 
                  min_samples_per_crow=5, max_samples_per_crow=200,
-                 curriculum_epoch=0, max_curriculum_epochs=20):
+                 curriculum_epoch=0, max_curriculum_epochs=20, model=None): # Added model parameter
         """
         Improved Crow Triplet Dataset with curriculum learning and balancing.
         
@@ -41,23 +41,39 @@ class ImprovedCrowTripletDataset(Dataset):
         self.max_samples_per_crow = max_samples_per_crow
         self.curriculum_epoch = curriculum_epoch
         self.max_curriculum_epochs = max_curriculum_epochs
-        
-        # Setup transforms
+        self.model = model # Store the model
+        self.all_img_embeddings = {} # To store pre-computed embeddings {path: tensor}
+        self.embeddings_computed_for_model_id = None # id(model) for which embeddings were computed
+        self.hard_negative_N_candidates = 50 # Number of candidates for hard negative mining
+
+        # Setup transforms (including a specific one for embedding generation)
         self._setup_transforms()
         
         # Load and balance dataset
-        self._load_and_balance_dataset()
+        self._load_and_balance_dataset() # This defines self.crow_to_imgs, 
+                                         # self.all_image_paths_labels, and self.samples (balanced)
         
-        # Setup curriculum learning
+        # Setup curriculum learning (operates on self.samples)
         self._setup_curriculum()
+
+        # Pre-compute embeddings if model is provided
+        if self.model is not None:
+            self._ensure_embeddings_computed()
         
         logger.info(f"Dataset {split}: {len(self.samples)} samples from {len(self.crow_to_imgs)} crows")
         
     def _setup_transforms(self):
         """Setup data transforms based on mode."""
-        # Base transforms
-        base_transforms = [
+        # Transform for consistent embedding generation (less augmentation)
+        self.embedding_transform = transforms.Compose([
             transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+        # Base transforms for training
+        base_transforms = [
+            transforms.Resize((224, 224)), 
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ]
@@ -125,17 +141,25 @@ class ImprovedCrowTripletDataset(Dataset):
         filtered_crows = {k: v for k, v in self.crow_to_imgs.items() 
                          if len(v) >= self.min_samples_per_crow}
         self.crow_to_imgs = filtered_crows
+
+        # Create a list of all unique image paths and their labels from the selected crows/images
+        # This list is used for computing embeddings.
+        self.all_image_paths_labels = []
+        for crow_id, img_files_list in self.crow_to_imgs.items():
+            for img_path in img_files_list:
+                self.all_image_paths_labels.append((img_path, crow_id))
         
-        # Create sample list
-        self.samples = []
-        for crow_id, img_files in self.crow_to_imgs.items():
-            for img_file in img_files:
-                self.samples.append((img_file, crow_id))
+        # Create initial sample list for training (anchor selection pool)
+        # This list will be balanced. self.crow_to_imgs here contains images up to max_samples_per_crow.
+        self.samples = [] 
+        for crow_id, img_files_list in self.crow_to_imgs.items(): 
+            for img_path in img_files_list:
+                self.samples.append((img_path, crow_id))
+
+        self._balance_classes() # Balances self.samples by oversampling based on target counts
         
-        # Balance dataset by oversampling minority classes
-        self._balance_classes()
-        
-        logger.info(f"Loaded {len(self.samples)} samples from {len(self.crow_to_imgs)} crows")
+        logger.info(f"Loaded {len(self.all_image_paths_labels)} unique images from {len(self.crow_to_imgs)} crows. "
+                    f"Balanced training samples: {len(self.samples)}.")
         
         # Log class distribution
         class_counts = defaultdict(int)
@@ -209,7 +233,65 @@ class ImprovedCrowTripletDataset(Dataset):
             
             logger.info(f"Curriculum learning: using {num_samples}/{len(sample_difficulties)} samples "
                        f"(difficulty ratio: {difficulty_ratio:.2f})")
-    
+
+    def set_model(self, model):
+        """Sets the model and flags that embeddings need recomputation."""
+        if self.model is not model: # Check if it's actually a new model instance
+            logger.info("Model updated in dataset. Embeddings will be recomputed if accessed for hard negative mining.")
+            self.model = model
+            # Mark embeddings as stale by mismatching the ID or clearing them
+            self.embeddings_computed_for_model_id = None 
+            # self.all_img_embeddings.clear() # Optionally clear, or let _ensure_embeddings_computed handle it
+
+    def _ensure_embeddings_computed(self):
+        """
+        Ensures that embeddings are computed for all unique images using the current model.
+        Returns True if embeddings are ready, False otherwise.
+        """
+        if self.model is None:
+            logger.debug("No model set in dataset. Cannot compute embeddings for hard negative mining.")
+            return False
+        
+        current_model_id = id(self.model)
+        if self.embeddings_computed_for_model_id == current_model_id and self.all_img_embeddings:
+            # Embeddings are current and available.
+            return True 
+
+        logger.info(f"Computing/Re-computing embeddings for hard negative mining with model ID {current_model_id}...")
+        new_embeddings_cache = {}
+        
+        original_model_training_state = self.model.training
+        self.model.eval() # Set model to evaluation mode
+        
+        try:
+            device = next(self.model.parameters()).device # Get model's device
+        except StopIteration: # Model has no parameters
+            logger.error("Model has no parameters. Cannot compute embeddings.")
+            if original_model_training_state: self.model.train() # Restore state
+            return False
+
+
+        with torch.no_grad():
+            for img_path, _ in self.all_image_paths_labels: # Iterate over unique images
+                try:
+                    img = Image.open(img_path).convert('RGB')
+                    img_tensor = self.embedding_transform(img).unsqueeze(0) 
+                    img_tensor = img_tensor.to(device)
+                    
+                    embedding = self.model(img_tensor)
+                    new_embeddings_cache[img_path] = embedding.squeeze(0).cpu() # Store on CPU
+                except Exception as e:
+                    logger.error(f"Failed to compute embedding for {img_path}: {e}")
+        
+        self.all_img_embeddings = new_embeddings_cache
+        self.embeddings_computed_for_model_id = current_model_id
+        
+        if original_model_training_state: # Restore model's original training state
+            self.model.train()
+            
+        logger.info(f"Computed and cached {len(self.all_img_embeddings)} embeddings.")
+        return bool(self.all_img_embeddings) # Return true if some embeddings were computed
+
     def update_curriculum(self, epoch):
         """Update curriculum for new epoch."""
         if epoch != self.curriculum_epoch and epoch < self.max_curriculum_epochs:
@@ -261,22 +343,89 @@ class ImprovedCrowTripletDataset(Dataset):
     
     def _get_hard_negative_sample(self, anchor_crow_id, anchor_embedding=None):
         """Get a hard negative sample using curriculum learning."""
-        # For now, just return a random negative
-        # TODO: Implement hard negative mining using pre-computed embeddings
-        return self._get_negative_sample(anchor_crow_id)
-    
+        
+        embeddings_ready = self._ensure_embeddings_computed()
+
+        if not embeddings_ready or anchor_embedding is None or not self.all_img_embeddings:
+            if self.model is not None and (not embeddings_ready or not self.all_img_embeddings):
+                 logger.debug(f"HNM for {anchor_crow_id}: Falling back to random negative (embeddings_ready={embeddings_ready}, anchor_emb_is_none={anchor_embedding is None}, cache_empty={not self.all_img_embeddings}).")
+            return self._get_negative_sample(anchor_crow_id)
+
+        hard_negative_path = None
+        min_dist = float('inf')
+        
+        anchor_embedding_cpu = anchor_embedding.cpu() # Ensure anchor embedding is on CPU for distance calc
+
+        # Collect all valid negative candidate paths that have embeddings
+        negative_candidates_paths = []
+        for path, label in self.all_image_paths_labels: # Iterate unique images
+            if label != anchor_crow_id and path in self.all_img_embeddings:
+                negative_candidates_paths.append(path)
+        
+        if not negative_candidates_paths:
+            logger.debug(f"HNM for {anchor_crow_id}: No valid negative candidates with embeddings found. Falling back.")
+            return self._get_negative_sample(anchor_crow_id)
+
+        # If more candidates than desired, sample a subset
+        if len(negative_candidates_paths) > self.hard_negative_N_candidates:
+            selected_candidate_paths = random.sample(negative_candidates_paths, self.hard_negative_N_candidates)
+        else:
+            selected_candidate_paths = negative_candidates_paths
+            
+        for neg_path in selected_candidate_paths:
+            neg_embedding = self.all_img_embeddings.get(neg_path) # Should exist due to earlier check
+            # neg_embedding is already on CPU as stored in cache
+            dist = torch.norm(anchor_embedding_cpu - neg_embedding, p=2).item() # L2 distance
+            if dist < min_dist:
+                min_dist = dist
+                hard_negative_path = neg_path
+        
+        if hard_negative_path:
+            # logger.debug(f"HNM for {anchor_crow_id}: Selected {hard_negative_path} (dist: {min_dist:.4f})")
+            return hard_negative_path
+        else:
+            # Fallback if no suitable hard negative found in candidates
+            logger.debug(f"HNM for {anchor_crow_id}: No hard negative found from candidates, falling back to random.")
+            return self._get_negative_sample(anchor_crow_id)
+
     def __getitem__(self, idx):
         """Get a triplet sample."""
-        # Get anchor
         anchor_path, anchor_crow_id = self.samples[idx]
-        anchor_img = self._load_image(anchor_path)
+        anchor_img = self._load_image(anchor_path) # This applies self.transform (training augmentations)
+
+        anchor_embedding_for_hnm = None
+        if self.model: 
+            try:
+                original_model_training_state = self.model.training
+                self.model.eval()
+                with torch.no_grad():
+                    # Use embedding_transform for consistency with pre-computed embeddings
+                    raw_anchor_img_pil = Image.open(anchor_path).convert('RGB')
+                    anchor_emb_tensor_for_hnm_device = self.embedding_transform(raw_anchor_img_pil).unsqueeze(0)
+                    
+                    device = next(self.model.parameters()).device # Get model's device
+                    anchor_emb_tensor_for_hnm_device = anchor_emb_tensor_for_hnm_device.to(device)
+                    
+                    # The embedding passed to _get_hard_negative_sample should be on the model's device initially,
+                    # as it will be .cpu()'d within that method.
+                    anchor_embedding_for_hnm = self.model(anchor_emb_tensor_for_hnm_device).squeeze(0) 
+                if original_model_training_state: # Restore state
+                    self.model.train()
+            except Exception as e:
+                logger.error(f"Could not compute anchor embedding for HNM for {anchor_path}: {e}")
         
-        # Get positive
         pos_path = self._get_positive_sample(anchor_crow_id, anchor_path)
         pos_img = self._load_image(pos_path)
         
-        # Get negative
-        neg_path = self._get_negative_sample(anchor_crow_id)
+        # Determine whether to use hard negative mining.
+        # Could be based on curriculum_epoch, e.g., enable after some initial epochs.
+        # For now, always attempt if model is available.
+        use_hard_negatives = self.model is not None
+        
+        if use_hard_negatives:
+            neg_path = self._get_hard_negative_sample(anchor_crow_id, anchor_embedding=anchor_embedding_for_hnm)
+        else:
+            neg_path = self._get_negative_sample(anchor_crow_id)
         neg_img = self._load_image(neg_path)
         
         # Return triplet

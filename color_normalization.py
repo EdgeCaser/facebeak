@@ -17,7 +17,21 @@ class ColorNormalizer:
         Returns:
             Normalized image as numpy array of same shape and dtype
         """
-        raise NotImplementedError
+        # Basic input validation, similar to DummyNormalizer
+        # Subclasses can override this for more specific needs or skip if handling differently.
+        if not isinstance(img, np.ndarray):
+            raise AttributeError("Input must be a numpy array")
+        if img.size == 0:
+            raise IndexError("Input array is empty")
+        if len(img.shape) != 3 or img.shape[2] != 3:
+            raise IndexError("Input must be a 3-channel image (H, W, 3)")
+        if img.dtype != np.uint8:
+            raise TypeError("Input must be uint8")
+        
+        # Default behavior: return image unchanged.
+        # Subclasses should provide specific normalization logic.
+        logger.debug("ColorNormalizer base class normalize() called, returning image unchanged.")
+        return img
 
 class DummyNormalizer(ColorNormalizer):
     """Dummy normalizer that returns the input image unchanged."""

@@ -24,7 +24,10 @@ from improved_triplet_loss import (
 )
 
 # We'll need to mock some imports that may not exist yet
+# Also, import the actual dataset we want to test
 import sys
+from improved_dataset import ImprovedCrowTripletDataset # Import the actual class
+from PIL import Image # For creating dummy images
 
 
 class MockImprovedCrowTripletDataset:
@@ -709,6 +712,218 @@ class TestIntegration:
                 loss_fn.update_epoch(10)
                 loss2, stats2 = loss_fn(embeddings, labels)
                 assert stats2['difficulty'] > 0
+
+# --- Tests for ImprovedCrowTripletDataset Hard Negative Mining ---
+
+@pytest.fixture
+def create_dummy_image_files(tmp_path):
+    """Creates dummy image files in a temporary directory structure for dataset testing."""
+    base_crop_dir = tmp_path / "hnm_crop_dir"
+    base_crop_dir.mkdir()
+    image_paths = {} # {'crow1': [Path(...), ...], 'crow2': [...]}
+    crow_labels = {} # {Path(...): 'crow1', ...}
+
+    for i in range(1, 4): # 3 crows
+        crow_id = f"crow{i}"
+        crow_dir = base_crop_dir / crow_id
+        crow_dir.mkdir()
+        image_paths[crow_id] = []
+        for j in range(1, 4): # 3 images per crow
+            img_file = crow_dir / f"img{j}.jpg"
+            # Create a tiny valid JPEG image using PIL
+            try:
+                img = Image.new('RGB', (10, 10), color = (random.randint(0,255), random.randint(0,255), random.randint(0,255)))
+                img.save(str(img_file), "JPEG")
+                image_paths[crow_id].append(img_file)
+                crow_labels[img_file] = crow_id
+            except Exception as e:
+                logging.error(f"PIL not available or failed to create dummy image: {e}")
+                # Fallback: just touch the file if PIL is not available or fails
+                img_file.touch()
+                image_paths[crow_id].append(img_file) # Still add path
+                crow_labels[img_file] = crow_id
+
+
+    return base_crop_dir, image_paths, crow_labels
+
+@pytest.fixture
+def mock_embedding_model():
+    """Creates a mock model for embedding generation."""
+    model = MagicMock(spec=nn.Module) # Simulate an nn.Module
+    model.embedding_dim = 128 # Example dimension
+    
+    # Mock parameters list and device
+    mock_param = MagicMock(spec=torch.Tensor)
+    mock_param.device = torch.device('cpu')
+    model.parameters.return_value = [mock_param]
+    model.device = torch.device('cpu') # Make model device accessible
+
+    # Default behavior for forward: return a random tensor of correct shape
+    # Tests can override this with side_effect for specific inputs
+    model.forward = MagicMock(return_value=torch.randn(1, model.embedding_dim))
+    
+    model.eval = MagicMock()
+    model.train = MagicMock()
+    return model
+
+class TestImprovedCrowTripletDatasetHNM:
+
+    def test_dataset_init_with_model(self, create_dummy_image_files, mock_embedding_model):
+        crop_dir, _, _ = create_dummy_image_files
+        dataset = ImprovedCrowTripletDataset(crop_dir=str(crop_dir), model=mock_embedding_model)
+        assert dataset.model is mock_embedding_model
+        # _ensure_embeddings_computed should be called if model is provided
+        mock_embedding_model.eval.assert_called() # Called by _ensure_embeddings_computed
+
+    def test_set_model(self, create_dummy_image_files, mock_embedding_model):
+        crop_dir, _, _ = create_dummy_image_files
+        dataset = ImprovedCrowTripletDataset(crop_dir=str(crop_dir), model=None)
+        assert dataset.model is None
+        dataset.set_model(mock_embedding_model)
+        assert dataset.model is mock_embedding_model
+        assert dataset.embeddings_computed_for_model_id is None # Stale
+
+    def test_ensure_embeddings_computed(self, create_dummy_image_files, mock_embedding_model):
+        crop_dir, image_paths_dict, _ = create_dummy_image_files
+        
+        # Configure mock model forward to return unique embeddings
+        def custom_forward(input_tensor):
+            # Create a "hash" of the input tensor for a unique embedding
+            # This is very crude, just for testing different outputs for different inputs
+            return torch.randn(1, mock_embedding_model.embedding_dim) + input_tensor.mean() 
+
+        mock_embedding_model.forward = MagicMock(side_effect=custom_forward)
+
+        dataset = ImprovedCrowTripletDataset(crop_dir=str(crop_dir), model=mock_embedding_model, split='train', min_samples_per_crow=1)
+        
+        # Call first time
+        ready = dataset._ensure_embeddings_computed()
+        assert ready
+        assert len(dataset.all_img_embeddings) == sum(len(paths) for paths in image_paths_dict.values())
+        mock_embedding_model.eval.assert_called()
+        mock_embedding_model.forward.assert_called()
+        initial_call_count = mock_embedding_model.forward.call_count
+        assert dataset.embeddings_computed_for_model_id == id(mock_embedding_model)
+
+        # Call second time, should use cache
+        ready = dataset._ensure_embeddings_computed()
+        assert ready
+        assert mock_embedding_model.forward.call_count == initial_call_count # No new calls
+
+        # Change model, should recompute
+        new_mock_model = mock_embedding_model # In a real scenario, this would be a new instance
+        new_mock_model.forward = MagicMock(side_effect=custom_forward) # Reset its forward mock
+        dataset.set_model(new_mock_model) # This only sets self.model and clears computed_id
+        
+        ready = dataset._ensure_embeddings_computed() # This will trigger recompute
+        assert ready
+        assert new_mock_model.forward.call_count > 0 # Should be called again
+        assert dataset.embeddings_computed_for_model_id == id(new_mock_model)
+
+
+    def test_get_hard_negative_sample_logic(self, create_dummy_image_files, mock_embedding_model):
+        crop_dir, image_paths_dict, crow_labels_map = create_dummy_image_files
+        
+        dataset = ImprovedCrowTripletDataset(crop_dir=str(crop_dir), model=mock_embedding_model, split='train', min_samples_per_crow=1)
+        dataset.hard_negative_N_candidates = 3 # Test with a small number of candidates
+
+        anchor_crow_id = 'crow1'
+        anchor_path = image_paths_dict[anchor_crow_id][0]
+
+        # Manually set up pre-computed embeddings for precise testing
+        # Anchor emb (for anchor_path)
+        # Positive emb (another img from crow1)
+        # Hard Negative emb (img from crow2, close to anchor)
+        # Easy Negative emb (img from crow3, far from anchor)
+        emb_anchor = torch.tensor([1.0, 0.0, 0.0])
+        emb_positive = torch.tensor([1.1, 0.1, 0.1])
+        emb_hard_neg = torch.tensor([1.2, 0.2, 0.2]) # crow2, close to anchor
+        emb_easy_neg = torch.tensor([5.0, 5.0, 5.0]) # crow3, far
+        emb_other_neg_c2 = torch.tensor([2.0, 2.0, 2.0]) # crow2, farther than hard_neg
+        emb_other_neg_c3 = torch.tensor([6.0, 6.0, 6.0]) # crow3, also far
+
+
+        dataset.all_img_embeddings = {
+            image_paths_dict['crow1'][0]: emb_anchor,
+            image_paths_dict['crow1'][1]: emb_positive,
+            image_paths_dict['crow2'][0]: emb_hard_neg, # This should be picked
+            image_paths_dict['crow3'][0]: emb_easy_neg,
+            image_paths_dict['crow2'][1]: emb_other_neg_c2,
+            image_paths_dict['crow3'][1]: emb_other_neg_c3,
+        }
+        # Ensure all paths in all_img_embeddings are also in all_image_paths_labels
+        dataset.all_image_paths_labels = list(dataset.all_img_embeddings.keys())
+        # Manually map labels for these paths
+        for path, emb in dataset.all_img_embeddings.items():
+            for cid, paths in image_paths_dict.items():
+                if path in paths:
+                    # Replace tuple with new one if it exists
+                    idx_to_replace = -1
+                    for i, (p,lbl) in enumerate(dataset.all_image_paths_labels):
+                        if p == path:
+                            idx_to_replace = i
+                            break
+                    if idx_to_replace != -1:
+                        dataset.all_image_paths_labels[idx_to_replace] = (path, cid)
+                    else: # Should not happen if setup correctly
+                         dataset.all_image_paths_labels.append((path,cid))
+
+
+        dataset.embeddings_computed_for_model_id = id(mock_embedding_model) # Mark as current
+        
+        # Test case: successful hard negative selection
+        # The anchor_embedding passed to the function is the one for anchor_path
+        returned_neg_path = dataset._get_hard_negative_sample(anchor_crow_id, emb_anchor)
+        assert returned_neg_path == image_paths_dict['crow2'][0] # Should be the hard negative
+
+        # Test case: Fallback if anchor_embedding is None
+        with patch.object(dataset, '_get_negative_sample', return_value="random_neg_path_fallback") as mock_random_neg:
+            returned_neg_path = dataset._get_hard_negative_sample(anchor_crow_id, None)
+            mock_random_neg.assert_called_once_with(anchor_crow_id)
+            assert returned_neg_path == "random_neg_path_fallback"
+
+        # Test case: Fallback if embeddings not ready (model is None)
+        dataset.model = None 
+        with patch.object(dataset, '_get_negative_sample', return_value="random_neg_no_model") as mock_random_neg:
+            returned_neg_path = dataset._get_hard_negative_sample(anchor_crow_id, emb_anchor)
+            mock_random_neg.assert_called_once_with(anchor_crow_id)
+            assert returned_neg_path == "random_neg_no_model"
+        dataset.model = mock_embedding_model # Restore model
+
+    def test_getitem_calls_hard_negative_mining(self, create_dummy_image_files, mock_embedding_model):
+        crop_dir, image_paths_dict, _ = create_dummy_image_files
+        
+        # Configure model's forward pass for the specific anchor image in __getitem__
+        # Let's say dataset[0] picks image_paths_dict['crow1'][0] as anchor
+        anchor_path_for_getitem = image_paths_dict['crow1'][0]
+        expected_anchor_embedding = torch.tensor([0.5, 0.5, 0.5] * (mock_embedding_model.embedding_dim // 3 +1))[:mock_embedding_model.embedding_dim].unsqueeze(0)
+        
+        def getitem_model_forward(input_tensor):
+            # This mock needs to handle the input tensor from _load_image via embedding_transform
+            # For simplicity, assume if it's called, it's for the anchor.
+            return expected_anchor_embedding
+
+        mock_embedding_model.forward = MagicMock(side_effect=getitem_model_forward)
+        
+        dataset = ImprovedCrowTripletDataset(crop_dir=str(crop_dir), model=mock_embedding_model, split='train', min_samples_per_crow=1)
+        dataset.samples = [(anchor_path_for_getitem, 'crow1')] # Force dataset[0] to be this anchor
+        
+        # Mock _ensure_embeddings_computed to avoid recomputing all here, assume they are there for HNM logic
+        dataset.all_img_embeddings = {p: torch.randn(mock_embedding_model.embedding_dim) for p_list in image_paths_dict.values() for p in p_list}
+        dataset.embeddings_computed_for_model_id = id(mock_embedding_model)
+
+        with patch.object(dataset, '_get_hard_negative_sample', return_value=image_paths_dict['crow2'][0]) as mock_hnm_call:
+            _ = dataset[0] # Trigger __getitem__
+            
+            mock_hnm_call.assert_called_once()
+            # Check the anchor_embedding passed to HNM
+            args, kwargs = mock_hnm_call.call_args
+            passed_anchor_label = args[0]
+            passed_anchor_embedding = kwargs.get('anchor_embedding')
+            
+            assert passed_anchor_label == 'crow1'
+            assert passed_anchor_embedding is not None
+            assert torch.allclose(passed_anchor_embedding.cpu(), expected_anchor_embedding.squeeze(0).cpu(), atol=1e-5)
 
 
 if __name__ == '__main__':
