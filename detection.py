@@ -357,6 +357,11 @@ def detect_crows_parallel(
                     detections.append(filtered)
                 else:
                     detections.append([])
+                
+                # --- CUDA Cache Clearing ---
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    logger.debug(f"Frame {idx}: Cleared CUDA cache.")
 
     print(f"[DEBUG] Finished detect_crows_parallel, detections: {detections}")
     return detections
