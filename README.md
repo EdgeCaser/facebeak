@@ -182,6 +182,34 @@ The facebeak system consists of multiple integrated components that work togethe
 - **Security**: Database encryption and privacy protection
 - **Comprehensive Testing**: 95%+ test coverage with automated validation
 
+## 📚 Complete Learning Pipeline Guides
+
+**New to machine learning or Python? Start here!**
+
+### 🎯 **[Complete Learning Pipeline Guide](docs/COMPLETE_LEARNING_PIPELINE_GUIDE.md)**
+**The definitive step-by-step guide for running the entire machine learning pipeline**
+- ✅ Designed for users with no Python or GitHub experience
+- ✅ Separate instructions for command-line and GUI approaches
+- ✅ Complete workflow from data extraction to model deployment
+- ✅ Troubleshooting section with common issues and solutions
+- ✅ Success checklists and performance metrics
+
+### ⚡ **[Quick Start Reference Card](docs/QUICK_START_REFERENCE.md)**
+**Essential commands and quick fixes at your fingertips**
+- ✅ One-page reference for all key commands
+- ✅ Common troubleshooting solutions
+- ✅ Performance optimization tips
+- ✅ Success metrics and file locations
+
+### 📊 **[Pipeline Flowchart](docs/PIPELINE_FLOWCHART.md)**
+**Visual guide to understanding the complete workflow**
+- ✅ Step-by-step flowchart with decision points
+- ✅ Time estimates and resource requirements
+- ✅ Branching paths for different user types
+- ✅ Quality control checkpoints
+
+---
+
 ## Quick Start Guide (For Non-Coders)
 
 ### Installation

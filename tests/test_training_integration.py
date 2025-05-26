@@ -94,7 +94,7 @@ class TestTrainingIntegration(unittest.TestCase):
         
         # Mock the CrowTripletDataset to test filtering
         try:
-            from train_triplet_resnet import CrowTripletDataset
+            from old_scripts.train_triplet_resnet import CrowTripletDataset
             dataset = CrowTripletDataset(self.crop_dir)
             
             # Get all image paths in dataset
@@ -252,7 +252,7 @@ class TestTrainingIntegration(unittest.TestCase):
             if os.path.exists(test_dir):
                 shutil.rmtree(test_dir)
             
-    @patch('train_triplet_resnet.logger')
+    @patch('old_scripts.train_triplet_resnet.logger')
     def test_training_dataset_logging_includes_manual_stats(self, mock_logger):
         """Test that training initialization logs manual labeling statistics."""
         test_files = ["crow1.jpg", "crow2.jpg", "false_pos.jpg"]
@@ -269,7 +269,7 @@ class TestTrainingIntegration(unittest.TestCase):
             
             try:
                 # Try to trigger dataset creation (this will call our logging code)
-                from train_triplet_resnet import CrowTripletDataset
+                from old_scripts.train_triplet_resnet import CrowTripletDataset
                 dataset = CrowTripletDataset(self.crop_dir)
                 
                 # Check that appropriate logging calls were made
@@ -292,7 +292,7 @@ class TestTrainingIntegration(unittest.TestCase):
     def test_dataset_size_changes_with_manual_labeling(self):
         """Test that dataset size changes as images are manually excluded."""
         try:
-            from train_triplet_resnet import CrowTripletDataset
+            from old_scripts.train_triplet_resnet import CrowTripletDataset
             
             # Initial dataset size (all images included)
             initial_dataset = CrowTripletDataset(self.crop_dir)
@@ -318,7 +318,7 @@ class TestTrainingIntegration(unittest.TestCase):
     def test_unlabeled_images_remain_included(self):
         """Test that unlabeled images are still included in training (innocent until proven guilty)."""
         try:
-            from train_triplet_resnet import CrowTripletDataset
+            from old_scripts.train_triplet_resnet import CrowTripletDataset
             
             # Label some images but leave others unlabeled
             add_image_label(self.test_images[0], "crow", confidence=0.95)

@@ -119,7 +119,7 @@ class ModelEvaluator:
     def _load_dataset(self):
         """Load dataset with better error handling."""
         try:
-            from train_triplet_resnet import CrowTripletDataset
+            from old_scripts.train_triplet_resnet import CrowTripletDataset
             
             # Create dataset
             dataset = CrowTripletDataset(self.crop_dir, self.audio_dir, split='val')

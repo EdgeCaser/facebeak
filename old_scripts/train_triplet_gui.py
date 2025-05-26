@@ -14,7 +14,7 @@ from tqdm import tqdm
 import cv2
 import numpy as np
 from models import CrowResNetEmbedder, CrowMultiModalEmbedder
-from train_triplet_resnet import CrowTripletDataset, TripletLoss, compute_metrics, custom_triplet_collate
+from old_scripts.train_triplet_resnet import CrowTripletDataset, TripletLoss, compute_metrics, custom_triplet_collate
 from torchvision import transforms
 import json
 from datetime import datetime

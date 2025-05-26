@@ -5,7 +5,7 @@ Debug script to test the CrowTripletDataset
 
 import sys
 import torch
-from train_triplet_resnet import CrowTripletDataset, custom_triplet_collate
+from old_scripts.train_triplet_resnet import CrowTripletDataset, custom_triplet_collate
 from torch.utils.data import DataLoader
 
 def test_dataset():

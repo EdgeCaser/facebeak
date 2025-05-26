@@ -8,7 +8,7 @@ try:
 except ImportError:
     TORCH_AVAILABLE = False
 
-from color_normalization import create_normalizer, AdaptiveNormalizer, ColorNormalizer
+from utilities.color_normalization import create_normalizer, AdaptiveNormalizer, ColorNormalizer
 
 def create_test_image(size=(224, 224), color=(100, 100, 100), noise_level=20):
     """Create a test image with controlled color and noise."""

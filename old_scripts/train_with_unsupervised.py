@@ -23,7 +23,7 @@ from unsupervised_learning import (
     TemporalConsistencyLoss,
     create_unsupervised_config
 )
-from train_triplet_resnet import CrowTripletDataset
+from old_scripts.train_triplet_resnet import CrowTripletDataset
 from db import get_all_crows, get_crow_embeddings
 from crow_clustering import CrowClusterAnalyzer
 

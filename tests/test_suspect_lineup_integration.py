@@ -10,7 +10,7 @@ import numpy as np
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db import initialize_database, save_crow_embedding, get_connection
-import sync_database
+import utilities.sync_database
 
 class TestSuspectLineupIntegration(unittest.TestCase):
     @classmethod
@@ -269,7 +269,7 @@ class TestSuspectLineupIntegration(unittest.TestCase):
     
     def test_gui_launcher_integration(self):
         """Test integration with GUI launcher."""
-        from gui_launcher import FacebeakGUI
+        from facebeak import FacebeakGUI
         
         # Mock the GUI components to test the suspect lineup launch
         root = MagicMock()

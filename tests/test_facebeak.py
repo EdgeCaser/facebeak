@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 import pytest
 import subprocess
-from train_triplet_resnet import CrowTripletDataset
+from old_scripts.train_triplet_resnet import CrowTripletDataset
 from detection import merge_overlapping_detections
 from crow_clustering import CrowClusterAnalyzer
 

@@ -16,14 +16,41 @@ import logging
 # Import the sync_database module and database utilities
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import sync_database
+import utilities.sync_database
 import db
 
 
 class TestSyncDatabase:
     """Test cases for sync_database functionality."""
     
-        @pytest.fixture(autouse=True)    def setup_test_environment(self):        """Set up test environment with temporary directories and database."""        # Create temporary directory for test files        self.test_dir = tempfile.mkdtemp()        self.original_cwd = os.getcwd()                # Change to test directory        os.chdir(self.test_dir)                # Create test crop directory structure        self.crop_dir = Path("crow_crops")        self.crop_dir.mkdir(exist_ok=True)                # Create test database        self.test_db_path = Path("test_crow_embeddings.db")                # Create the database file first (required by some database operations)        self.test_db_path.touch()                # Patch the database path        self.db_patcher = patch('db.DB_PATH', self.test_db_path)        self.db_patcher.start()                # Initialize database        db.initialize_database()                yield
+    @pytest.fixture(autouse=True)
+    def setup_test_environment(self):
+        """Set up test environment with temporary directories and database."""
+        # Create temporary directory for test files
+        self.test_dir = tempfile.mkdtemp()
+        self.original_cwd = os.getcwd()
+        
+        # Change to test directory
+        os.chdir(self.test_dir)
+        
+        # Create test crop directory structure
+        self.crop_dir = Path("crow_crops")
+        self.crop_dir.mkdir(exist_ok=True)
+        
+        # Create test database
+        self.test_db_path = Path("test_crow_embeddings.db")
+        
+        # Create the database file first (required by some database operations)
+        self.test_db_path.touch()
+        
+        # Patch the database path
+        self.db_patcher = patch('db.DB_PATH', self.test_db_path)
+        self.db_patcher.start()
+        
+        # Initialize database
+        db.initialize_database()
+        
+        yield
         
         # Cleanup
         self.db_patcher.stop()

@@ -7,7 +7,7 @@ from db import save_crow_embedding, get_all_crows, get_crow_history, add_behavio
 from sort import Sort
 from scipy.spatial.distance import cdist
 from models import CrowResNetEmbedder, create_model
-from color_normalization import AdaptiveNormalizer, create_normalizer
+from utilities.color_normalization import AdaptiveNormalizer, create_normalizer
 from multi_view import create_multi_view_extractor
 from ultralytics import YOLO
 import torchvision
@@ -28,7 +28,7 @@ from dataclasses import dataclass
 import torch.nn.functional as F
 from threading import Thread, Event
 from multi_view import MultiViewExtractor
-from color_normalization import ColorNormalizer
+from utilities.color_normalization import ColorNormalizer
 import functools
 import platform
 import json

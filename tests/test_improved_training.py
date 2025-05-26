@@ -657,7 +657,7 @@ class TestSetupImprovedTraining:
         }
         mock_dataset_stats.recommend_training_params.return_value = (mock_recommendations, mock_stats)
         
-        from setup_improved_training import setup_training_config
+        from utilities.setup_improved_training import setup_training_config
         
         config_path = os.path.join(temp_training_dir, 'test_config.json')
         config = setup_training_config(temp_training_dir, config_path)
