@@ -83,6 +83,8 @@ def initialize_database():
             confidence FLOAT,
             reviewer_notes TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             is_training_data BOOLEAN DEFAULT 1
         )
         ''')
@@ -221,6 +223,11 @@ def find_matching_crow(embedding, threshold=0.6, video_path=None, frame_number=N
                 known_emb = np.frombuffer(emb_blob, dtype=np.float32).reshape(-1)
                 known_emb = known_emb / np.linalg.norm(known_emb)
                 
+                # Skip if embedding dimensions don't match
+                if len(embedding) != len(known_emb):
+                    logger.debug(f"Skipping temporal match for crow {crow_id} due to dimension mismatch: {len(embedding)} vs {len(known_emb)}")
+                    continue
+                
                 # Calculate similarity
                 similarity = float(1 - cosine(embedding, known_emb))
                 
@@ -265,6 +272,11 @@ def find_matching_crow(embedding, threshold=0.6, video_path=None, frame_number=N
             
             known_emb = np.frombuffer(emb_blob, dtype=np.float32).reshape(-1)
             known_emb = known_emb / np.linalg.norm(known_emb)
+            
+            # Skip if embedding dimensions don't match
+            if len(embedding) != len(known_emb):
+                logger.debug(f"Skipping crow {crow_id} due to dimension mismatch: {len(embedding)} vs {len(known_emb)}")
+                continue
             
             # Calculate similarity
             similarity = float(1 - cosine(embedding, known_emb))
@@ -604,25 +616,28 @@ def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_
         
         # Validate inputs
         if not os.path.exists(image_path):
-            raise ValueError(f"Image path does not exist: {image_path}")
+            logger.warning(f"Image path does not exist: {image_path}")
+            return False
             
-        if label not in ['crow', 'not_a_crow', 'not_sure', 'multi_crow']:
-            raise ValueError(f"Invalid label: {label}. Must be 'crow', 'not_a_crow', 'not_sure', or 'multi_crow'")
+        if not label or label not in ['crow', 'not_a_crow', 'not_sure', 'multi_crow']:
+            logger.warning(f"Invalid label: {label}. Must be 'crow', 'not_a_crow', 'not_sure', or 'multi_crow'")
+            return False
             
         if confidence is not None and not 0 <= confidence <= 1:
-            raise ValueError("Confidence must be between 0 and 1")
+            logger.warning("Confidence must be between 0 and 1")
+            return False
             
         # Implement "innocent until proven guilty" philosophy
         # If is_training_data is not explicitly set, determine based on label
         if is_training_data is None:
-            # Exclude not_a_crow and multi_crow from training data by default
-            is_training_data = (label not in ['not_a_crow', 'multi_crow'])
+            # Exclude not_a_crow, multi_crow, and not_sure from training data by default
+            is_training_data = (label not in ['not_a_crow', 'multi_crow', 'not_sure'])
             
         # Insert or update label
         cursor.execute('''
             INSERT OR REPLACE INTO image_labels 
-            (image_path, label, confidence, reviewer_notes, is_training_data)
-            VALUES (?, ?, ?, ?, ?)
+            (image_path, label, confidence, reviewer_notes, is_training_data, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ''', (image_path, label, confidence, reviewer_notes, is_training_data))
         
         label_id = cursor.lastrowid
@@ -698,7 +713,7 @@ def get_image_label(image_path):
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT label, confidence, reviewer_notes, timestamp, is_training_data
+            SELECT label, confidence, reviewer_notes, timestamp, is_training_data, created_at, updated_at
             FROM image_labels 
             WHERE image_path = ?
         ''', (image_path,))
@@ -710,7 +725,9 @@ def get_image_label(image_path):
                 'confidence': row[1],
                 'reviewer_notes': row[2],
                 'timestamp': row[3],
-                'is_training_data': bool(row[4])
+                'is_training_data': bool(row[4]),
+                'created_at': row[5],
+                'updated_at': row[6]
             }
         return None
         
@@ -837,12 +854,12 @@ def get_training_suitable_images(from_directory=None):
                 if file.lower().endswith(('.jpg', '.jpeg', '.png')):
                     all_images.append(os.path.join(root, file))
         
-        # Get excluded images (labeled as not_a_crow)
+        # Get excluded images (labeled as not_a_crow or not_sure)
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
             SELECT image_path FROM image_labels 
-            WHERE label = 'not_a_crow'
+            WHERE label IN ('not_a_crow', 'not_sure')
         """)
         excluded_paths = {row[0] for row in cursor.fetchall()}
         
@@ -870,8 +887,8 @@ def is_image_training_suitable(image_path):
         result = cursor.fetchone()
         if result:
             label, is_training_data = result
-            # Suitable if marked as training data and not labeled as 'not_a_crow'
-            return is_training_data and label != 'not_a_crow'
+            # Suitable if marked as training data and not labeled as 'not_a_crow' or 'not_sure'
+            return is_training_data and label not in ('not_a_crow', 'not_sure')
         else:
             # If not labeled, assume it's suitable (for backward compatibility)
             return True

@@ -1,11 +1,22 @@
 import unittest
 from unittest.mock import MagicMock, patch, call
-import tkinter as tk
-from tkinter import ttk
 import sys
 import os
 import tempfile
 from pathlib import Path
+
+# Mock tkinter completely before any imports
+sys.modules['tkinter'] = MagicMock()
+sys.modules['tkinter.ttk'] = MagicMock()
+sys.modules['tkinter.messagebox'] = MagicMock()
+sys.modules['tkinter.simpledialog'] = MagicMock()
+sys.modules['tkinter.filedialog'] = MagicMock()
+sys.modules['PIL'] = MagicMock()
+sys.modules['PIL.Image'] = MagicMock()
+sys.modules['PIL.ImageTk'] = MagicMock()
+
+import tkinter as tk
+from tkinter import ttk
 
 # Import the suspect lineup module
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,7 +27,7 @@ class TestSuspectLineupGUI(unittest.TestCase):
     def setUpClass(cls):
         """Set up test fixtures that are shared across all tests."""
         # Create a mock Tk instance with all required attributes
-        cls.root = MagicMock(spec=tk.Tk)
+        cls.root = MagicMock()
         cls.root.title = MagicMock()
         cls.root.quit = MagicMock()
         cls.root.geometry = MagicMock()
@@ -36,18 +47,18 @@ class TestSuspectLineupGUI(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures that are run before each test."""
         # Create comprehensive mock widgets
-        self.mock_frame = MagicMock(spec=ttk.Frame)
-        self.mock_label_frame = MagicMock(spec=ttk.LabelFrame)
-        self.mock_listbox = MagicMock(spec=tk.Listbox)
-        self.mock_scrollbar = MagicMock(spec=ttk.Scrollbar)
-        self.mock_button = MagicMock(spec=ttk.Button)
-        self.mock_entry = MagicMock(spec=ttk.Entry)
-        self.mock_text = MagicMock(spec=tk.Text)
-        self.mock_label = MagicMock(spec=ttk.Label)
-        self.mock_string_var = MagicMock(spec=tk.StringVar)
-        self.mock_combobox = MagicMock(spec=ttk.Combobox)
-        self.mock_radiobutton = MagicMock(spec=ttk.Radiobutton)
-        self.mock_canvas = MagicMock(spec=tk.Canvas)
+        self.mock_frame = MagicMock()
+        self.mock_label_frame = MagicMock()
+        self.mock_listbox = MagicMock()
+        self.mock_scrollbar = MagicMock()
+        self.mock_button = MagicMock()
+        self.mock_entry = MagicMock()
+        self.mock_text = MagicMock()
+        self.mock_label = MagicMock()
+        self.mock_string_var = MagicMock()
+        self.mock_combobox = MagicMock()
+        self.mock_radiobutton = MagicMock()
+        self.mock_canvas = MagicMock()
         
         # Set up mock widget behaviors
         self.mock_combobox.get = MagicMock(return_value="")
@@ -70,7 +81,7 @@ class TestSuspectLineupGUI(unittest.TestCase):
         self.mock_string_var.get = MagicMock(return_value="")
         self.mock_string_var.set = MagicMock()
         
-        # Mock database functions
+        # Mock database functions and GUI components
         self.db_patches = [
             patch('suspect_lineup.get_all_crows', return_value=[]),
             patch('suspect_lineup.get_first_crow_image', return_value=None),
@@ -81,6 +92,12 @@ class TestSuspectLineupGUI(unittest.TestCase):
             patch('suspect_lineup.reassign_crow_embeddings'),
             patch('suspect_lineup.create_new_crow_from_embeddings', return_value=1),
             patch('suspect_lineup.delete_crow_embeddings'),
+            # Mock the messagebox and other GUI components in the suspect_lineup module
+            patch('suspect_lineup.messagebox.showwarning'),
+            patch('suspect_lineup.messagebox.showerror'),
+            patch('suspect_lineup.messagebox.showinfo'),
+            patch('suspect_lineup.messagebox.askyesno', return_value=True),
+            patch('suspect_lineup.filedialog.askdirectory', return_value=''),
         ]
         
         for patcher in self.db_patches:

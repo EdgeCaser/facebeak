@@ -5,7 +5,7 @@ import logging
 import torchvision.models as models
 
 class AudioFeatureExtractor(nn.Module):
-    def __init__(self, input_dim=128, hidden_dim=256, output_dim=256):
+    def __init__(self, input_dim=128, hidden_dim=256, output_dim=512):
         """Extract features from audio spectrograms."""
         super().__init__()
         self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
@@ -32,7 +32,7 @@ class AudioFeatureExtractor(nn.Module):
         return x
 
 class CrowMultiModalEmbedder(nn.Module):
-    def __init__(self, visual_embed_dim=512, audio_embed_dim=256, final_embed_dim=512, device=None):
+    def __init__(self, visual_embed_dim=512, audio_embed_dim=512, final_embed_dim=512, device=None):
         """
         Multi-modal model for crow identification using both visual and audio features.
         

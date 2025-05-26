@@ -82,7 +82,7 @@ def test_data_dir(tmp_path_factory):
         for i in range(5):
             img_path = img_dir / f"{crow_id}_img_{i}.jpg"
             img = create_dummy_image()
-            img.save(img_path)
+            img.save(img_path, format='JPEG')
             
             # Create corresponding video file
             video_path = video_dir / f"{crow_id}_img_{i}.mp4"

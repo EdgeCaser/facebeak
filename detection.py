@@ -144,8 +144,9 @@ def merge_overlapping_detections(detections, iou_threshold=0.5):
                 continue
                 
             iou = compute_iou(det1['bbox'], det2['bbox'])
-            # Always merge if IOU exceeds threshold
-            if iou >= iou_threshold:
+            # Only merge if IOU exceeds threshold AND classes are the same
+            # Don't merge different classes to preserve class diversity
+            if iou >= iou_threshold and det1['class'] == det2['class']:
                 current_group.append(det2)
                 used.add(j)
                 scores.append(det2['score'])
@@ -194,13 +195,31 @@ def timeout(seconds):
         @wraps(func)
         def wrapper(*args, **kwargs):
             logger.debug(f"Running {func.__name__} with timeout protection")
-            try:
-                # Simple approach - let the model run without thread-based timeout
-                # CUDA operations don't play well with threading timeouts on Windows
-                return func(*args, **kwargs)
-            except Exception as e:
-                logger.error(f"Error in {func.__name__}: {e}")
-                raise
+            import threading
+            import time
+            
+            result = [None]
+            exception = [None]
+            
+            def target():
+                try:
+                    result[0] = func(*args, **kwargs)
+                except Exception as e:
+                    exception[0] = e
+            
+            thread = threading.Thread(target=target)
+            thread.daemon = True
+            thread.start()
+            thread.join(timeout=seconds)
+            
+            if thread.is_alive():
+                # Thread is still running, timeout occurred
+                raise TimeoutError(f"Function {func.__name__} timed out after {seconds} seconds")
+            
+            if exception[0]:
+                raise exception[0]
+            
+            return result[0]
         return wrapper
     return decorator
 

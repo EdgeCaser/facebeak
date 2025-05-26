@@ -253,13 +253,16 @@ class CrowClusterAnalyzer:
             logger.warning("No valid clustering parameters found, using conservative defaults")
             best_params = (self.eps_range[0], min_samples_range[0])
             best_score = 0.0
-        
-        # Save parameter search results
-        if results:
+            # Still save empty results for consistency
+            self.cluster_metrics['parameter_search'] = []
+        else:
+            # Save parameter search results
             self.cluster_metrics['parameter_search'] = convert_bools(results)
-            self.best_params = best_params
-            
-            # Log best parameters and metrics
+        
+        self.best_params = best_params
+        
+        # Log best parameters and metrics only if we found valid results
+        if results:
             best_result = next(r for r in results if r['eps'] == best_params[0] and r['min_samples'] == best_params[1])
             logger.info("Best clustering parameters found:")
             logger.info(f"eps={best_params[0]:.3f}, min_samples={best_params[1]}")
@@ -311,7 +314,17 @@ class CrowClusterAnalyzer:
             output_path = Path(output_dir) / 'clustering_parameter_search.png'
         else:
             output_path = Path('clustering_parameter_search.png')
-        plt.savefig(str(output_path))
+        try:
+            plt.savefig(str(output_path), format='png', dpi=100, bbox_inches='tight')
+        except (TypeError, AttributeError) as e:
+            # Fallback for PIL/matplotlib compatibility issues
+            logger.warning(f"Failed to save plot with PIL backend: {e}")
+            try:
+                # Try without format specification
+                plt.savefig(str(output_path), dpi=100, bbox_inches='tight')
+            except Exception as e2:
+                logger.warning(f"Failed to save plot even without format: {e2}")
+                # Skip saving the plot if all methods fail
         plt.close()
     
     def cluster_crows(self, embeddings: np.ndarray, frame_numbers: Optional[List[int]] = None, 
@@ -438,7 +451,17 @@ class CrowClusterAnalyzer:
                 output_path = Path(output_dir) / 'crow_clusters_visualization.png'
             else:
                 output_path = Path('crow_clusters_visualization.png')
-            plt.savefig(str(output_path))
+            try:
+                plt.savefig(str(output_path), format='png', dpi=100, bbox_inches='tight')
+            except (TypeError, AttributeError) as e:
+                # Fallback for PIL/matplotlib compatibility issues
+                logger.warning(f"Failed to save plot with PIL backend: {e}")
+                try:
+                    # Try without format specification
+                    plt.savefig(str(output_path), dpi=100, bbox_inches='tight')
+                except Exception as e2:
+                    logger.warning(f"Failed to save plot even without format: {e2}")
+                    # Skip saving the plot if all methods fail
             plt.close()
             if not output_path.exists():
                 logger.warning("Failed to save cluster visualization: file not created")

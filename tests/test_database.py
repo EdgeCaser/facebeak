@@ -166,8 +166,11 @@ class TestDatabaseOperations(unittest.TestCase):
         crow_id2 = save_crow_embedding(similar_embedding, "test.mp4", 101, 0.95)
         self.assertEqual(crow_id1, crow_id2)
         
-        # Create a very different embedding
+        # Create a very different embedding (orthogonal to base_embedding)
         different_embedding = np.random.rand(512).astype(np.float32)
+        different_embedding = different_embedding / np.linalg.norm(different_embedding)
+        # Make it orthogonal to base_embedding to ensure low similarity
+        different_embedding = different_embedding - np.dot(different_embedding, base_embedding) * base_embedding
         different_embedding = different_embedding / np.linalg.norm(different_embedding)
         
         # This should create a new crow
@@ -417,19 +420,19 @@ class TestDatabaseOperations(unittest.TestCase):
             add_image_label(test_paths[0], "crow", confidence=0.95)  # Should be included
             add_image_label(test_paths[1], "crow", confidence=0.90)  # Should be included
             add_image_label(test_paths[2], "not_a_crow", confidence=0.85)  # Should be excluded
-            add_image_label(test_paths[3], "not_sure", confidence=0.60)  # Should be excluded (low confidence)
-            # test_paths[4] remains unlabeled - should be excluded
+            add_image_label(test_paths[3], "not_sure", confidence=0.60)  # Should be excluded (labeled as not_sure)
+            # test_paths[4] remains unlabeled - should be included (innocent until proven guilty)
             
             # Get training suitable images from our test directory
             suitable = get_training_suitable_images(from_directory=test_dir)
             
-            # Should only return confirmed crows with high confidence
+            # Should return confirmed crows and unlabeled images (innocent until proven guilty)
             suitable_basenames = [os.path.basename(path) for path in suitable]
             self.assertIn("good_crow_1.jpg", suitable_basenames)
             self.assertIn("good_crow_2.jpg", suitable_basenames)
+            self.assertIn("unlabeled.jpg", suitable_basenames)  # Unlabeled should be included (innocent until proven guilty)
             self.assertNotIn("false_positive.jpg", suitable_basenames)  # Labeled as not_a_crow
-            self.assertNotIn("uncertain.jpg", suitable_basenames)  # Low confidence
-            self.assertNotIn("unlabeled.jpg", suitable_basenames)  # No label
+            self.assertNotIn("uncertain.jpg", suitable_basenames)  # Labeled as not_sure
             
         finally:
             # Clean up test files

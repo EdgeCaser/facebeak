@@ -158,6 +158,9 @@ if SUPER_RESOLUTION_MODEL:
 
 logger.info("--- Model loading and device management complete. ---")
 
+# Create a global model reference for backward compatibility with tests
+model = CROW_EMBEDDING_MODEL
+
 
 def apply_super_resolution(img_tensor, min_size=100):
     """Apply super-resolution to small images."""
@@ -905,7 +908,3 @@ if __name__ == '__main__':
         logger.info(f"TOY_DETECTION_MODEL is on: {yolo_device}")
     if SUPER_RESOLUTION_MODEL:
         logger.info(f"SUPER_RESOLUTION_MODEL is on: {next(SUPER_RESOLUTION_MODEL.parameters()).device if list(SUPER_RESOLUTION_MODEL.parameters()) else 'No params/Unknown'}")
-
-```python
-import types # Required for MethodType binding in load_triplet_model
-```

@@ -38,6 +38,8 @@ class CrowTracker:
         self.crows_dir.mkdir(exist_ok=True)
         self.processing_dir = self.base_dir / "processing"
         self.processing_dir.mkdir(exist_ok=True)
+        self.metadata_dir = self.base_dir / "metadata"
+        self.metadata_dir.mkdir(exist_ok=True)
         
         # Audio directory
         if self.enable_audio_extraction:
@@ -52,7 +54,7 @@ class CrowTracker:
         logger.info(f"Orientation correction: {'enabled' if self.correct_orientation else 'disabled'}")
         
         # Tracking data file
-        self.tracking_file = self.base_dir / "tracking_data.json"
+        self.tracking_file = self.metadata_dir / "crow_tracking.json"
         
         # Load detection model
         logger.info("Loading detection model (Faster R-CNN)")
