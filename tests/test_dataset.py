@@ -1,8 +1,10 @@
 import pytest
 import torch
 import os
+import sys
 from pathlib import Path
 import subprocess
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dataset import CrowTripletDataset
 from torch.utils.data import DataLoader
 

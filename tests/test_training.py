@@ -1,6 +1,9 @@
 import pytest
 import torch
 import numpy as np
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from training import compute_triplet_loss, compute_metrics, training_step, validation_step
 from dataset import CrowTripletDataset
 from model import CrowMultiModalEmbedder

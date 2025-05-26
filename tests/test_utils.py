@@ -4,8 +4,10 @@ import pytest
 import numpy as np
 import cv2
 import os
+import sys
 import tempfile
 from pathlib import Path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import extract_frames, save_video_with_labels
 
 class TestUtils(unittest.TestCase):

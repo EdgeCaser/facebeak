@@ -6,7 +6,9 @@ Verify that orientation correction is working on saved crop files.
 import cv2
 import numpy as np
 import os
+import sys
 from pathlib import Path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from crow_orientation import correct_crow_crop_orientation, detect_crow_orientation
 import matplotlib.pyplot as plt
 

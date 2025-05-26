@@ -1,6 +1,8 @@
 import os
-import db
+import sys
 from pathlib import Path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import db
 import logging
 
 logging.basicConfig(level=logging.INFO)

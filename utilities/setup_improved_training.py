@@ -5,9 +5,11 @@ Analyzes your dataset and provides optimal training parameters.
 """
 
 import os
+import sys
 import json
 import argparse
 from pathlib import Path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from improved_dataset import DatasetStats
 
 def setup_training_config(crop_dir='crow_crops', output_file='training_config.json'):

@@ -2,6 +2,9 @@ import pytest
 import numpy as np
 import torch
 import cv2
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tracking import (
     compute_embedding,
     extract_normalized_crow_crop,

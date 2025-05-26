@@ -2,6 +2,9 @@ import pytest
 import torch
 import numpy as np
 import random
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from model import AudioFeatureExtractor, CrowResNetEmbedder, CrowMultiModalEmbedder
 from models import CrowResNetEmbedder as NewCrowResNetEmbedder, create_model
 

@@ -1,10 +1,12 @@
 import pytest
 import os
+import sys
 import shutil
 import numpy as np
 import torch
 from pathlib import Path
 from datetime import datetime, timedelta
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from crow_tracking import CrowTracker
 from tracking import EnhancedTracker
 from unittest.mock import patch, MagicMock

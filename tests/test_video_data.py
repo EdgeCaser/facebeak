@@ -3,9 +3,12 @@ import torch
 import numpy as np
 import cv2
 import subprocess
+import sys
+import os
 from PIL import Image
 import soundfile as sf
 from pathlib import Path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from audio import extract_audio_features
 from model import CrowMultiModalEmbedder
 from training import compute_triplet_loss, compute_metrics

@@ -2,12 +2,14 @@ import unittest
 from unittest.mock import MagicMock, patch, call
 import pytest
 import argparse
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from main import parse_args, process_video
 import cv2
 import numpy as np
 from pathlib import Path
 import tempfile
-import os
 
 class TestMainFunctions(unittest.TestCase):
     def test_parse_args(self):
