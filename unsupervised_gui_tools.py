@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 import json
 
-from db import get_all_crows, get_crow_embeddings, update_crow_label, reassign_crow_embeddings, get_connection
+from db import get_all_crows, get_crow_embeddings, update_crow_name, reassign_crow_embeddings, get_connection
 from unsupervised_learning import (
     UnsupervisedTrainingPipeline,
     AutoLabelingSystem, 
@@ -496,30 +496,34 @@ class UnsupervisedLearningGUI:
             self.status_var.set(f"Merging {suggestion['name1']} into {suggestion['name2']}...")
             self.master.update() # Ensure status bar updates
 
-            crow_id_from = suggestion['crow_id1']
-            crow_id_to = suggestion['crow_id2']
-            
-            # Ensure crow_id_from is the one with fewer sightings or older if equal,
-            # to preserve the more established crow ID if possible.
-            # However, the suggestion already has name1 and name2, id1 and id2.
-            # For simplicity, we'll assume the user is prompted to confirm which ID to keep,
-            # or the suggestion implies id1 is merged into id2.
-            # The current suggestion['crow_id1'] will be merged into suggestion['crow_id2'].
+            try:
+                crow_id_from = suggestion['crow_id1']
+                crow_id_to = suggestion['crow_id2']
+                
+                # Ensure crow_id_from is the one with fewer sightings or older if equal,
+                # to preserve the more established crow ID if possible.
+                # However, the suggestion already has name1 and name2, id1 and id2.
+                # For simplicity, we'll assume the user is prompted to confirm which ID to keep,
+                # or the suggestion implies id1 is merged into id2.
+                # The current suggestion['crow_id1'] will be merged into suggestion['crow_id2'].
 
-            success, message = self.label_smoother.perform_merge_operation(crow_id_from, crow_id_to)
+                success, message = self.label_smoother.perform_merge_operation(crow_id_from, crow_id_to)
 
-            if success:
-                self.merge_tree.item(item_id, values=(
-                    suggestion['name1'], # Or the name of the merged crow
-                    suggestion['name2'], # Or the name of the merged crow
-                    f"{suggestion['confidence']:.3f}",
-                    suggestion['n_comparisons'], # This might change or be irrelevant
-                    "Applied"
-                ))
-                messagebox.showinfo("Success", message)
-                self.status_var.set("Merge completed")
-                # Optional: Refresh merge suggestions list or remove the applied one
-                self.analyze_merges() 
+                if success:
+                    self.merge_tree.item(item_id, values=(
+                        suggestion['name1'], # Or the name of the merged crow
+                        suggestion['name2'], # Or the name of the merged crow
+                        f"{suggestion['confidence']:.3f}",
+                        suggestion['n_comparisons'], # This might change or be irrelevant
+                        "Applied"
+                    ))
+                    messagebox.showinfo("Success", message)
+                    self.status_var.set("Merge completed")
+                    # Optional: Refresh merge suggestions list or remove the applied one
+                    self.analyze_merges()
+                else:
+                    messagebox.showerror("Error", f"Merge failed: {message}")
+                    self.status_var.set("Merge failed")
             except Exception as e:
                 # This specific exception catch might be redundant if perform_merge_operation handles all its exceptions
                 # and returns False, message. But kept for safety.
