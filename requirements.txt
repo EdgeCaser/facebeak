@@ -19,6 +19,7 @@ seaborn
 seaborn>=0.12.0
 matplotlib
 matplotlib>=3.7.0
+plotly>=5.17.0  # For interactive visualizations in unsupervised learning
 
 # Database and data management
 sqlalchemy>=2.0.0

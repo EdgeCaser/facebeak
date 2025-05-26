@@ -51,7 +51,7 @@ class CrowTripletDataset(Dataset):
             # Find images
             image_dir = crow_dir / 'images'
             if image_dir.exists():
-                image_paths = sorted(image_dir.glob('*.jpg'))
+                image_paths = sorted(image_dir.glob('*.jpg')) + sorted(image_dir.glob('*.jpeg'))
                 if image_paths:
                     self.crow_to_images[crow_id] = image_paths
                 else:

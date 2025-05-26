@@ -238,9 +238,38 @@ class CrowExtractorGUI:
         ttk.Checkbutton(settings_frame, text="Enable Multi-View for YOLO", variable=self.mv_yolo_var).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=2)
         ttk.Checkbutton(settings_frame, text="Enable Multi-View for Faster R-CNN", variable=self.mv_rcnn_var).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=2)
         
+        # Orientation correction checkbox
+        self.orientation_correction_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(settings_frame, text="Auto-correct crow orientation", variable=self.orientation_correction_var).grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=2)
+        
+        # NMS merge threshold
+        self.nms_threshold_var = tk.DoubleVar(value=0.3)
+        ttk.Label(settings_frame, text="Box Merge Threshold:").grid(row=5, column=0, sticky=tk.W)
+        ttk.Scale(settings_frame, from_=0.1, to=0.7, variable=self.nms_threshold_var, 
+                 orient=tk.HORIZONTAL, length=150).grid(row=5, column=1, padx=5)
+        ttk.Label(settings_frame, textvariable=self.nms_threshold_var).grid(row=5, column=2)
+        
+        # Tooltip-like label for NMS threshold
+        ttk.Label(settings_frame, text="(Lower = merge more boxes)", font=('TkDefaultFont', 8)).grid(row=6, column=0, columnspan=3, sticky=tk.W)
+        
+        # Audio settings frame
+        audio_frame = ttk.LabelFrame(self.left_panel, text="Audio Settings", padding="5")
+        audio_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        
+        # Enable audio extraction
+        self.enable_audio_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(audio_frame, text="Extract audio segments", variable=self.enable_audio_var).grid(row=0, column=0, sticky=tk.W)
+        
+        # Audio duration
+        ttk.Label(audio_frame, text="Audio duration (seconds):").grid(row=1, column=0, sticky=tk.W)
+        self.audio_duration_var = tk.DoubleVar(value=2.0)
+        ttk.Scale(audio_frame, from_=0.5, to=5.0, variable=self.audio_duration_var, 
+                 orient=tk.HORIZONTAL, length=150).grid(row=1, column=1, padx=5)
+        ttk.Label(audio_frame, textvariable=self.audio_duration_var).grid(row=1, column=2)
+        
         # Control buttons
         control_frame = ttk.Frame(self.left_panel)
-        control_frame.grid(row=4, column=0, columnspan=3, pady=5)
+        control_frame.grid(row=3, column=0, columnspan=3, pady=5)
         
         self.start_button = ttk.Button(control_frame, text="Start Processing", command=self._start_processing)
         self.start_button.grid(row=0, column=0, padx=5)
@@ -259,7 +288,7 @@ class CrowExtractorGUI:
         
         # Progress tracking
         progress_frame = ttk.LabelFrame(self.left_panel, text="Progress", padding="5")
-        progress_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        progress_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
         
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, 
@@ -271,7 +300,7 @@ class CrowExtractorGUI:
         
         # Statistics panel
         stats_frame = ttk.LabelFrame(self.left_panel, text="Statistics", padding="5")
-        stats_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        stats_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
         
         # Initialize statistics
         self.stats = {
@@ -368,21 +397,35 @@ class CrowExtractorGUI:
         logger.info(f"Starting processing in directory: {video_dir}")
         logger.info(f"Output directory: {output_dir}")
         
-        # Initialize tracker with output directory
-        self.tracker = CrowTracker(output_dir)
+        # Initialize tracker with audio settings
+        enable_audio = self.enable_audio_var.get()
+        audio_duration = self.audio_duration_var.get()
+        correct_orientation = self.orientation_correction_var.get()
+        
+        self.tracker = CrowTracker(
+            output_dir, 
+            enable_audio_extraction=enable_audio,
+            audio_duration=audio_duration,
+            correct_orientation=correct_orientation
+        )
+        
+        logger.info(f"Audio extraction: {'enabled' if enable_audio else 'disabled'}")
+        if enable_audio:
+            logger.info(f"Audio duration: {audio_duration} seconds")
+        logger.info(f"Orientation correction: {'enabled' if correct_orientation else 'disabled'}")
         
         # Enable save button when processing starts
         self.save_button.config(state=tk.NORMAL)
         
-        video_files = [f for f in os.listdir(video_dir) 
+        self.video_files = [f for f in os.listdir(video_dir) 
                       if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))]
         
-        if not video_files:
+        if not self.video_files:
             logger.error("No video files found in selected directory")
             messagebox.showerror("Error", "No video files found in selected directory")
             return
         
-        logger.info(f"Found {len(video_files)} video files to process")
+        logger.info(f"Found {len(self.video_files)} video files to process")
         
         # Create processing run directory
         self.run_dir = self.tracker.create_processing_run()
@@ -397,14 +440,21 @@ class CrowExtractorGUI:
         # Reset statistics
         self._reset_stats()
         
+        # Initialize processing state
+        self.current_video_index = 0
+        self.current_frame_num = 0
+        
         # Start processing the first video
         logger.info("Starting video processing")
-        self._process_next_video(video_files, 0)
+        self._process_next_video(self.video_files, 0)
     
     def _process_next_video(self, video_files, current_index):
         if not self.processing or current_index >= len(video_files):
             self._stop_processing()
             return
+        
+        # Update current video index for pause/resume
+        self.current_video_index = current_index
         
         video_file = video_files[current_index]
         self.current_video = os.path.join(self.video_dir_var.get(), video_file)
@@ -464,7 +514,8 @@ class CrowExtractorGUI:
                     [frame],
                     score_threshold=self.min_confidence_var.get(),
                     multi_view_yolo=self.mv_yolo_var.get(),
-                    multi_view_rcnn=self.mv_rcnn_var.get()
+                    multi_view_rcnn=self.mv_rcnn_var.get(),
+                    nms_threshold=self.nms_threshold_var.get()
                 )
                 frame_dets = detections[0]
                 logger.debug(f"Frame {self.current_frame_num}: Found {len(frame_dets)} detections")
@@ -556,7 +607,8 @@ class CrowExtractorGUI:
         self.paused = not self.paused
         self.pause_button.config(text="Resume" if self.paused else "Pause")
         if not self.paused:
-            self._process_frame(self.current_video_files, self.current_video_index)
+            # Resume processing from where we left off
+            self._process_frame(self.video_files, self.current_video_index)
     
     def _stop_processing(self):
         """Stop processing videos."""
@@ -626,6 +678,24 @@ class CrowExtractorGUI:
     def _load_progress(self):
         """Load previously saved tracking data."""
         try:
+            # Initialize tracker if it doesn't exist
+            if not hasattr(self, 'tracker'):
+                if not self.output_dir_var.get():
+                    messagebox.showerror("Error", "Please select an output directory first")
+                    return
+                
+                # Initialize tracker with current settings
+                enable_audio = self.enable_audio_var.get()
+                audio_duration = self.audio_duration_var.get()
+                correct_orientation = self.orientation_correction_var.get()
+                
+                self.tracker = CrowTracker(
+                    self.output_dir_var.get(), 
+                    enable_audio_extraction=enable_audio,
+                    audio_duration=audio_duration,
+                    correct_orientation=correct_orientation
+                )
+            
             # Check if tracking file exists
             if not self.tracker.tracking_file.exists():
                 messagebox.showinfo("Load Progress", "No saved progress found.")
@@ -633,27 +703,30 @@ class CrowExtractorGUI:
             
             # Confirm with user
             if not messagebox.askyesno("Load Progress", 
-                "This will replace current tracking data with saved data. Continue?"):
+                "This will load saved tracking data. Continue?"):
                 return
             
             # Load the tracking data
             with open(self.tracker.tracking_file, 'r') as f:
                 self.tracker.tracking_data = json.load(f)
             
-            # Update statistics
+            # Update statistics from loaded data
             total_crows = len(self.tracker.tracking_data["crows"])
             total_detections = sum(crow["total_detections"] for crow in self.tracker.tracking_data["crows"].values())
             
             # Update stats display
-            self.stats_labels['crows_created'].configure(text=str(total_crows))
-            self.stats_labels['detections'].configure(text=str(total_detections))
+            self.stats['crows_created'] = total_crows
+            self.stats['detections'] = total_detections
+            self.stats['valid_crops'] = total_detections
+            self._update_stats()
             
             # Show summary
             summary = (
                 f"Progress loaded successfully!\n\n"
                 f"Total crows: {total_crows}\n"
                 f"Total detections: {total_detections}\n"
-                f"Last updated: {self.tracker.tracking_data['updated_at']}"
+                f"Last updated: {self.tracker.tracking_data['updated_at']}\n\n"
+                f"You can now start processing to continue from where you left off."
             )
             messagebox.showinfo("Load Progress", summary)
             logger.info(f"Loaded tracking data: {total_crows} crows, {total_detections} detections")

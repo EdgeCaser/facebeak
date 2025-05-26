@@ -159,38 +159,52 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# facebeak specific
-# Database files
-crow_embeddings.db
+# =============================================================================
+# FACEBEAK PROJECT SPECIFIC IGNORES
+# =============================================================================
+
+# Database files - These contain user data and can be large
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
+crow_embeddings.db
+nonexistent.db
 
-# Data directories
+# Data directories - These contain user videos and processed data
 videos/
 crow_crops/
 clustering_results/
+non_crow_crops/
+training_data/
+validation_data/
+test_data/
 
-# Video files
+# Video and audio files - These are typically large user content
 *.mp4
 *.avi
 *.mov
 *.mkv
+*.MOV
+*.MP4
+*.AVI
+*.webm
+*.flv
+*.wmv
+*.m4v
 *.wav
+*.mp3
 *.flac
 *.ogg
-*.webm
+*.m4a
+*.aac
 sample.mp4
 output.mp4
-output/
 temp_*.mp4
 
-# Log files
-facebeak_session.log
-*.log
-logs/
-
-# Model files and weights
+# Model files and weights - These should be downloaded/trained separately
 *.pkl
+*.pickle
 *.h5
 *.model
 *.weights
@@ -199,11 +213,110 @@ logs/
 *.onnx
 *.tflite
 *.pb
+*.joblib
+*.dill
+yolov8*.pt
+crow_resnet_triplet.pth
 models/
 weights/
+checkpoints/
+
+# Training and processing outputs
+training_output/
+training_logs/
+run_*/
+runs/
+processing_runs/
+processing/
+outputs/
+results/
+exports/
+backups/
+metadata/
+
+# Large metrics and history files
+*metrics_history.json
+*metrics.json
+*history.json
+*training_metrics.json
+*loss_history.json
+*accuracy_history.json
+*evaluation_results.json
+
+# Analysis and embedding files - These can be very large and should not be in git
+*analysis.json
+*_analysis.json
+detection_*_analysis.json
+non_crow_analysis.json
+*embeddings.json
+*_embeddings.json
+detection_embeddings.json
+individuals.json
+quick_analysis_report.json
+detections_restructured/analysis/
+analysis/
+
+# Orientation correction test outputs
+orientation_correction_test.png
+orientation_verification.png
+
+# Audio extraction outputs
+audio/
+crow_audio/
+
+# Embedding cache files
+*embeddings.npy
+*features.npy
+embedding_cache/
+
+# Large numpy arrays and tensors
+*.npy
+*.npz
+tensor_cache/
+
+# Log files
+*.log
+logs/
+facebeak_session.log
+extract_training.log
+extract_training_gui.log
+crow_clustering.log
+training.log
+
+# Test outputs and temporary files
+test_output/
+test_crops/
+test_audio/
+unit_testing_videos/
+crow_crops_test_*/
+*.tmp
+*.temp
+*.debug
+*.prof
+*.trace
+
+# Generated images and visualizations
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.webp
+!docs/*.jpg
+!docs/*.jpeg
+!docs/*.png
+!docs/*.gif
+!README*.png
+!wireframes/*.png
+!wireframes/*.jpg
+clustering_*.png
+crow_clusters_visualization.png
+clustering_parameter_search.png
 
 # Configuration and secrets
 config.yaml
+config.json
 .env.local
 .env.*.local
 secrets.yaml
@@ -211,152 +324,49 @@ credentials.json
 token.json
 *.key
 *.pem
+.secrets/
 
-# Temporary files
-*.tmp
-*.temp
-.DS_Store
-Thumbs.db
-
-# Debug files
-debug/
-*.debug
-*.prof
-*.trace
-
-# Output directories
-output/
-results/
-exports/
-
-# Cache directories
-.cache/
-__pycache__/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Documentation builds
-docs/_build/
-site/
-
-# Test coverage
-.coverage
-coverage.xml
-htmlcov/
-.tox/
-.nox/
-
-# Environment variables
-.env
-.env.*
-!.env.example
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
-venv/
-ENV/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Logs
-*.log
-logs/
-
-# Output files
-output/
-backups/
-
-# OS
-.DS_Store
-Thumbs.db
-
-crow_crops/
+# Generated reports and diffs
+coverage_report.txt
+test_results*.txt
+changes_since_last_commit.diff
+*.diff
+*_report.txt
 
 # IDE and Editor files
 .cursor/
 .cursor.json
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Benchmarking and profiling
 .benchmarks/
+*.benchmark
+profile.json
 
-# Project-specific generated files
-clustering_metrics.json
-crow_clusters_visualization.png
-clustering_parameter_search.png
-nonexistent.db
-backups/
-test_audio/
-test_crops/
-test_output/
-unit_testing_videos/
-training_output/
-crow_crops_test_Sample/
+# Cache directories
+.cache/
+.ruff_cache/
+.black_cache/
+.isort.cfg
 
-# Media files (except documentation)
-*.jpg
-*.jpeg
-*.png
-!docs/*.jpg
-!docs/*.jpeg
-!docs/*.png
-*.MOV
-output.mp4
+# Temporary Python test files
+test_multi_crow.py
 
-# Model files (should be downloaded separately)
-yolov8s.pt
-yolov8n.pt
-crow_resnet_triplet.pth
-
-# Personal data and models (not ignored - these are your private files)
-# videos/
-# crow_crops/
-# yolov8s.pt
-# yolov8n.pt
-# crow_resnet_triplet.pth
-# crow_embeddings.db
-
-# Generated output (but not source data)
-output.mp4
-temp_*.mp4
-
-# Large test output files that shouldn't be committed
-test_output.txt
-test_results*.txt
-coverage_report.txt
-changes_since_last_commit.diff
-
-# Processing run metadata directories
-run_*/
-processing_runs/
-processing/
-
-# Additional generated files
-*.diff
-*_report.txt
+# Large training configuration files (>100MB should be managed with Git LFS)
+training_config.json

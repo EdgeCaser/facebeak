@@ -18,6 +18,7 @@ import seaborn as sns
 import random
 from audio import extract_audio_features
 import librosa
+from PIL import Image
 
 # Configure logging
 logging.basicConfig(
@@ -29,6 +30,72 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+def custom_triplet_collate(batch):
+    """Custom collate function for triplet data with optional audio."""
+    # Separate the components
+    imgs_list = []
+    audio_list = []
+    labels_list = []
+    
+    for imgs, audio, label in batch:
+        imgs_list.append(imgs)
+        audio_list.append(audio)
+        labels_list.append(label)
+    
+    # Stack images (triplets)
+    anchor_imgs = torch.stack([imgs[0] for imgs in imgs_list])
+    pos_imgs = torch.stack([imgs[1] for imgs in imgs_list])
+    neg_imgs = torch.stack([imgs[2] for imgs in imgs_list])
+    
+    # Handle audio (triplets) - check if any batch has non-None audio
+    has_audio = any(audio[0] is not None for audio in audio_list)
+    
+    if has_audio:
+        # Stack audio features for each position in triplet
+        anchor_audio_list = []
+        pos_audio_list = []
+        neg_audio_list = []
+        
+        for audio in audio_list:
+            anchor_audio, pos_audio, neg_audio = audio
+            
+            if anchor_audio is not None:
+                anchor_audio_list.append(anchor_audio)
+                pos_audio_list.append(pos_audio)
+                neg_audio_list.append(neg_audio)
+            else:
+                # Create dummy audio features if None
+                dummy_audio = {
+                    'mel_spec': torch.zeros(128, 64),
+                    'chroma': torch.zeros(12, 64)
+                }
+                anchor_audio_list.append(dummy_audio)
+                pos_audio_list.append(dummy_audio)
+                neg_audio_list.append(dummy_audio)
+        
+        # Stack the audio features
+        def stack_audio_dicts(audio_dicts):
+            if all(isinstance(a, dict) for a in audio_dicts):
+                return {
+                    'mel_spec': torch.stack([a['mel_spec'] for a in audio_dicts]),
+                    'chroma': torch.stack([a['chroma'] for a in audio_dicts])
+                }
+            else:
+                return None
+        
+        anchor_audio = stack_audio_dicts(anchor_audio_list)
+        pos_audio = stack_audio_dicts(pos_audio_list)
+        neg_audio = stack_audio_dicts(neg_audio_list)
+        
+        batched_audio = (anchor_audio, pos_audio, neg_audio)
+    else:
+        # No audio in this batch
+        batched_audio = (None, None, None)
+    
+    batched_imgs = (anchor_imgs, pos_imgs, neg_imgs)
+    
+    return batched_imgs, batched_audio, labels_list
 
 class CrowTripletDataset(Dataset):
     def __init__(self, crop_dir, audio_dir=None, transform=None, split='train'):
@@ -109,7 +176,7 @@ class CrowTripletDataset(Dataset):
             
         for crow_dir in crow_dirs:
             crow_id = crow_dir.name
-            img_files = list(crow_dir.glob("*.jpg")) + list(crow_dir.glob("*.png"))
+            img_files = list(crow_dir.glob("*.jpg")) + list(crow_dir.glob("*.png")) + list(crow_dir.glob("*.jpeg"))
             
             if not img_files:
                 logger.warning(f"No images found for crow {crow_id}")
@@ -123,10 +190,10 @@ class CrowTripletDataset(Dataset):
                 # Check if image has been manually labeled
                 if get_image_label:
                     label_info = get_image_label(str(img_file))
-                    if label_info and label_info['label'] == 'not_a_crow':
-                        # Image has been explicitly marked as not a crow - exclude it
+                    if label_info and label_info['label'] in ['not_a_crow', 'multi_crow']:
+                        # Image has been explicitly marked as not a crow or multi-crow - exclude it
                         excluded_count += 1
-                        logger.debug(f"Excluding manually labeled non-crow: {img_file.name}")
+                        logger.debug(f"Excluding manually labeled {label_info['label']}: {img_file.name}")
                         continue
                 
                 # Include the image (unlabeled, labeled as crow, or labeled as not_sure)
@@ -143,7 +210,7 @@ class CrowTripletDataset(Dataset):
         included_count = total_found - excluded_count
         if excluded_count > 0:
             logger.info(f"Manual labeling filter: {included_count}/{total_found} images included "
-                       f"({excluded_count} excluded as 'not_a_crow')")
+                       f"({excluded_count} excluded as 'not_a_crow' or 'multi_crow')")
         else:
             logger.info(f"No manual labeling exclusions found. Using all {total_found} images.")
         
@@ -225,39 +292,69 @@ class CrowTripletDataset(Dataset):
         return len(self.samples)
         
     def __getitem__(self, idx):
-        img_path, crow_id = self.samples[idx]
-        
-        # Load and transform image
-        img = cv2.imread(str(img_path))
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = self.transform(img)
-        
-        # Get audio features if available
-        audio_features = None
-        if self.audio_dir and crow_id in self.crow_to_audio:
-            # Randomly select an audio file for this crow
-            audio_path = random.choice(self.crow_to_audio[crow_id])
-            audio_features = self._load_and_preprocess_audio(audio_path)
-            
-        return img, audio_features, crow_id
+        """Get a triplet of samples (anchor, positive, negative)."""
+        return self.get_triplet(idx)
         
     def get_triplet(self, idx):
         """Get a triplet of samples (anchor, positive, negative)."""
-        anchor_img, anchor_audio, anchor_id = self[idx]
+        anchor_path, anchor_id = self.samples[idx]
         
         # Get positive sample (same crow)
-        positive_idx = random.choice([i for i, (_, _, cid) in enumerate(self.samples) 
-                                    if cid == anchor_id and i != idx])
-        positive_img, positive_audio, _ = self[positive_idx]
+        positive_candidates = [i for i, (_, cid) in enumerate(self.samples) 
+                             if cid == anchor_id and i != idx]
+        if not positive_candidates:
+            # If no other images for this crow, use the same image
+            positive_idx = idx
+        else:
+            positive_idx = random.choice(positive_candidates)
+        positive_path, _ = self.samples[positive_idx]
         
         # Get negative sample (different crow)
-        negative_idx = random.choice([i for i, (_, _, cid) in enumerate(self.samples) 
-                                    if cid != anchor_id])
-        negative_img, negative_audio, _ = self[negative_idx]
+        negative_candidates = [i for i, (_, cid) in enumerate(self.samples) 
+                             if cid != anchor_id]
+        if not negative_candidates:
+            # Should not happen, but fallback to anchor
+            negative_idx = idx
+        else:
+            negative_idx = random.choice(negative_candidates)
+        negative_path, _ = self.samples[negative_idx]
+        
+        # Load and transform images
+        anchor_img = self._load_and_transform_image(anchor_path)
+        positive_img = self._load_and_transform_image(positive_path)
+        negative_img = self._load_and_transform_image(negative_path)
+        
+        # Get audio features if available
+        anchor_audio = self._get_audio_features(anchor_id)
+        positive_audio = self._get_audio_features(anchor_id)  # Same crow as anchor
+        negative_audio = self._get_audio_features(self.samples[negative_idx][1])  # Different crow
         
         return (anchor_img, positive_img, negative_img), \
                (anchor_audio, positive_audio, negative_audio), \
                anchor_id
+    
+    def _load_and_transform_image(self, img_path):
+        """Load and transform a single image."""
+        try:
+            img = Image.open(str(img_path)).convert('RGB')
+            img = np.array(img)  # Convert PIL to numpy array for transforms
+            img = self.transform(img)
+            return img
+        except Exception as e:
+            logger.error(f"Failed to load image {img_path}: {e}")
+            # Return a black image as fallback to prevent training crash
+            img = np.zeros((224, 224, 3), dtype=np.uint8)
+            img = self.transform(img)
+            return img
+    
+    def _get_audio_features(self, crow_id):
+        """Get audio features for a crow."""
+        if not self.audio_dir or crow_id not in self.crow_to_audio:
+            return None
+        
+        # Randomly select an audio file for this crow
+        audio_path = random.choice(self.crow_to_audio[crow_id])
+        return self._load_and_preprocess_audio(audio_path)
 
 class TripletLoss(nn.Module):
     def __init__(self, margin=1.0, mining_type='hard'):
