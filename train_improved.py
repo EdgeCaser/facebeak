@@ -327,20 +327,44 @@ class ImprovedTrainer:
             if len(same_crow_sims) > 0 and len(diff_crow_sims) > 0:
                 separability = np.mean(same_crow_sims) - np.mean(diff_crow_sims)
                 
+                # Calculate precision, recall, and F1 score
+                # Use a threshold to determine positive/negative predictions
+                threshold = 0.5  # Similarity threshold for same crow prediction
+                
+                # True positives: same crow pairs with similarity >= threshold
+                tp = sum(1 for sim in same_crow_sims if sim >= threshold)
+                # False negatives: same crow pairs with similarity < threshold
+                fn = sum(1 for sim in same_crow_sims if sim < threshold)
+                # False positives: different crow pairs with similarity >= threshold
+                fp = sum(1 for sim in diff_crow_sims if sim >= threshold)
+                # True negatives: different crow pairs with similarity < threshold
+                tn = sum(1 for sim in diff_crow_sims if sim < threshold)
+                
+                # Calculate metrics
+                precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+                
                 # Store evaluation metrics
                 eval_data = {
                     'epoch': epoch + 1,
                     'separability': separability,
                     'same_crow_sim': np.mean(same_crow_sims),
                     'diff_crow_sim': np.mean(diff_crow_sims),
-                    'precision': 0.0,  # Placeholder
-                    'recall': 0.0,     # Placeholder
-                    'f1_score': 0.0    # Placeholder
+                    'precision': precision,
+                    'recall': recall,
+                    'f1_score': f1_score,
+                    'threshold': threshold,
+                    'tp': tp,
+                    'fp': fp,
+                    'tn': tn,
+                    'fn': fn
                 }
                 self.training_history['eval_metrics'].append(eval_data)
                 
                 logger.info(f"Eval - Epoch {epoch+1}: Separability={separability:.3f}, "
-                           f"Same={np.mean(same_crow_sims):.3f}, Diff={np.mean(diff_crow_sims):.3f}")
+                           f"Same={np.mean(same_crow_sims):.3f}, Diff={np.mean(diff_crow_sims):.3f}, "
+                           f"P={precision:.3f}, R={recall:.3f}, F1={f1_score:.3f}")
                 return separability
             
             return 0.0

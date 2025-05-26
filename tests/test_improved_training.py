@@ -49,7 +49,35 @@ class MockImprovedCrowTripletDataset:
         )
         
     def update_curriculum(self, epoch):
-        pass
+        """Update curriculum learning parameters based on epoch."""
+        # Implement a simple curriculum that increases difficulty over time
+        total_epochs = 100  # Assume 100 epochs for curriculum progression
+        
+        # Start with easier samples (higher similarity threshold) and gradually make it harder
+        initial_threshold = 0.8
+        final_threshold = 0.3
+        
+        # Linear progression from initial to final threshold
+        progress = min(epoch / total_epochs, 1.0)
+        self.difficulty_threshold = initial_threshold - (initial_threshold - final_threshold) * progress
+        
+        # Update mining strategy based on epoch
+        if epoch < 10:
+            self.current_mining = 'semi_hard'  # Start with easier mining
+        elif epoch < 30:
+            self.current_mining = 'hard'       # Move to harder mining
+        else:
+            self.current_mining = 'adaptive'   # Use adaptive mining for fine-tuning
+        
+        # Update data augmentation intensity
+        self.augmentation_strength = min(0.5 + 0.5 * progress, 1.0)
+        
+        return {
+            'difficulty_threshold': self.difficulty_threshold,
+            'mining_strategy': self.current_mining,
+            'augmentation_strength': self.augmentation_strength,
+            'progress': progress
+        }
 
 
 class MockCrowResNetEmbedder(nn.Module):

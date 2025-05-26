@@ -243,6 +243,19 @@ metadata/
 *accuracy_history.json
 *evaluation_results.json
 
+# Analysis and embedding files - These can be very large and should not be in git
+*analysis.json
+*_analysis.json
+detection_*_analysis.json
+non_crow_analysis.json
+*embeddings.json
+*_embeddings.json
+detection_embeddings.json
+individuals.json
+quick_analysis_report.json
+detections_restructured/analysis/
+analysis/
+
 # Orientation correction test outputs
 orientation_correction_test.png
 orientation_verification.png

@@ -554,9 +554,154 @@ class UnsupervisedLearningGUI:
         item_id = int(selection[0])
         suggestion = self.current_suggestions[item_id]
         
-        # This would open a detailed image comparison window
-        messagebox.showinfo("Image Review", 
-                          f"Would open image review for {suggestion['name1']} vs {suggestion['name2']}")
+        # Open image review window
+        self.open_image_review_window(suggestion)
+    
+    def open_image_review_window(self, suggestion):
+        """Open a window to review images for merge decision."""
+        review_window = tk.Toplevel(self.master)
+        review_window.title(f"Image Review: {suggestion['name1']} vs {suggestion['name2']}")
+        review_window.geometry("800x600")
+        
+        # Header with suggestion info
+        header_frame = ttk.Frame(review_window)
+        header_frame.pack(fill='x', padx=10, pady=5)
+        
+        ttk.Label(header_frame, text=f"Comparing: {suggestion['name1']} (ID: {suggestion['crow_id1']}) vs {suggestion['name2']} (ID: {suggestion['crow_id2']})", 
+                 font=('Arial', 12, 'bold')).pack()
+        ttk.Label(header_frame, text=f"Confidence: {suggestion['confidence']:.3f} | Comparisons: {suggestion['n_comparisons']}").pack()
+        
+        # Main content frame
+        content_frame = ttk.Frame(review_window)
+        content_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        # Left side - Crow 1 images
+        left_frame = ttk.LabelFrame(content_frame, text=f"{suggestion['name1']} (ID: {suggestion['crow_id1']})")
+        left_frame.pack(side='left', fill='both', expand=True, padx=5)
+        
+        # Right side - Crow 2 images
+        right_frame = ttk.LabelFrame(content_frame, text=f"{suggestion['name2']} (ID: {suggestion['crow_id2']})")
+        right_frame.pack(side='right', fill='both', expand=True, padx=5)
+        
+        # Load and display images
+        self.load_crow_images_for_review(left_frame, suggestion['crow_id1'])
+        self.load_crow_images_for_review(right_frame, suggestion['crow_id2'])
+        
+        # Action buttons
+        button_frame = ttk.Frame(review_window)
+        button_frame.pack(fill='x', padx=10, pady=5)
+        
+        ttk.Button(button_frame, text="Merge These Crows", 
+                  command=lambda: self.confirm_merge_from_review(review_window, suggestion)).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Keep Separate", 
+                  command=lambda: self.reject_merge_from_review(review_window, suggestion)).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Close", 
+                  command=review_window.destroy).pack(side='right', padx=5)
+    
+    def load_crow_images_for_review(self, parent_frame, crow_id):
+        """Load and display images for a specific crow in the review window."""
+        try:
+            embeddings = get_crow_embeddings(crow_id)
+            
+            if not embeddings:
+                ttk.Label(parent_frame, text="No images found").pack(pady=20)
+                return
+            
+            # Create scrollable frame for images
+            canvas = tk.Canvas(parent_frame, height=400)
+            scrollbar = ttk.Scrollbar(parent_frame, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            # Load up to 10 images to avoid overwhelming the UI
+            max_images = min(10, len(embeddings))
+            images_per_row = 2
+            
+            for i, emb in enumerate(embeddings[:max_images]):
+                image_path = emb.get('image_path', '')
+                if not image_path or not Path(image_path).exists():
+                    continue
+                
+                try:
+                    # Load and resize image
+                    image = cv2.imread(image_path)
+                    if image is None:
+                        continue
+                    
+                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    image = cv2.resize(image, (150, 150))
+                    
+                    # Convert to PhotoImage
+                    pil_image = Image.fromarray(image)
+                    photo = ImageTk.PhotoImage(pil_image)
+                    
+                    # Calculate grid position
+                    row = i // images_per_row
+                    col = i % images_per_row
+                    
+                    # Create frame for image and info
+                    img_frame = ttk.Frame(scrollable_frame)
+                    img_frame.grid(row=row, column=col, padx=5, pady=5, sticky='nsew')
+                    
+                    # Image label
+                    img_label = ttk.Label(img_frame, image=photo)
+                    img_label.image = photo  # Keep reference
+                    img_label.pack()
+                    
+                    # Image info
+                    info_text = f"Conf: {emb.get('confidence', 'N/A'):.3f}\n{Path(image_path).name}"
+                    ttk.Label(img_frame, text=info_text, font=('Arial', 8)).pack()
+                    
+                except Exception as e:
+                    logger.warning(f"Could not load image {image_path}: {e}")
+                    continue
+            
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+            
+            # Show total count
+            ttk.Label(parent_frame, text=f"Showing {min(max_images, len(embeddings))} of {len(embeddings)} images").pack(pady=5)
+            
+        except Exception as e:
+            logger.error(f"Error loading images for crow {crow_id}: {e}")
+            ttk.Label(parent_frame, text=f"Error loading images: {str(e)}").pack(pady=20)
+    
+    def confirm_merge_from_review(self, review_window, suggestion):
+        """Confirm merge after image review."""
+        review_window.destroy()
+        
+        # Find the suggestion in the tree and apply merge
+        for item in self.merge_tree.get_children():
+            values = self.merge_tree.item(item)['values']
+            if (values[0] == suggestion['name1'] and 
+                values[1] == suggestion['name2'] and 
+                float(values[2]) == suggestion['confidence']):
+                
+                self.merge_tree.selection_set(item)
+                self.apply_merge()
+                break
+    
+    def reject_merge_from_review(self, review_window, suggestion):
+        """Reject merge after image review."""
+        review_window.destroy()
+        
+        # Find the suggestion in the tree and reject it
+        for item in self.merge_tree.get_children():
+            values = self.merge_tree.item(item)['values']
+            if (values[0] == suggestion['name1'] and 
+                values[1] == suggestion['name2'] and 
+                float(values[2]) == suggestion['confidence']):
+                
+                self.merge_tree.selection_set(item)
+                self.reject_merge()
+                break
     
     def generate_pseudo_labels(self):
         """Generate and display pseudo-labels."""
@@ -624,8 +769,43 @@ class UnsupervisedLearningGUI:
             messagebox.showwarning("Warning", "Please select an outlier")
             return
         
-        # Implementation would mark the outlier as verified
-        messagebox.showinfo("Success", "Outlier marked as correctly labeled")
+        idx = selection[0]
+        if idx >= len(self.current_outliers):
+            messagebox.showerror("Error", "Invalid outlier selection")
+            return
+            
+        outlier = self.current_outliers[idx]
+        crow_id = outlier['metadata']['crow_id']
+        
+        try:
+            # Mark this outlier as verified in database
+            # We can add a verification flag to the crow_embeddings table or create a separate verification table
+            conn = get_connection()
+            cursor = conn.cursor()
+            
+            # For now, we'll update the confidence score to indicate it's been manually verified
+            # In a more complete implementation, you might add a 'verified' column
+            cursor.execute("""
+                UPDATE crow_embeddings 
+                SET confidence = CASE 
+                    WHEN confidence < 0.95 THEN 0.95 
+                    ELSE confidence 
+                END
+                WHERE crow_id = ? AND image_path = ?
+            """, (crow_id, outlier['metadata']['image_path']))
+            
+            conn.commit()
+            conn.close()
+            
+            # Remove from outlier list
+            self.outlier_listbox.delete(idx)
+            self.current_outliers.pop(idx)
+            
+            messagebox.showinfo("Success", f"Outlier for {outlier['metadata']['crow_name']} marked as correctly labeled")
+            
+        except Exception as e:
+            logger.error(f"Error marking outlier as correct: {e}")
+            messagebox.showerror("Error", f"Failed to mark outlier as correct: {str(e)}")
     
     def relabel_outlier(self):
         """Relabel selected outlier."""
@@ -634,8 +814,133 @@ class UnsupervisedLearningGUI:
             messagebox.showwarning("Warning", "Please select an outlier")
             return
         
-        # This would open a relabeling dialog
-        messagebox.showinfo("Relabel", "Would open relabeling dialog")
+        idx = selection[0]
+        if idx >= len(self.current_outliers):
+            messagebox.showerror("Error", "Invalid outlier selection")
+            return
+            
+        outlier = self.current_outliers[idx]
+        self.open_relabel_dialog(outlier, idx)
+    
+    def open_relabel_dialog(self, outlier, outlier_idx):
+        """Open dialog to relabel an outlier to a different crow."""
+        dialog = tk.Toplevel(self.master)
+        dialog.title("Relabel Outlier")
+        dialog.geometry("400x300")
+        dialog.transient(self.master)
+        dialog.grab_set()
+        
+        # Header info
+        header_frame = ttk.Frame(dialog)
+        header_frame.pack(fill='x', padx=10, pady=5)
+        
+        ttk.Label(header_frame, text=f"Relabeling outlier from: {outlier['metadata']['crow_name']}", 
+                 font=('Arial', 10, 'bold')).pack()
+        ttk.Label(header_frame, text=f"Image: {Path(outlier['metadata']['image_path']).name}").pack()
+        
+        # Crow selection
+        selection_frame = ttk.Frame(dialog)
+        selection_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        ttk.Label(selection_frame, text="Select new crow ID:").pack(anchor='w')
+        
+        # Get all available crows
+        try:
+            crows = get_all_crows()
+            crow_options = [f"{crow['id']}: {crow.get('name', 'Crow_' + str(crow['id']))}" for crow in crows]
+            
+            crow_var = tk.StringVar()
+            crow_listbox = tk.Listbox(selection_frame, height=8)
+            for option in crow_options:
+                crow_listbox.insert(tk.END, option)
+            crow_listbox.pack(fill='both', expand=True, pady=5)
+            
+            # Option to create new crow
+            new_crow_frame = ttk.Frame(selection_frame)
+            new_crow_frame.pack(fill='x', pady=5)
+            
+            create_new_var = tk.BooleanVar()
+            ttk.Checkbutton(new_crow_frame, text="Create new crow", 
+                           variable=create_new_var).pack(side='left')
+            
+            new_name_var = tk.StringVar()
+            ttk.Entry(new_crow_frame, textvariable=new_name_var, 
+                     placeholder_text="New crow name").pack(side='right', fill='x', expand=True, padx=(10, 0))
+            
+        except Exception as e:
+            ttk.Label(selection_frame, text=f"Error loading crows: {str(e)}").pack()
+            return
+        
+        # Buttons
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(fill='x', padx=10, pady=5)
+        
+        def apply_relabel():
+            try:
+                if create_new_var.get():
+                    # Create new crow
+                    new_name = new_name_var.get().strip()
+                    if not new_name:
+                        messagebox.showerror("Error", "Please enter a name for the new crow")
+                        return
+                    
+                    # Create new crow in database
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO crows (name) VALUES (?)", (new_name,))
+                    new_crow_id = cursor.lastrowid
+                    conn.commit()
+                    conn.close()
+                    
+                    target_crow_id = new_crow_id
+                    target_name = new_name
+                else:
+                    # Use selected existing crow
+                    selection = crow_listbox.curselection()
+                    if not selection:
+                        messagebox.showerror("Error", "Please select a crow or create a new one")
+                        return
+                    
+                    selected_text = crow_listbox.get(selection[0])
+                    target_crow_id = int(selected_text.split(':')[0])
+                    target_name = selected_text.split(':', 1)[1].strip()
+                
+                # Move the embedding to the new crow
+                old_crow_id = outlier['metadata']['crow_id']
+                image_path = outlier['metadata']['image_path']
+                
+                # Get the specific embedding ID
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM crow_embeddings WHERE crow_id = ? AND image_path = ?", 
+                             (old_crow_id, image_path))
+                result = cursor.fetchone()
+                
+                if result:
+                    embedding_id = result[0]
+                    # Use the existing reassign function
+                    moved_count = reassign_crow_embeddings(old_crow_id, target_crow_id, [embedding_id])
+                    
+                    if moved_count > 0:
+                        # Remove from outlier list
+                        self.outlier_listbox.delete(outlier_idx)
+                        self.current_outliers.pop(outlier_idx)
+                        
+                        messagebox.showinfo("Success", f"Outlier relabeled to {target_name}")
+                        dialog.destroy()
+                    else:
+                        messagebox.showerror("Error", "Failed to reassign embedding")
+                else:
+                    messagebox.showerror("Error", "Could not find embedding in database")
+                
+                conn.close()
+                
+            except Exception as e:
+                logger.error(f"Error relabeling outlier: {e}")
+                messagebox.showerror("Error", f"Failed to relabel outlier: {str(e)}")
+        
+        ttk.Button(button_frame, text="Apply", command=apply_relabel).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side='right', padx=5)
     
     def mark_not_crow(self):
         """Mark selected outlier as not a crow."""
@@ -644,8 +949,64 @@ class UnsupervisedLearningGUI:
             messagebox.showwarning("Warning", "Please select an outlier")
             return
         
-        # Implementation would mark as not_a_crow
-        messagebox.showinfo("Success", "Marked as not a crow")
+        idx = selection[0]
+        if idx >= len(self.current_outliers):
+            messagebox.showerror("Error", "Invalid outlier selection")
+            return
+            
+        outlier = self.current_outliers[idx]
+        
+        # Confirm the action
+        result = messagebox.askyesno(
+            "Confirm Action",
+            f"Mark this image as 'not a crow'?\n"
+            f"Crow: {outlier['metadata']['crow_name']}\n"
+            f"Image: {Path(outlier['metadata']['image_path']).name}\n\n"
+            f"This will remove the embedding from the database."
+        )
+        
+        if not result:
+            return
+            
+        try:
+            # Remove the embedding from the database
+            crow_id = outlier['metadata']['crow_id']
+            image_path = outlier['metadata']['image_path']
+            
+            conn = get_connection()
+            cursor = conn.cursor()
+            
+            # Delete the specific embedding
+            cursor.execute("DELETE FROM crow_embeddings WHERE crow_id = ? AND image_path = ?", 
+                         (crow_id, image_path))
+            
+            deleted_count = cursor.rowcount
+            
+            if deleted_count > 0:
+                # Update crow sighting count
+                cursor.execute("""
+                    UPDATE crows 
+                    SET total_sightings = (
+                        SELECT COUNT(*) FROM crow_embeddings WHERE crow_id = ?
+                    )
+                    WHERE id = ?
+                """, (crow_id, crow_id))
+                
+                conn.commit()
+                
+                # Remove from outlier list
+                self.outlier_listbox.delete(idx)
+                self.current_outliers.pop(idx)
+                
+                messagebox.showinfo("Success", f"Embedding marked as 'not a crow' and removed from database")
+            else:
+                messagebox.showwarning("Warning", "No embedding found to delete")
+            
+            conn.close()
+            
+        except Exception as e:
+            logger.error(f"Error marking as not crow: {e}")
+            messagebox.showerror("Error", f"Failed to mark as not crow: {str(e)}")
 
 
 def main():

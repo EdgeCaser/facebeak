@@ -108,8 +108,12 @@ class SuspectLineup:
         self.video_listbox.configure(yscrollcommand=video_scrollbar.set)
         
         # Select button for videos
-        select_button = ttk.Button(video_frame, text="Select", command=self.select_videos)
-        select_button.grid(row=1, column=0, pady=(5, 0))
+        self.select_videos_button = ttk.Button(video_frame, text="Select", command=self.select_videos, state='disabled')
+        self.select_videos_button.grid(row=1, column=0, pady=(5, 0))
+        
+        # Status label for video selection
+        self.status_label = ttk.Label(video_frame, text="Select videos to load images", foreground="gray")
+        self.status_label.grid(row=2, column=0, pady=(5, 0))
         
         # Save/Discard buttons
         button_frame = ttk.Frame(control_panel)
@@ -261,8 +265,34 @@ class SuspectLineup:
             
     def on_video_select(self, event):
         """Handle video selection change."""
-        # This is just for visual feedback, actual loading happens on Select button
-        pass
+        try:
+            selected_indices = self.video_listbox.curselection()
+            
+            if not selected_indices:
+                # No selection - disable select button and clear info
+                self.select_videos_button.configure(state='disabled')
+                return
+            
+            # Enable select button when videos are selected
+            self.select_videos_button.configure(state='normal')
+            
+            # Update status with selection info
+            num_selected = len(selected_indices)
+            if num_selected == 1:
+                selected_video = self.current_videos[selected_indices[0]]
+                video_name = os.path.basename(selected_video['video_path'])
+                status_text = f"Selected: {video_name} ({selected_video['sighting_count']} sightings)"
+            else:
+                total_sightings = sum(self.current_videos[i]['sighting_count'] for i in selected_indices)
+                status_text = f"Selected {num_selected} videos ({total_sightings} total sightings)"
+            
+            # Update status label if it exists
+            if hasattr(self, 'status_label'):
+                self.status_label.configure(text=status_text)
+            
+        except Exception as e:
+            logger.error(f"Error handling video selection: {e}")
+            # Don't show error dialog for selection events as they happen frequently
         
     def select_videos(self):
         """Load images from selected videos."""
