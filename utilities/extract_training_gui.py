@@ -356,8 +356,8 @@ class CrowExtractorGUI:
         preview_frame.columnconfigure(0, weight=1)
         preview_frame.rowconfigure(0, weight=1)
         
-        # Set window size
-        self.root.geometry("1200x800")
+        # Set window size - increased width to accommodate wider preview
+        self.root.geometry("1600x800")
         
         # Bind window close event
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
@@ -600,7 +600,7 @@ class CrowExtractorGUI:
         # Convert to PhotoImage
         preview = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
         preview = Image.fromarray(preview)
-        preview.thumbnail((800, 600))  # Resize to fit window
+        preview.thumbnail((1000, 700))  # Resize to fit wider window
         photo = ImageTk.PhotoImage(preview)
         
         self.preview_label.configure(image=photo)
