@@ -361,5 +361,4 @@ if __name__ == '__main__':
     time.sleep(0.1) 
     
     unittest.main(exit=False) 
-    tearDownClassGlobalPatches() 
->>>>>>> REPLACE
+    tearDownClassGlobalPatches()

@@ -81,13 +81,11 @@ global_kivy_patches_components = [
     patch('kivy.garden.matplotlib.backend_kivyagg.FigureCanvasKivyAgg', MagicMock()) 
 ]
 
-@classmethod
-def setUpClassGlobalPatches(cls):
+def setUpClassGlobalPatches():
     for p in global_kivy_patches_components:
         p.start()
 
-@classmethod
-def tearDownClassGlobalPatches(cls):
+def tearDownClassGlobalPatches():
     for p in global_kivy_patches_components:
         p.stop()
 

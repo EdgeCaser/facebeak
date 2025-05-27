@@ -353,7 +353,7 @@ def test_timeout_decorator():
         return "success"
     
     # Test timeout
-            with pytest.raises(detection.TimeoutException):
+    with pytest.raises(detection.TimeoutException):
         slow_function()
     
     # Test successful execution
