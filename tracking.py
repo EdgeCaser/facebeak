@@ -62,6 +62,16 @@ class TimeoutException(TrackingError):
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Load configuration at the start of the script
+CONFIG = {}
+try:
+    with open("config.json", "r") as f:
+        CONFIG = json.load(f)
+except FileNotFoundError:
+    logger.warning("config.json not found in tracking.py. Using default model paths.")
+except json.JSONDecodeError:
+    logger.warning("Error decoding config.json in tracking.py. Using default model paths.")
+
 # --- PATCH: Platform check for signal.SIGALRM ---
 IS_WINDOWS = platform.system() == 'Windows'
 
@@ -87,29 +97,44 @@ def timeout(seconds):
 # --- Model Loading Section ---
 logger.info("--- Initializing and Loading Application Models ---")
 
+# --- Model Loading Section ---
+logger.info("--- Initializing and Loading Application Models ---")
+
+# --- Model Loading Section ---
+logger.info("--- Initializing and Loading Application Models ---")
+
+# Determine model directory
+model_dir_str = CONFIG.get('model_dir')
+if not model_dir_str: # Handles None or empty string
+    model_dir_path = Path('.') # Default to current directory if not specified or empty
+else:
+    model_dir_path = Path(model_dir_str)
+
 # 1. Primary Crow Embedding Model
 logger.info("Initializing primary Crow Embedding Model (CrowResNetEmbedder)...")
 CROW_EMBEDDING_MODEL = CrowResNetEmbedder(embedding_dim=512) # Assuming embedding_dim is a parameter
+crow_embedding_model_path_obj = model_dir_path / 'crow_resnet_triplet.pth'
 try:
     # Load weights on CPU first to prevent potential CUDA OOM if model was saved on GPU
-    CROW_EMBEDDING_MODEL.cpu() 
-    CROW_EMBEDDING_MODEL.load_state_dict(torch.load('crow_resnet_triplet.pth', map_location='cpu'))
-    logger.info("Successfully loaded trained weights for CrowResNetEmbedder from 'crow_resnet_triplet.pth'.")
+    CROW_EMBEDDING_MODEL.cpu()
+    CROW_EMBEDDING_MODEL.load_state_dict(torch.load(str(crow_embedding_model_path_obj), map_location='cpu'))
+    logger.info(f"Successfully loaded trained weights for CrowResNetEmbedder from '{str(crow_embedding_model_path_obj)}'.")
 except FileNotFoundError:
-    logger.warning("'crow_resnet_triplet.pth' not found. CrowResNetEmbedder will use its initial (random or default pre-trained) weights.")
+    logger.warning(f"'{str(crow_embedding_model_path_obj)}' not found. CrowResNetEmbedder will use its initial (random or default pre-trained) weights. Ensure 'model_dir' in config.json is correct or the model is in the default location.")
 except Exception as e:
-    logger.warning(f"Could not load weights for CrowResNetEmbedder from 'crow_resnet_triplet.pth' due to an error: {e}. Using initial weights.")
+    logger.warning(f"Could not load weights for CrowResNetEmbedder from '{str(crow_embedding_model_path_obj)}' due to an error: {e}. Using initial weights.")
 CROW_EMBEDDING_MODEL.eval()
 logger.info("CrowResNetEmbedder set to evaluation mode.")
 
 # 2. Toy Detection Model (YOLO)
 TOY_DETECTION_MODEL = None
+toy_model_path_obj = model_dir_path / 'yolov8n_toys.pt'
 try:
-    logger.info("Loading YOLO model for toy detection ('yolov8n_toys.pt')...")
-    TOY_DETECTION_MODEL = YOLO('yolov8n_toys.pt') # YOLO handles its own device placement
-    logger.info("YOLO toy detection model ('yolov8n_toys.pt') loaded successfully.")
+    logger.info(f"Loading YOLO model for toy detection ('{str(toy_model_path_obj)}')...")
+    TOY_DETECTION_MODEL = YOLO(str(toy_model_path_obj)) # YOLO handles its own device placement
+    logger.info(f"YOLO toy detection model ('{str(toy_model_path_obj)}') loaded successfully.")
 except Exception as e:
-    logger.warning(f"Failed to load YOLO toy detection model ('yolov8n_toys.pt'): {e}. Toy detection will be disabled.")
+    logger.warning(f"Failed to load YOLO toy detection model ('{str(toy_model_path_obj)}'): {e}. Toy detection will be disabled. Ensure 'model_dir' in config.json is correct or the model is in the default location.")
 
 # 3. Super Resolution Model
 logger.info("Initializing SuperResolutionModel...")

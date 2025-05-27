@@ -1,5 +1,11 @@
 # facebeak
 
+**Note on OS Compatibility**: This application has been refactored for improved cross-platform compatibility and should work on Windows, Linux, and macOS. Setup and execution scripts are provided for both Windows (`.bat`) and Linux/macOS (`.sh`).
+
+---
+
+## Overview
+
 facebeak is an AI-powered tool for identifying and tracking individual crows (and other birds) in video footage. It uses advanced computer vision models to detect birds, assign persistent visual IDs, and maintains a comprehensive database of known individuals for long-term study.
 
 ## 🚀 Major New Features
@@ -210,21 +216,126 @@ The facebeak system consists of multiple integrated components that work togethe
 
 ---
 
-## Quick Start Guide (For Non-Coders)
+## 🚀 Quick Start Guide
+
+This guide helps you get facebeak running quickly.
+
+### System Dependencies
+
+-   **Python**: Version 3.9+ is recommended (Python 3.11.9 was used for development).
+-   **FFmpeg**: This is required for all video processing and audio extraction features.
+    -   Download FFmpeg from [ffmpeg.org](https://ffmpeg.org/download.html).
+    -   You can either:
+        -   Add the directory containing `ffmpeg` (or `ffmpeg.exe` on Windows) to your system's PATH.
+        -   Or, specify the full path to the `ffmpeg` executable in the `config.json` file (see "Configuration" section above).
 
 ### Installation
-1. Download and install Python 3.11.9 
-   - During installation, make sure to check "Add Python to PATH"
-2. Download this project by clicking the green "Code" button above and selecting "Download ZIP"
-3. Extract the ZIP file to a folder on your computer
-4. Open a command prompt (Windows) or terminal (Mac/Linux) in the extracted folder
-5. Run these commands to set up the required software:
+
+**1. Get Python:**
+-   Download and install Python from [python.org](https://www.python.org/downloads/).
+-   During installation on Windows, ensure you check the box "Add Python to PATH".
+
+**2. Download Project:**
+-   Download this project by clicking the green "Code" button above and selecting "Download ZIP".
+-   Extract the ZIP file to a folder on your computer (e.g., `C:\facebeak` or `~/facebeak`).
+
+**3. Setup Environment & Install Dependencies:**
+
+   Open your system's command line interface:
+    -   **Windows**: Command Prompt or PowerShell.
+    -   **Linux/macOS**: Terminal.
+
+   Navigate to the project folder where you extracted the files:
+   ```bash
+   cd path/to/your/facebeak_folder
    ```
+
+   Now, run the setup script for your operating system:
+
+   -   **Windows:**
+       ```batch
+       setup_and_run.bat
+       ```
+   -   **Linux/macOS:**
+       ```bash
+       bash setup_and_run.sh
+       # If you get a permission error, try: chmod +x setup_and_run.sh
+       # Then run: ./setup_and_run.sh
+       ```
+
+   These scripts will attempt to:
+   1.  Guide you to create or confirm a Python virtual environment (recommended name: `.venv`).
+   2.  Activate the virtual environment.
+   3.  Upgrade `pip` (Python's package installer).
+   4.  Install all required Python packages from `requirements.txt`.
+
+   **Manual Virtual Environment Setup (if not using the setup scripts or for troubleshooting):**
+   If you prefer to set up the virtual environment manually or the script encounters issues:
+   ```bash
+   # Navigate to your project root directory
+   # Replace 'python' with 'python3' if that's your command for Python 3
+   python -m venv .venv  # Creates a virtual environment named .venv
+   
+   # Activate the virtual environment:
+   # On Windows (cmd.exe):
+   # .venv\Scripts\activate.bat
+   # On Windows (PowerShell):
+   # .\.venv\Scripts\Activate.ps1 
+   # (You might need to set PowerShell execution policy: Set-ExecutionPolicy RemoteSigned -Scope CurrentUser)
+   # On Linux/macOS (bash/zsh):
+   # source .venv/bin/activate
+   
+   # Once activated, upgrade pip and install requirements:
    python -m pip install --upgrade pip
    pip install -r requirements.txt
    ```
 
 ### Using the Program
+
+Once setup is complete and the virtual environment is active (your command prompt might change to show `(.venv)` at the beginning of the line):
+
+#### **Launching the Main GUI (`facebeak.py`)**
+This is the primary way to interact with most features.
+
+-   **Windows:** If you used `setup_and_run.bat`, it might leave a command prompt open with the environment active. If not, open a new Command Prompt in the project folder and run `.venv\Scripts\activate.bat`. Then:
+    ```batch
+    python facebeak.py
+    ```
+-   **Linux/macOS:** If you used `setup_and_run.sh`, the environment is active in that terminal. Run:
+    ```bash
+    python facebeak.py
+    ```
+-   Alternatively, you might be able to double-click `facebeak.py` if your system is configured to run Python scripts, but running from an activated terminal is more reliable for ensuring the correct environment.
+
+#### **Running Specific Video Processing via CLI (`main.py`)**
+For automated processing or if you prefer the command line.
+
+-   **Windows (using the script):**
+    From a command prompt in the project directory (venv does not need to be active first for this script, as it activates it):
+    ```batch
+    run_facebeak.bat
+    ```
+    (This script will prompt you for inputs.)
+
+-   **Linux/macOS (using the script):**
+    From a terminal in the project directory (venv does not need to be active first for this script):
+    ```bash
+    bash run_facebeak.sh
+    # Or, if you've made it executable (chmod +x run_facebeak.sh):
+    # ./run_facebeak.sh
+    ```
+    (This script will prompt you for inputs.)
+
+-   **Directly (manual command):**
+    Ensure your virtual environment is active.
+    ```bash
+    python main.py --video path/to/your/video.mp4 --skip-output path/to/skip_output.mp4 --full-output path/to/full_output.mp4 [other_options]
+    ```
+    Use `python main.py --help` to see all available command-line options.
+
+---
+*(The following sections describe workflows and are largely unchanged but should be read in context of the new setup)*
+---
 
 #### **🚀 NEW**: Advanced Workflow with Unsupervised Learning
 1. **Phase 1: Data Extraction with Audio**
@@ -371,11 +482,9 @@ The facebeak system consists of multiple integrated components that work togethe
   * Reduce camera movement and ensure consistent lighting
 
 ### Troubleshooting
-- If you get an error about missing files, make sure you've run the installation steps
-- If the program won't start, try running it from the command prompt:
-  1. Open command prompt (Windows) or terminal (Mac/Linux)
-  2. Navigate to the program folder
-  3. Type `python gui_launcher.py` and press Enter
+- **Initial Setup**: If you get errors about missing files or modules, ensure you have run the correct setup script (`setup_and_run.bat` or `setup_and_run.sh`) which installs dependencies from `requirements.txt`. Make sure your virtual environment is active.
+- **FFmpeg**: If video processing fails with errors related to `ffmpeg`, ensure it's installed and accessible. Either add it to your system's PATH or set the `ffmpeg_path` in `config.json`.
+- **Program Start**: If the GUI (`facebeak.py`) doesn't start, try running it from an activated command prompt/terminal to see error messages: `python facebeak.py`.
 - **NEW**: If you see many false positive detections, increase Min Confidence to 0.6-0.7
 - **NEW**: If Faster R-CNN produces false positives, disable its multi-view option
 - **NEW**: If database issues occur, check the logs in the `logs/` directory
@@ -386,12 +495,15 @@ The facebeak system consists of multiple integrated components that work togethe
 
 ## Technical Details (For Developers)
 
-### Requirements
-- Python 3.11.9
-- RTX 3080 or compatible GPU (recommended for overnight training)
-- **NEW**: FFmpeg for audio extraction (automatically handled)
-- **NEW**: Additional packages: plotly>=5.17.0 for interactive visualizations
-- See `requirements.txt` for complete dependency list
+### Dependencies
+- Python 3.11.9 (or compatible 3.9+ version)
+- RTX 3080 or compatible GPU (recommended for optimal training performance, especially overnight training). CPU-only operation is possible but will be significantly slower for model training and processing.
+- **FFmpeg**: Required for video processing (e.g., frame extraction, audio manipulation).
+    - Must be installed on the system.
+    - The application will attempt to find `ffmpeg` in the system's PATH.
+    - Alternatively, the full path to the `ffmpeg` executable can be specified in `config.json` using the `ffmpeg_path` key.
+- See `requirements.txt` for a complete list of Python package dependencies. These are installed by the `setup_and_run` scripts or manually via `pip install -r requirements.txt`.
+- **NEW**: Some utility scripts or advanced features might use additional packages like `plotly>=5.17.0` for interactive visualizations. These are included in `requirements.txt`.
 
 ### Usage
 
@@ -806,6 +918,42 @@ python -m pytest tests/test_workflow_integration.py -v
 - ✅ Clustering analysis and duplicate detection with comprehensive reporting
 - ✅ Advanced training pipeline with curriculum learning and auto-filtering
 - ✅ **NEW**: One-click training setup with automatic parameter optimization
+
+## ⚙️ Configuration (`config.json`)
+
+facebeak uses a `config.json` file in the project root to manage various settings. If this file doesn't exist, or if a specific key is missing, the application will generally use sensible default values.
+
+```json
+{
+  "input_dir": "./videos",
+  "output_dir": "./output",
+  "model_dir": "./models",
+  "ffmpeg_path": "ffmpeg",
+  "db_path": "",
+  "log_dir": "./logs"
+}
+```
+
+**Key Descriptions:**
+
+-   `input_dir`: Default directory for input videos. This is primarily a suggestion for scripts or if the GUI doesn't specify a path.
+-   `output_dir`: Default base directory where output files (processed videos, image crops, clustering results, etc.) are saved. The GUI often pre-fills this based on this config value.
+-   `model_dir`: Specifies the directory where trained model files (e.g., `.pt` for YOLO, `.pth` for PyTorch models) are stored or should be looked for.
+-   `ffmpeg_path`: Path to the FFmpeg executable.
+    -   If set to `"ffmpeg"` (the default), the system will assume FFmpeg is installed and available in the system's PATH.
+    -   Otherwise, provide the full, absolute path to the `ffmpeg` (or `ffmpeg.exe` on Windows) executable.
+-   `db_path`: Specifies the path to the SQLite database file (e.g., `crow_embeddings.db`).
+    -   **Precedence for Database Path**:
+        1.  Environment variable: `CROW_DB_PATH` (if set, this takes highest priority).
+        2.  `config.json`: Value of `db_path` (if set to a non-empty string).
+        3.  Default: `~/.facebeak/crow_embeddings.db` (i.e., in a `.facebeak` folder within the user's home directory).
+-   `log_dir`: Directory where application log files are stored.
+    -   **Precedence for Log Directory**:
+        1.  Environment variable: `LOG_DIR` (if set, this takes highest priority).
+        2.  `config.json`: Value of `log_dir` (if set to a non-empty string).
+        3.  Default: `./logs` (a `logs` directory in the project root).
+
+An empty string for `db_path` or `log_dir` in `config.json` means the application will ignore this config entry and proceed to the next precedence level (usually the default path).
 
 ### Planned Features 🚧
 - 🚧 **🔊 Advanced Audio Analysis**: Voice activity detection, dynamic clip lengths, crow call classification

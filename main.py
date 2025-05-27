@@ -11,11 +11,27 @@ from datetime import datetime
 import subprocess
 import numpy as np
 from typing import List
+import json # Added import
+from pathlib import Path # Added import
+
+# Load configuration at the start of the script
+CONFIG = {}
+try:
+    with open("config.json", "r") as f:
+        CONFIG = json.load(f)
+except FileNotFoundError:
+    print("WARNING: config.json not found. Using default settings.")
+except json.JSONDecodeError:
+    print("WARNING: Error decoding config.json. Using default settings.")
+
 
 class TeeLogger:
-    def __init__(self, log_path):
+    def __init__(self, log_path_str: str):
+        # Ensure log directory exists
+        log_path_obj = Path(log_path_str)
+        log_path_obj.parent.mkdir(parents=True, exist_ok=True)
         # Open in write mode ('w') to start fresh each session
-        self.log = open(log_path, 'w')
+        self.log = open(log_path_obj, 'w')
         self.stdout = sys.stdout
         self.stderr = sys.stderr
         sys.stdout = self
@@ -76,20 +92,21 @@ def add_audio_to_video(processed_video, original_video, output_video):
     """Add audio from original video to processed video."""
     try:
         # Create temporary file in the same directory as output
-        import tempfile
-        import os
-        output_dir = os.path.dirname(output_video)
-        temp_output = os.path.join(output_dir, 'temp_with_audio.mp4')
+        import tempfile # Keep for tempfile module if still needed, though not directly for path joining
+        # import os # os is already imported globally
+        output_video_path = Path(output_video)
+        temp_output = output_video_path.parent / 'temp_with_audio.mp4'
         
+        ffmpeg_path = CONFIG.get('ffmpeg_path', 'ffmpeg')
         cmd = [
-            'ffmpeg', '-y',
+            ffmpeg_path, '-y',
             '-i', processed_video,
             '-i', original_video,
             '-c', 'copy',
             '-map', '0:v:0',
             '-map', '1:a:0?',  # Make audio optional with ?
             '-shortest',
-            temp_output
+            str(temp_output) # Popen expects string paths
         ]
         # Use Popen to capture and log output in real-time
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -101,8 +118,8 @@ def add_audio_to_video(processed_video, original_video, output_video):
             raise subprocess.CalledProcessError(process.returncode, cmd)
         
         # If successful, move temp file to final output
-        if os.path.exists(temp_output):
-            os.replace(temp_output, output_video)
+        if temp_output.exists():
+            temp_output.replace(output_video_path) # Use Path.replace
     except subprocess.CalledProcessError as e:
         print(f"[WARNING] Could not add audio: {str(e)}")
         # If audio transfer fails, just copy the processed video to output
@@ -118,19 +135,20 @@ def compress_video(input_path, output_path, crf=23):
     """Compress video while maintaining quality."""
     try:
         # Create temporary file in the same directory as output
-        import tempfile
-        import os
-        output_dir = os.path.dirname(output_path)
-        temp_output = os.path.join(output_dir, 'temp_compressed.mp4')
+        import tempfile # Keep for tempfile module
+        # import os # os is already imported globally
+        output_path_obj = Path(output_path)
+        temp_output = output_path_obj.parent / 'temp_compressed.mp4'
         
+        ffmpeg_path = CONFIG.get('ffmpeg_path', 'ffmpeg')
         cmd = [
-            'ffmpeg', '-y',
+            ffmpeg_path, '-y',
             '-i', input_path,
             '-vcodec', 'libx264',
             '-crf', str(crf),
             '-preset', 'medium',
             '-acodec', 'copy',
-            temp_output
+            str(temp_output) # Popen expects string paths
         ]
         # Use Popen to capture and log output in real-time
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -142,8 +160,8 @@ def compress_video(input_path, output_path, crf=23):
             raise subprocess.CalledProcessError(process.returncode, cmd)
         
         # If successful, move temp file to final output
-        if os.path.exists(temp_output):
-            os.replace(temp_output, output_path)
+        if temp_output.exists():
+            temp_output.replace(output_path_obj) # Use Path.replace
     except subprocess.CalledProcessError as e:
         print(f"[WARNING] Could not compress video: {str(e)}")
         # If compression fails, just copy the input to output
@@ -413,9 +431,11 @@ def interpolate_frames(video_path: str, output_path: str, processed_frames: List
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
     # Create temporary video without audio
-    temp_output = output_path + ".temp.mp4"
+    output_path_obj = Path(output_path)
+    temp_output_path = output_path_obj.parent / (output_path_obj.name + ".temp.mp4")
+
     writer = cv2.VideoWriter(
-        temp_output,
+        str(temp_output_path), # VideoWriter expects string path
         cv2.VideoWriter_fourcc(*'mp4v'),
         fps,
         (width, height)
@@ -483,15 +503,16 @@ def interpolate_frames(video_path: str, output_path: str, processed_frames: List
     if preserve_audio:
         # Use ffmpeg to combine video with original audio
         try:
+            ffmpeg_path = CONFIG.get('ffmpeg_path', 'ffmpeg')
             cmd = [
-                'ffmpeg', '-y',
-                '-i', temp_output,
+                ffmpeg_path, '-y',
+                '-i', str(temp_output_path), # Popen expects string paths
                 '-i', video_path,
                 '-c:v', 'copy',
                 '-c:a', 'aac',
                 '-map', '0:v:0',
                 '-map', '1:a:0',
-                output_path
+                str(output_path_obj) # Popen expects string paths
             ]
             # Use Popen to capture and log output in real-time
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -502,12 +523,14 @@ def interpolate_frames(video_path: str, output_path: str, processed_frames: List
             if process.returncode != 0:
                 raise subprocess.CalledProcessError(process.returncode, cmd)
                 
-            os.remove(temp_output)
+            temp_output_path.unlink() # Use Path.unlink to remove
         except Exception as e:
             print(f"[WARNING] Could not add audio: {str(e)}")
-            os.rename(temp_output, output_path)
+            if temp_output_path.exists(): # Check before renaming
+                temp_output_path.rename(output_path_obj) # Use Path.rename
     else:
-        os.rename(temp_output, output_path)
+        if temp_output_path.exists(): # Check before renaming
+            temp_output_path.rename(output_path_obj) # Use Path.rename
 
 def interpolate_tracks(prev_tracks: np.ndarray, next_tracks: np.ndarray, alpha: float) -> np.ndarray:
     """Interpolate between two sets of tracks."""
@@ -578,8 +601,11 @@ if __name__ == "__main__":
         sys.exit(1)
     
     # Initialize logger
-    log_path = "facebeak_session.log"
-    logger = TeeLogger(log_path)
+    log_dir_str = CONFIG.get('log_dir', 'logs')
+    # TeeLogger's __init__ now handles directory creation using Path
+    log_file_name = "facebeak_session.log"
+    log_path_str = str(Path(log_dir_str) / log_file_name) # Construct path using pathlib
+    logger = TeeLogger(log_path_str)
     
     try:
         args = parse_args()
