@@ -17,7 +17,7 @@ from detection import (
     merge_overlapping_detections,
     has_overlapping_crows,
     _run_model_inference,
-    TimeoutError
+    TimeoutException
 )
 
 class TestCriticalDetection(unittest.TestCase):
