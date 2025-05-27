@@ -9,7 +9,57 @@ import numpy as np
 # Import modules
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from db import initialize_database, save_crow_embedding, get_connection
+
+# Mock all Tkinter components before any imports that might use them
+import unittest.mock
+
+# Create mock modules for tkinter submodules
+mock_messagebox = unittest.mock.MagicMock()
+mock_messagebox.showwarning = unittest.mock.MagicMock()
+mock_messagebox.showerror = unittest.mock.MagicMock()
+mock_messagebox.showinfo = unittest.mock.MagicMock()
+mock_messagebox.askyesno = unittest.mock.MagicMock()
+
+mock_filedialog = unittest.mock.MagicMock()
+mock_filedialog.askdirectory = unittest.mock.MagicMock()
+mock_filedialog.askopenfilenames = unittest.mock.MagicMock()
+
+tkinter_mocks = {
+    'tkinter': unittest.mock.MagicMock(),
+    'tkinter.Tk': unittest.mock.MagicMock,
+    'tkinter.ttk': unittest.mock.MagicMock(),
+    'tkinter.ttk.Frame': unittest.mock.MagicMock,
+    'tkinter.ttk.LabelFrame': unittest.mock.MagicMock,
+    'tkinter.Listbox': unittest.mock.MagicMock,
+    'tkinter.ttk.Scrollbar': unittest.mock.MagicMock,
+    'tkinter.ttk.Button': unittest.mock.MagicMock,
+    'tkinter.ttk.Entry': unittest.mock.MagicMock,
+    'tkinter.Text': unittest.mock.MagicMock,
+    'tkinter.ttk.Label': unittest.mock.MagicMock,
+    'tkinter.BooleanVar': unittest.mock.MagicMock,
+    'tkinter.StringVar': unittest.mock.MagicMock,
+    'tkinter.IntVar': unittest.mock.MagicMock,
+    'tkinter.DoubleVar': unittest.mock.MagicMock,
+    'tkinter.ttk.Style': unittest.mock.MagicMock,
+    'tkinter.ttk.Progressbar': unittest.mock.MagicMock,
+    'tkinter.ttk.Spinbox': unittest.mock.MagicMock,
+    'tkinter.Canvas': unittest.mock.MagicMock,
+    'tkinter.ttk.Checkbutton': unittest.mock.MagicMock,
+    'tkinter.PhotoImage': unittest.mock.MagicMock,
+    'tkinter.messagebox': mock_messagebox,
+    'tkinter.filedialog': mock_filedialog,
+}
+
+# Apply all the mocks
+for module_name, mock_class in tkinter_mocks.items():
+    sys.modules[module_name] = mock_class
+
+from db import (initialize_database, get_connection, save_crow_embedding, 
+                get_all_crows, get_first_crow_image, get_crow_videos, 
+                get_crow_images_from_video, update_crow_name, 
+                reassign_crow_embeddings, create_new_crow_from_embeddings,
+                get_crow_embeddings, get_embedding_ids_by_image_paths,
+                delete_crow_embeddings)
 from utilities import sync_database
 
 class TestSuspectLineupIntegration(unittest.TestCase):
@@ -269,25 +319,20 @@ class TestSuspectLineupIntegration(unittest.TestCase):
     
     def test_gui_launcher_integration(self):
         """Test integration with GUI launcher."""
-        from facebeak import FacebeakGUI
-        
-        # Mock the GUI components to test the suspect lineup launch
-        with patch('tkinter.Tk') as mock_tk:
-            root = mock_tk.return_value
+        # Since we've already mocked tkinter at the module level, we can test more simply
+        with patch('subprocess.Popen') as mock_popen, \
+             patch('pathlib.Path.exists', return_value=True), \
+             patch('facebeak.get_venv_python', return_value='python'):
             
-            with patch('tkinter.ttk.Frame'), \
-                 patch('tkinter.ttk.LabelFrame'), \
-                 patch('tkinter.Listbox'), \
-                 patch('tkinter.ttk.Scrollbar'), \
-                 patch('tkinter.ttk.Button'), \
-                 patch('tkinter.ttk.Entry'), \
-                 patch('tkinter.Text'), \
-                 patch('tkinter.ttk.Label'), \
-                 patch('tkinter.BooleanVar'), \
-                 patch('tkinter.ttk.Style'), \
-                 patch('subprocess.Popen') as mock_popen:
-                
-                app = FacebeakGUI(root)
+            # Import and test the launch function directly
+            from facebeak import FacebeakGUI
+            
+            # Create a mock root and app - the tkinter components are already mocked
+            mock_root = MagicMock()
+            app = FacebeakGUI(mock_root)
+            
+            # Mock the _update_output method to prevent any GUI updates
+            app._update_output = MagicMock()
             
             # Test launching suspect lineup
             app.launch_suspect_lineup()
