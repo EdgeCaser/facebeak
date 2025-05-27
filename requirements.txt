@@ -27,6 +27,8 @@ soundfile>=0.12.1  # For audio file I/O
 
 # Visualization and GUI
 tensorboard>=2.14.0  # For training visualization
+Kivy>=2.1.0
+kivy-garden.matplotlib
 
 # Detection and tracking
 ultralytics>=8.0.0  # For YOLOv8 detection
