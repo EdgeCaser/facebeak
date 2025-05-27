@@ -57,6 +57,15 @@ DB_PATH = ensure_db_dir()
 def initialize_database():
     """Initialize the database."""
     try:
+        # Ensure database directory exists and create empty database file if it doesn't exist
+        db_path = Path(DB_PATH)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Create empty database file if it doesn't exist
+        if not db_path.exists():
+            db_path.touch()
+            logger.info(f"Created new database file: {db_path}")
+        
         # Create connection
         conn = secure_database_connection(str(DB_PATH))
         c = conn.cursor()
