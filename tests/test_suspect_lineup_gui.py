@@ -10,10 +10,20 @@ import time
 import sys
 import logging
 
+# Disable Kivy graphics completely for testing
+os.environ['KIVY_WINDOW'] = 'sdl2'
+os.environ['KIVY_GL_BACKEND'] = 'mock'
+os.environ['KIVY_USE_DEFAULTCONFIG'] = '1'
+os.environ['KIVY_NO_CONSOLELOG'] = '1'
+# Prevent any window creation
+os.environ['SDL_VIDEODRIVER'] = 'dummy'
+# Force headless mode
+os.environ['KIVY_HEADLESS'] = '1'
+
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 # Import Kivy version of the GUI
-from kivy_suspect_lineup import SuspectLineupApp, SuspectLineupLayout 
+from kivy_suspect_lineup import SuspectLineupApp, SuspectLineupLayout
 from db import (initialize_database, get_all_crows,
                 get_first_crow_image, get_crow_videos, get_crow_images_from_video,
                 update_crow_name, reassign_crow_embeddings, create_new_crow_from_embeddings,
@@ -22,6 +32,35 @@ from db import (initialize_database, get_all_crows,
 
 # Set up logger
 logger = logging.getLogger(__name__)
+
+# Patch the SuspectLineupApp class at module level to prevent real instantiation
+original_suspect_lineup_app = SuspectLineupApp
+
+class MockSuspectLineupApp:
+    def __init__(self, **kwargs):
+        # Don't call the real __init__ to prevent window creation
+        self.current_crow_id = None
+        self.current_crow_name = ""
+        self.unsaved_changes = False
+        self.all_crows_data = []
+        self.current_crow_videos = []
+        self.selected_video_paths = []
+        self.image_classifications = {}
+        self.image_widgets_map = {}
+        self.layout = MagicMock()
+        
+    def build(self):
+        return MagicMock()
+        
+    def run(self):
+        pass  # Don't actually run the app
+        
+    def stop(self):
+        pass
+
+# Replace the class in the module
+import kivy_suspect_lineup
+kivy_suspect_lineup.SuspectLineupApp = MockSuspectLineupApp
 
 # --- Kivy Mocking Setup ---
 class MinimalKivyAppMock:

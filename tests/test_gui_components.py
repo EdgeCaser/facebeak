@@ -6,6 +6,15 @@ from pathlib import Path
 import sys
 import json # For test_start_training_logic_kivy
 
+# Disable Kivy graphics completely for testing
+os.environ['KIVY_WINDOW'] = 'sdl2'
+os.environ['KIVY_GL_BACKEND'] = 'mock'
+os.environ['KIVY_USE_DEFAULTCONFIG'] = '1'
+os.environ['KIVY_NO_CONSOLELOG'] = '1'
+os.environ['KIVY_HEADLESS'] = '1'
+# Prevent any window creation
+os.environ['SDL_VIDEODRIVER'] = 'dummy'
+
 # Add parent dir for local imports
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
