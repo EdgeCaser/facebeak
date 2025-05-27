@@ -139,7 +139,7 @@ class ExtractorLayout(BoxLayout):
         self.controls_panel.add_widget(prog_section_box)
 
         stats_section_box, stats_section = self._create_section_layout("Statistics")
-        self.stats_grid = GridLayout(cols=2, spacing="3dp", size_hint_y=None)
+        self.stats_grid = GridLayout(cols=1, spacing="2dp", size_hint_y=None, padding="5dp")
         self.stats_grid.bind(minimum_height=self.stats_grid.setter('height'))
         self.stats_labels_ui = {} 
         stats_definitions = [
@@ -150,10 +150,20 @@ class ExtractorLayout(BoxLayout):
             ('current_video_crows', 'Video Crows:')
         ]
         for key, text_label in stats_definitions:
-            lbl_title = Label(text=text_label, size_hint_x=0.7, halign='right', text_size=(None, None), height='20dp')
-            lbl_value = Label(text="0", size_hint_x=0.3, halign='left', text_size=(None, None), height='20dp')
-            self.stats_grid.add_widget(lbl_title)
-            self.stats_grid.add_widget(lbl_value)
+            # Create a horizontal row for each statistic
+            row_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height='22dp', spacing="5dp")
+            
+            lbl_title = Label(text=text_label, size_hint_x=0.65, 
+                            halign='left', valign='middle', 
+                            text_size=(None, None), font_size='11sp')
+            lbl_value = Label(text="0", size_hint_x=0.35,
+                            halign='right', valign='middle', 
+                            text_size=(None, None), font_size='11sp', bold=True)
+            
+            row_layout.add_widget(lbl_title)
+            row_layout.add_widget(lbl_value)
+            
+            self.stats_grid.add_widget(row_layout)
             self.stats_labels_ui[key] = lbl_value 
         stats_section.add_widget(self.stats_grid)
         self.controls_panel.add_widget(stats_section_box)
