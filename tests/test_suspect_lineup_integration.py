@@ -24,6 +24,15 @@ mock_filedialog = unittest.mock.MagicMock()
 mock_filedialog.askdirectory = unittest.mock.MagicMock()
 mock_filedialog.askopenfilenames = unittest.mock.MagicMock()
 
+# Create mock variable classes that don't require a root window
+class MockVariable:
+    def __init__(self, value=None):
+        self._value = value
+    def get(self):
+        return self._value
+    def set(self, value):
+        self._value = value
+
 tkinter_mocks = {
     'tkinter': unittest.mock.MagicMock(),
     'tkinter.Tk': unittest.mock.MagicMock,
@@ -36,10 +45,10 @@ tkinter_mocks = {
     'tkinter.ttk.Entry': unittest.mock.MagicMock,
     'tkinter.Text': unittest.mock.MagicMock,
     'tkinter.ttk.Label': unittest.mock.MagicMock,
-    'tkinter.BooleanVar': unittest.mock.MagicMock,
-    'tkinter.StringVar': unittest.mock.MagicMock,
-    'tkinter.IntVar': unittest.mock.MagicMock,
-    'tkinter.DoubleVar': unittest.mock.MagicMock,
+    'tkinter.BooleanVar': lambda value=False: MockVariable(value),
+    'tkinter.StringVar': lambda value="": MockVariable(value),
+    'tkinter.IntVar': lambda value=0: MockVariable(value),
+    'tkinter.DoubleVar': lambda value=0.0: MockVariable(value),
     'tkinter.ttk.Style': unittest.mock.MagicMock,
     'tkinter.ttk.Progressbar': unittest.mock.MagicMock,
     'tkinter.ttk.Spinbox': unittest.mock.MagicMock,
