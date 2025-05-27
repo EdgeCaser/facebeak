@@ -650,7 +650,7 @@ class TestImprovedTrainer:
 class TestSetupImprovedTraining:
     """Test suite for setup_improved_training.py functionality."""
     
-    @patch('setup_improved_training.DatasetStats')
+    @patch('utilities.setup_improved_training.DatasetStats')
     def test_setup_training_config(self, mock_dataset_stats, temp_training_dir):
         """Test setup_improved_training configuration generation."""
         # Mock the dataset analysis
@@ -772,7 +772,8 @@ def create_dummy_image_files(tmp_path):
             # Create a tiny valid JPEG image using PIL
             try:
                 import random
-                img = Image.new('RGB', (10, 10), color = (random.randint(0,255), random.randint(0,255), random.randint(0,255)))
+                from PIL import Image as PILImage
+                img = PILImage.new('RGB', (10, 10), color = (random.randint(0,255), random.randint(0,255), random.randint(0,255)))
                 img.save(str(img_file), "JPEG")
                 image_paths[crow_id].append(img_file)
                 crow_labels[img_file] = crow_id
@@ -795,7 +796,7 @@ def mock_embedding_model():
     # Mock parameters list and device
     mock_param = MagicMock(spec=torch.Tensor)
     mock_param.device = torch.device('cpu')
-    model.parameters.return_value = [mock_param]
+    model.parameters.return_value = iter([mock_param])  # Return iterator, not list
     model.device = torch.device('cpu') # Make model device accessible
 
     # Default behavior for forward: return a random tensor of correct shape
@@ -893,21 +894,12 @@ class TestImprovedCrowTripletDatasetHNM:
             image_paths_dict['crow3'][1]: emb_other_neg_c3,
         }
         # Ensure all paths in all_img_embeddings are also in all_image_paths_labels
-        dataset.all_image_paths_labels = list(dataset.all_img_embeddings.keys())
+        dataset.all_image_paths_labels = []
         # Manually map labels for these paths
         for path, emb in dataset.all_img_embeddings.items():
             for cid, paths in image_paths_dict.items():
                 if path in paths:
-                    # Replace tuple with new one if it exists
-                    idx_to_replace = -1
-                    for i, (p,lbl) in enumerate(dataset.all_image_paths_labels):
-                        if p == path:
-                            idx_to_replace = i
-                            break
-                    if idx_to_replace != -1:
-                        dataset.all_image_paths_labels[idx_to_replace] = (path, cid)
-                    else: # Should not happen if setup correctly
-                         dataset.all_image_paths_labels.append((path,cid))
+                    dataset.all_image_paths_labels.append((path, cid))
 
 
         dataset.embeddings_computed_for_model_id = id(mock_embedding_model) # Mark as current

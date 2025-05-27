@@ -9,6 +9,8 @@ from db import get_crow_embeddings, get_all_crows
 from tqdm import tqdm
 import json
 from typing import Dict, List, Tuple, Optional
+import matplotlib
+matplotlib.use('Agg')  # Set backend before importing pyplot
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 import seaborn as sns
@@ -430,9 +432,6 @@ class CrowClusterAnalyzer:
             logger.warning("Skipping cluster visualization: too few samples")
             return
         try:
-            import matplotlib
-            matplotlib.use('Agg')
-            import matplotlib.pyplot as plt
             from pathlib import Path
             perplexity = min(30, len(embeddings) - 1)
             tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity)

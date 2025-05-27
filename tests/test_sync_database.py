@@ -405,6 +405,7 @@ class TestSyncDatabaseIntegration:
         
         # Use real database operations
         self.test_db_path = Path("integration_test.db")
+        self.test_db_path.touch()  # Create the database file
         self.db_patcher = patch('db.DB_PATH', self.test_db_path)
         self.db_patcher.start()
         

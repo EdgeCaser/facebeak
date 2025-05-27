@@ -35,20 +35,50 @@ class TestTrainingIntegration(unittest.TestCase):
         # Set environment variable for test database
         os.environ['CROW_DB_PATH'] = cls.db_path
         
+        # Create the database file
+        Path(cls.db_path).touch()
+        
         # Create test crop directory structure
         os.makedirs(cls.crop_dir, exist_ok=True)
         
     def setUp(self):
         """Set up test fixtures for each test."""
-        # Initialize fresh database
+        # Create a unique database file for this test
+        import time
+        self.test_db_path = os.path.join(self.temp_dir.name, f"test_db_{int(time.time() * 1000000)}.db")
+        
+        # Remove the file if it exists and set the environment variable
+        if os.path.exists(self.test_db_path):
+            os.remove(self.test_db_path)
+        os.environ['CROW_DB_PATH'] = self.test_db_path
+        
+        # Initialize fresh database (this will create the file with proper schema)
         initialize_database()
         
-        # Clear any existing image labels from previous tests
+        # Verify the database was created properly
         from db import get_connection
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM image_labels")
-        conn.commit()
+        # Check if the table has the required columns
+        cursor.execute("PRAGMA table_info(image_labels)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'created_at' not in columns:
+            # If the schema is wrong, recreate the table
+            cursor.execute("DROP TABLE IF EXISTS image_labels")
+            cursor.execute('''
+                CREATE TABLE image_labels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    image_path TEXT UNIQUE NOT NULL,
+                    label TEXT NOT NULL,
+                    confidence FLOAT,
+                    reviewer_notes TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_training_data BOOLEAN DEFAULT 1
+                )
+            ''')
+            conn.commit()
         conn.close()
         
         # Create test images in crop directory
@@ -355,16 +385,47 @@ class TestImageReviewerIntegration(unittest.TestCase):
         cls.db_path = os.path.join(cls.temp_dir.name, "test_reviewer_integration.db")
         os.environ['CROW_DB_PATH'] = cls.db_path
         
+        # Create the database file
+        Path(cls.db_path).touch()
+        
     def setUp(self):
         """Set up each test."""
+        # Create a unique database file for this test
+        import time
+        self.test_db_path = os.path.join(self.temp_dir.name, f"test_db_{int(time.time() * 1000000)}.db")
+        
+        # Remove the file if it exists and set the environment variable
+        if os.path.exists(self.test_db_path):
+            os.remove(self.test_db_path)
+        os.environ['CROW_DB_PATH'] = self.test_db_path
+        
+        # Initialize fresh database (this will create the file with proper schema)
         initialize_database()
         
-        # Clear any existing image labels from previous tests
+        # Verify the database was created properly
         from db import get_connection
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM image_labels")
-        conn.commit()
+        # Check if the table has the required columns
+        cursor.execute("PRAGMA table_info(image_labels)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'created_at' not in columns:
+            # If the schema is wrong, recreate the table
+            cursor.execute("DROP TABLE IF EXISTS image_labels")
+            cursor.execute('''
+                CREATE TABLE image_labels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    image_path TEXT UNIQUE NOT NULL,
+                    label TEXT NOT NULL,
+                    confidence FLOAT,
+                    reviewer_notes TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_training_data BOOLEAN DEFAULT 1
+                )
+            ''')
+            conn.commit()
         conn.close()
         
     @classmethod
