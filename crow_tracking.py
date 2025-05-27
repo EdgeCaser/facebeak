@@ -32,10 +32,17 @@ class CrowTracker:
         self.audio_duration = audio_duration
         self.correct_orientation = correct_orientation
         
-        # Create directory structure
+        # Create directory structure - NEW: video/frame-based instead of crow-based to prevent training bias
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        
+        # NEW: Videos directory for frame-based crop organization (prevents bias)
+        self.videos_dir = self.base_dir / "videos"
+        self.videos_dir.mkdir(exist_ok=True)
+        
+        # Keep legacy crows directory for backward compatibility with existing tracking
         self.crows_dir = self.base_dir / "crows"
         self.crows_dir.mkdir(exist_ok=True)
+        
         self.processing_dir = self.base_dir / "processing"
         self.processing_dir.mkdir(exist_ok=True)
         self.metadata_dir = self.base_dir / "metadata"
@@ -56,6 +63,9 @@ class CrowTracker:
         # Tracking data file
         self.tracking_file = self.metadata_dir / "crow_tracking.json"
         
+        # NEW: Crop metadata file for mapping crops to crow IDs
+        self.crop_metadata_file = self.metadata_dir / "crop_metadata.json"
+        
         # Load detection model
         logger.info("Loading detection model (Faster R-CNN)")
         self.detection_model = load_faster_rcnn()
@@ -67,9 +77,13 @@ class CrowTracker:
         # Load or create tracking data
         self.tracking_data = self._load_tracking_data()
         
+        # NEW: Load or create crop metadata
+        self.crop_metadata = self._load_crop_metadata()
+        
         # Log initialization
         logger.info(f"Initialized CrowTracker with {len(self.tracking_data['crows'])} known crows")
         logger.info(f"Using base directory: {self.base_dir}")
+        logger.info(f"NEW: Using video/frame-based crop organization to prevent training bias")
     
     def _load_tracking_data(self):
         """Load tracking data from file or create new if not exists."""
@@ -142,6 +156,57 @@ class CrowTracker:
             
         except Exception as e:
             logger.error(f"Error saving tracking data: {str(e)}")
+            raise
+    
+    def _load_crop_metadata(self):
+        """Load crop metadata from file or create new if not exists."""
+        try:
+            if self.crop_metadata_file.exists():
+                with open(self.crop_metadata_file, 'r') as f:
+                    data = json.load(f)
+                    logger.info(f"Loaded crop metadata from {self.crop_metadata_file}")
+                    return data
+            else:
+                # Create new crop metadata
+                data = {
+                    "crops": {},  # crop_path -> {"crow_id": str, "frame": int, "video": str, "timestamp": str}
+                    "created_at": datetime.now().isoformat(),
+                    "updated_at": datetime.now().isoformat()
+                }
+                logger.info("Created new crop metadata")
+                self._save_crop_metadata(data, force=True)
+                return data
+        except Exception as e:
+            logger.error(f"Error loading crop metadata: {str(e)}")
+            # Create new crop metadata on error
+            data = {
+                "crops": {},
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }
+            logger.info("Created new crop metadata after error")
+            return data
+    
+    def _save_crop_metadata(self, data=None, force=False):
+        """Save crop metadata to file."""
+        try:
+            if data is None:
+                data = self.crop_metadata
+            
+            # Update timestamp
+            data["updated_at"] = datetime.now().isoformat()
+            
+            # Ensure directory exists
+            self.crop_metadata_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Save to file
+            with open(self.crop_metadata_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            
+            logger.debug("Crop metadata saved successfully")
+            
+        except Exception as e:
+            logger.error(f"Error saving crop metadata: {str(e)}")
             raise
     
     def _generate_crow_id(self):  # Changed from generate_crow_id to match test
@@ -418,6 +483,39 @@ class CrowTracker:
             for crow_id, data in self.tracking_data["crows"].items()
         }
     
+    def get_crops_by_crow_id(self, crow_id):
+        """Get all crop paths for a specific crow ID (for backward compatibility)."""
+        crop_paths = []
+        for crop_path, metadata in self.crop_metadata["crops"].items():
+            if metadata["crow_id"] == crow_id:
+                full_path = self.base_dir / crop_path
+                if full_path.exists():
+                    crop_paths.append(str(full_path))
+        return sorted(crop_paths)
+    
+    def get_crops_by_video(self, video_name):
+        """Get all crop paths for a specific video."""
+        crop_paths = []
+        for crop_path, metadata in self.crop_metadata["crops"].items():
+            if metadata["video"] == video_name:
+                full_path = self.base_dir / crop_path
+                if full_path.exists():
+                    crop_paths.append(str(full_path))
+        return sorted(crop_paths)
+    
+    def get_crop_metadata_by_path(self, crop_path):
+        """Get metadata for a specific crop path."""
+        # Convert absolute path to relative if needed
+        if Path(crop_path).is_absolute():
+            try:
+                crop_relative_path = str(Path(crop_path).relative_to(self.base_dir))
+            except ValueError:
+                return None
+        else:
+            crop_relative_path = crop_path
+        
+        return self.crop_metadata["crops"].get(crop_relative_path)
+    
     def create_processing_run(self):
         """Create a new processing run directory with timestamp."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -436,21 +534,8 @@ class CrowTracker:
             logger.error(f"Error cleaning up processing directory: {e}")
     
     def save_crop(self, crop, crow_id, frame_num, video_path=None):
-        """Save a crop image to disk and return the path."""
+        """Save a crop image to disk using video/frame-based organization to prevent training bias."""
         try:
-            # Create crow directory if it doesn't exist
-            crow_dir = self.crows_dir / crow_id
-            crow_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Generate unique filename with timestamp, video info, and global counter to prevent conflicts
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Include milliseconds
-            
-            # Increment global crop counter for absolute uniqueness
-            if "last_crop_id" not in self.tracking_data:
-                self.tracking_data["last_crop_id"] = 0
-            self.tracking_data["last_crop_id"] += 1
-            crop_id = self.tracking_data["last_crop_id"]
-            
             # Extract video name if provided
             video_name = "unknown"
             if video_path:
@@ -458,18 +543,22 @@ class CrowTracker:
                 # Sanitize video name for filesystem
                 video_name = "".join(c for c in video_name if c.isalnum() or c in ('-', '_'))[:20]
             
-            # Create unique filename: cropID_timestamp_videoname_frame_XXXXXX.jpg
-            filename = f"crop_{crop_id:08d}_{timestamp}_{video_name}_frame_{frame_num:06d}.jpg"
-            crop_path = crow_dir / filename
+            # NEW: Create video-specific directory (prevents bias by not grouping by crow ID)
+            video_dir = self.videos_dir / video_name
+            video_dir.mkdir(parents=True, exist_ok=True)
             
-            # Check if file already exists and add counter if needed
-            counter = 1
-            original_crop_path = crop_path
-            while crop_path.exists():
-                stem = original_crop_path.stem
-                suffix = original_crop_path.suffix
-                crop_path = original_crop_path.parent / f"{stem}_{counter:03d}{suffix}"
-                counter += 1
+            # NEW: Generate frame-based filename to prevent training bias
+            # Format: frame_XXXXXX_crop_XXX.jpg (multiple crops per frame possible)
+            base_filename = f"frame_{frame_num:06d}_crop"
+            
+            # Find next available crop number for this frame
+            crop_counter = 1
+            while True:
+                filename = f"{base_filename}_{crop_counter:03d}.jpg"
+                crop_path = video_dir / filename
+                if not crop_path.exists():
+                    break
+                crop_counter += 1
             
             # Handle both numpy array and tensor formats
             if isinstance(crop, dict):
@@ -490,7 +579,22 @@ class CrowTracker:
             
             # Save the crop (OpenCV expects BGR format, but for saving it should be fine)
             cv2.imwrite(str(crop_path), crop_np)
-            logger.debug(f"Saved crop to {crop_path}")
+            
+            # NEW: Record crop metadata for tracking purposes (maintains crow ID mapping)
+            crop_relative_path = str(crop_path.relative_to(self.base_dir))
+            self.crop_metadata["crops"][crop_relative_path] = {
+                "crow_id": crow_id,
+                "frame": frame_num,
+                "video": video_name,
+                "video_path": str(video_path) if video_path else None,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Save crop metadata
+            self._save_crop_metadata()
+            
+            logger.debug(f"Saved crop to {crop_path} (video/frame-based organization)")
+            logger.debug(f"Mapped crop to crow {crow_id} in metadata")
             
             return crop_path
             

@@ -25,27 +25,27 @@ def run_tests():
     test_commands = [
         {
             "name": "Database Function Tests",
-            "cmd": ["python", "-m", "pytest", "tests/test_suspect_lineup_db.py", 
+            "cmd": [sys.executable, "-m", "pytest", "tests/test_suspect_lineup_db.py",
                    "-v", "--tb=short", "-m", "not integration"],
             "description": "Testing database functions with fallback logic"
         },
         {
-            "name": "GUI Component Tests", 
-            "cmd": ["python", "-m", "pytest", "tests/test_suspect_lineup_gui.py",
+            "name": "GUI Component Tests",
+            "cmd": [sys.executable, "-m", "pytest", "tests/test_suspect_lineup_gui.py",
                    "-v", "--tb=short", "-m", "not integration"],
             "description": "Testing GUI components and user interactions"
         },
         {
             "name": "Integration Tests",
-            "cmd": ["python", "-m", "pytest", "tests/test_suspect_lineup_integration.py",
+            "cmd": [sys.executable, "-m", "pytest", "tests/test_suspect_lineup_integration.py",
                    "-v", "--tb=short", "-m", "integration"],
             "description": "Testing end-to-end workflows and component integration"
         },
         {
             "name": "All Suspect Lineup Tests",
-            "cmd": ["python", "-m", "pytest", 
+            "cmd": [sys.executable, "-m", "pytest",
                    "tests/test_suspect_lineup_db.py",
-                   "tests/test_suspect_lineup_gui.py", 
+                   "tests/test_suspect_lineup_gui.py",
                    "tests/test_suspect_lineup_integration.py",
                    "-v", "--tb=short", "--cov=suspect_lineup", "--cov=sync_database",
                    "--cov-report=term-missing", "--cov-report=html:htmlcov_suspect_lineup"],
@@ -123,7 +123,7 @@ def run_tests():
 def run_specific_test_pattern(pattern):
     """Run tests matching a specific pattern."""
     cmd = [
-        "python", "-m", "pytest", 
+        sys.executable, "-m", "pytest",
         f"tests/test_suspect_lineup*.py",
         "-v", "--tb=short",
         "-k", pattern

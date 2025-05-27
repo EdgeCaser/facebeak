@@ -8,10 +8,25 @@ from multi_view import create_multi_view_extractor
 import signal
 from contextlib import contextmanager
 import functools
+import json # Added import
+import os # Added import
+from pathlib import Path # Added import
 import logging
 import threading
 import time
 from functools import wraps
+import platform # Added for the new timeout decorator
+# signal is already imported globally
+
+# Load configuration at the start of the script
+CONFIG = {}
+try:
+    with open("config.json", "r") as f:
+        CONFIG = json.load(f)
+except FileNotFoundError:
+    print("WARNING: config.json not found in detection.py. Using default model paths.")
+except json.JSONDecodeError:
+    print("WARNING: Error decoding config.json in detection.py. Using default model paths.")
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -22,14 +37,31 @@ if not logger.handlers:
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-class TimeoutError(Exception):
+# Custom exception class for timeouts, consistent with tracking.py
+class TimeoutException(Exception): # Renamed from TimeoutError to TimeoutException
     pass
+
+# --- PATCH: Platform check for signal.SIGALRM (copied from tracking.py) ---
+IS_WINDOWS = platform.system() == 'Windows'
 
 # Load models once at module level
 print("[INFO] Loading detection models...")
 
+# Determine model directory
+model_dir_str = CONFIG.get('model_dir')
+if not model_dir_str: # Handles None or empty string
+    model_dir = Path('.') # Default to current directory Path object
+else:
+    model_dir = Path(model_dir_str)
+
 # YOLOv8 model for first pass
-yolo_model = YOLO('yolov8s.pt')  # Using small model for better accuracy while maintaining speed
+yolo_model_path_obj = model_dir / 'yolov8s.pt'
+try:
+    yolo_model = YOLO(str(yolo_model_path_obj))  # YOLO might expect a string path
+except Exception as e:
+    logger.error(f"Failed to load YOLO model from {str(yolo_model_path_obj)}: {e}. Attempting to load from default path 'yolov8s.pt'.")
+    yolo_model = YOLO(str(Path('.') / 'yolov8s.pt')) # Fallback to default
+
 if torch.cuda.is_available():
     yolo_model.to('cuda')
     print("[INFO] YOLOv8 model loaded on GPU")
@@ -37,6 +69,14 @@ else:
     print("[INFO] YOLOv8 model loaded on CPU")
 
 # Faster R-CNN model for refinement
+# Note: Faster R-CNN weights are typically downloaded by torchvision and not loaded from a local file by default.
+# If a specific pre-trained Faster R-CNN file was intended to be loaded from model_dir,
+# the loading mechanism here would need to change significantly.
+# For now, we assume the default torchvision behavior for weights.
+# If you have a .pth file for faster_rcnn, the loading code would be different, e.g.:
+# faster_rcnn_model_path = model_dir / 'faster_rcnn_model.pth'
+# faster_rcnn_model.load_state_dict(torch.load(str(faster_rcnn_model_path)))
+
 faster_rcnn_model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
     weights=torchvision.models.detection.FasterRCNN_ResNet50_FPN_Weights.DEFAULT
 )
@@ -191,35 +231,30 @@ def merge_overlapping_detections(detections, iou_threshold=0.5):
     return merged
 
 def timeout(seconds):
+    """Decorator for function timeout (copied from tracking.py)."""
     def decorator(func):
-        @wraps(func)
+        @functools.wraps(func) # functools is already imported
         def wrapper(*args, **kwargs):
-            logger.debug(f"Running {func.__name__} with timeout protection")
-            import threading
-            import time
+            if IS_WINDOWS:
+                # Windows does not support SIGALRM, execute directly
+                # For Windows, a thread-based timeout might still be possible but more complex to interrupt.
+                # The original threading-based timeout in detection.py could be used here for Windows if desired,
+                # but for consistency with tracking.py's approach, we'll skip signal-based timeout on Windows.
+                # logger.warning(f"Timeout decorator is not using signal-based timeout on Windows for {func.__name__}.")
+                return func(*args, **kwargs) 
             
-            result = [None]
-            exception = [None]
+            # For non-Windows, use signal-based timeout
+            def handler(signum, frame):
+                raise TimeoutException(f"Function {func.__name__} timed out after {seconds} seconds")
             
-            def target():
-                try:
-                    result[0] = func(*args, **kwargs)
-                except Exception as e:
-                    exception[0] = e
-            
-            thread = threading.Thread(target=target)
-            thread.daemon = True
-            thread.start()
-            thread.join(timeout=seconds)
-            
-            if thread.is_alive():
-                # Thread is still running, timeout occurred
-                raise TimeoutError(f"Function {func.__name__} timed out after {seconds} seconds")
-            
-            if exception[0]:
-                raise exception[0]
-            
-            return result[0]
+            original_handler = signal.signal(signal.SIGALRM, handler)
+            signal.alarm(seconds)
+            try:
+                result = func(*args, **kwargs)
+            finally:
+                signal.alarm(0) # Reset alarm
+                signal.signal(signal.SIGALRM, original_handler) # Restore original handler
+            return result
         return wrapper
     return decorator
 
@@ -271,7 +306,7 @@ def detect_crows_parallel(
                                         'model': 'yolo',
                                         'view': 'multi'  # Mark as multi-view
                                     })
-                        except TimeoutError:
+                        except TimeoutException: # Updated to TimeoutException
                             logger.error("YOLO model inference timed out for multi-view")
                             continue  # Continue with next view instead of breaking
                 else:
@@ -290,7 +325,7 @@ def detect_crows_parallel(
                                     'model': 'yolo',
                                     'view': 'single'
                                 })
-                    except TimeoutError:
+                    except TimeoutException: # Updated to TimeoutException
                         logger.error("YOLO model inference timed out")
                         yolo_results = None
                 print(f"[DEBUG] Frame {idx}: After YOLO detection")
@@ -317,7 +352,7 @@ def detect_crows_parallel(
                                         'model': 'rcnn',
                                         'view': 'multi'  # Mark as multi-view
                                     })
-                        except TimeoutError:
+                        except TimeoutException: # Updated to TimeoutException
                             logger.error("RCNN model inference timed out for multi-view")
                             continue  # Continue with next view instead of breaking
                 else:
@@ -340,7 +375,7 @@ def detect_crows_parallel(
                                     'model': 'rcnn',
                                     'view': 'single'  # Mark as single-view
                                 })
-                    except TimeoutError:
+                    except TimeoutException: # Updated to TimeoutException
                         logger.error("RCNN model inference timed out")
                         rcnn_results = None
                 print(f"[DEBUG] Frame {idx}: After RCNN detection")

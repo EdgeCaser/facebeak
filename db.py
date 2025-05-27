@@ -12,13 +12,37 @@ import torch
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Load configuration at the start of the script
+CONFIG = {}
+try:
+    with open("config.json", "r") as f:
+        CONFIG = json.load(f)
+except FileNotFoundError:
+    logger.warning("config.json not found in db.py. Using default DB path logic.")
+except json.JSONDecodeError:
+    logger.warning("Error decoding config.json in db.py. Using default DB path logic.")
+import json # Ensure json is imported, though it should be if CONFIG is used
+
 def get_db_path():
-    """Get the database path from environment variable or use default."""
-    db_path = os.environ.get('CROW_DB_PATH')
-    if db_path:
-        return Path(db_path)
-    # Use default path in user's home directory
-    return Path.home() / '.facebeak' / 'crow_embeddings.db'
+    """Get the database path from environment variable, config file, or use default."""
+    # 1. Check environment variable
+    env_db_path = os.environ.get('CROW_DB_PATH')
+    if env_db_path:
+        logger.info(f"Using database path from CROW_DB_PATH environment variable: {env_db_path}")
+        return Path(env_db_path)
+
+    # 2. Check config.json
+    config_db_path = CONFIG.get('db_path')
+    if config_db_path and isinstance(config_db_path, str) and config_db_path.strip():
+        logger.info(f"Using database path from config.json: {config_db_path}")
+        return Path(config_db_path)
+    elif config_db_path: # Log if it's present but empty or invalid
+        logger.warning(f"db_path in config.json is present but empty or invalid: '{config_db_path}'. Proceeding to default.")
+
+    # 3. Use default path in user's home directory
+    default_path = Path.home() / '.facebeak' / 'crow_embeddings.db'
+    logger.info(f"Using default database path: {default_path}")
+    return default_path
 
 # Ensure database directory exists
 def ensure_db_dir():
@@ -156,11 +180,12 @@ def save_crow_embedding(embedding, video_path=None, frame_number=None, confidenc
         
         # Save the embedding
         embedding_blob = embedding.tobytes()
+        db_video_path = Path(video_path).as_posix() if video_path else None
         c.execute('''
             INSERT INTO crow_embeddings 
             (crow_id, embedding, video_path, frame_number, confidence)
             VALUES (?, ?, ?, ?, ?)
-        ''', (crow_id, embedding_blob, video_path, frame_number, confidence))
+        ''', (crow_id, embedding_blob, db_video_path, frame_number, confidence))
         
         # Commit transaction
         conn.commit()
@@ -195,8 +220,11 @@ def find_matching_crow(embedding, threshold=0.6, video_path=None, frame_number=N
         embedding = np.asarray(embedding, dtype=np.float32).reshape(-1)
         embedding = embedding / np.linalg.norm(embedding)
         
+        # Normalize video_path to POSIX for DB comparison if provided
+        db_video_path_to_check = Path(video_path).as_posix() if video_path else None
+
         # Get recent embeddings from the same video first
-        if video_path and frame_number is not None:
+        if db_video_path_to_check and frame_number is not None:
             # Look for crows seen in recent frames (within last 30 frames)
             cursor.execute('''
                 WITH recent_embeddings AS (
@@ -212,7 +240,7 @@ def find_matching_crow(embedding, threshold=0.6, video_path=None, frame_number=N
                 SELECT crow_id, embedding, frame_number, confidence
                 FROM recent_embeddings
                 WHERE rn = 1
-            ''', (video_path, frame_number, frame_number))
+            ''', (db_video_path_to_check, frame_number, frame_number))
             recent_rows = cursor.fetchall()
             
             # Check recent embeddings first with a stricter threshold
@@ -615,8 +643,9 @@ def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_
         cursor = conn.cursor()
         
         # Validate inputs
-        if not os.path.exists(image_path):
-            logger.warning(f"Image path does not exist: {image_path}")
+        image_path_obj = Path(image_path) # Create Path object
+        if not image_path_obj.exists():
+            logger.warning(f"Image path does not exist: {str(image_path_obj)}")
             return False
             
         if not label or label not in ['crow', 'not_a_crow', 'not_sure', 'multi_crow']:
@@ -638,11 +667,11 @@ def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_
             INSERT OR REPLACE INTO image_labels 
             (image_path, label, confidence, reviewer_notes, is_training_data, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        ''', (image_path, label, confidence, reviewer_notes, is_training_data))
+        ''', (image_path_obj.as_posix(), label, confidence, reviewer_notes, is_training_data))
         
         label_id = cursor.lastrowid
         conn.commit()
-        logger.info(f"Added/updated label for {image_path}: {label}")
+        logger.info(f"Added/updated label for {image_path_obj.as_posix()}: {label}")
         return label_id
         
     except Exception as e:
@@ -674,27 +703,29 @@ def get_unlabeled_images(limit=20, from_directory=None):
             return []
         
         # Get all image files from the directory
-        image_files = []
-        for root, dirs, files in os.walk(search_dir):
+        search_dir_path = Path(search_dir)
+        image_files_posix = []
+        for root, dirs, files in os.walk(search_dir_path):
             for file in files:
                 if file.lower().endswith(('.jpg', '.jpeg', '.png')):
-                    # Normalize path separators for consistent matching
-                    full_path = os.path.join(root, file).replace('\\', '/')
-                    image_files.append(full_path)
+                    full_path_obj = Path(root) / file
+                    image_files_posix.append(full_path_obj.as_posix()) # Store as POSIX
         
-        # Get already labeled images from database (only for images in our directory)
+        # Get already labeled images from database (all stored as POSIX)
         conn = get_connection()
         cursor = conn.cursor()
         
-        if image_files:
-            placeholders = ','.join('?' * len(image_files))
-            cursor.execute(f"SELECT image_path FROM image_labels WHERE image_path IN ({placeholders})", image_files)
-            labeled_paths = {row[0] for row in cursor.fetchall()}
+        if image_files_posix:
+            placeholders = ','.join('?' * len(image_files_posix))
+            # Query using POSIX paths
+            cursor.execute(f"SELECT image_path FROM image_labels WHERE image_path IN ({placeholders})", image_files_posix)
+            labeled_paths_posix = {row[0] for row in cursor.fetchall()} # These are already POSIX
         else:
-            labeled_paths = set()
+            labeled_paths_posix = set()
         
         # Filter out labeled images
-        unlabeled = [path for path in image_files if path not in labeled_paths]
+        # unlabeled will contain POSIX paths, which is fine for returning
+        unlabeled = [path_str for path_str in image_files_posix if path_str not in labeled_paths_posix]
         
         # Shuffle and limit results
         import random
@@ -716,7 +747,7 @@ def get_image_label(image_path):
             SELECT label, confidence, reviewer_notes, timestamp, is_training_data, created_at, updated_at
             FROM image_labels 
             WHERE image_path = ?
-        ''', (image_path,))
+        ''', (Path(image_path).as_posix(),)) # Query with POSIX path
         
         row = cursor.fetchone()
         if row:
@@ -757,24 +788,25 @@ def get_training_data_stats(from_directory=None):
         search_dir = from_directory if from_directory else "crow_crops"
         
         # Get all image files from the directory
-        all_images = set()
-        if os.path.exists(search_dir):
-            for root, dirs, files in os.walk(search_dir):
+        search_dir_path = Path(search_dir)
+        all_images_posix = set()
+        if search_dir_path.exists():
+            for root, dirs, files in os.walk(search_dir_path):
                 for file in files:
                     if file.lower().endswith(('.jpg', '.jpeg', '.png')):
-                        all_images.add(os.path.join(root, file))
+                        all_images_posix.add((Path(root) / file).as_posix()) # Store as POSIX
         
         conn = get_connection()
         cursor = conn.cursor()
         
-        # Get all labels for images in our search directory
-        if all_images:
-            placeholders = ','.join('?' * len(all_images))
+        # Get all labels for images in our search directory (query with POSIX paths)
+        if all_images_posix:
+            placeholders = ','.join('?' * len(all_images_posix))
             cursor.execute(f"""
                 SELECT label, confidence, is_training_data 
                 FROM image_labels 
                 WHERE image_path IN ({placeholders})
-            """, list(all_images))
+            """, list(all_images_posix))
         else:
             # If no directory or images, return empty stats
             return {
@@ -848,24 +880,26 @@ def get_training_suitable_images(from_directory=None):
             return []
         
         # Get all image files from the directory
-        all_images = []
-        for root, dirs, files in os.walk(search_dir):
-            for file in files:
-                if file.lower().endswith(('.jpg', '.jpeg', '.png')):
-                    all_images.append(os.path.join(root, file))
+        search_dir_path = Path(search_dir)
+        all_images_posix = []
+        if search_dir_path.exists():
+            for root, dirs, files in os.walk(search_dir_path):
+                for file in files:
+                    if file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        all_images_posix.append((Path(root) / file).as_posix()) # Store as POSIX
         
-        # Get excluded images (labeled as not_a_crow or not_sure)
+        # Get excluded images (labeled as not_a_crow or not_sure) - these are stored as POSIX
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
             SELECT image_path FROM image_labels 
-            WHERE label IN ('not_a_crow', 'not_sure')
-        """)
-        excluded_paths = {row[0] for row in cursor.fetchall()}
+            WHERE label IN ('not_a_crow', 'not_sure') OR is_training_data = 0
+        """) # Also check is_training_data flag directly
+        excluded_paths_posix = {row[0] for row in cursor.fetchall()} # These are already POSIX
         
-        # Return images that are not excluded
-        suitable = [path for path in all_images if path not in excluded_paths]
-        return suitable
+        # Return images that are not excluded (paths are POSIX)
+        suitable_posix = [path_str for path_str in all_images_posix if path_str not in excluded_paths_posix]
+        return suitable_posix
         
     except Exception as e:
         logger.error(f"Error getting training suitable images: {e}")
@@ -882,7 +916,7 @@ def is_image_training_suitable(image_path):
             SELECT label, is_training_data 
             FROM image_labels 
             WHERE image_path = ?
-        ''', (image_path,))
+        ''', (Path(image_path).as_posix(),)) # Query with POSIX path
         
         result = cursor.fetchone()
         if result:
@@ -1279,18 +1313,23 @@ def get_embedding_ids_by_image_paths(image_paths):
                         frame_number = int(frame_part)
                         
                         # Find matching embedding
+                        # Assuming video_path in DB is stored as POSIX
+                        # We need to ensure the LIKE query is effective with POSIX paths.
+                        # Constructing a POSIX-like pattern for video_part
+                        video_part_posix_like = Path(video_part).as_posix()
+
                         cursor.execute('''
                             SELECT id FROM crow_embeddings 
                             WHERE video_path LIKE ? AND frame_number = ?
                             ORDER BY timestamp DESC
                             LIMIT 1
-                        ''', (f'%{video_part}%', frame_number))
+                        ''', (f'%{video_part_posix_like}%', frame_number))
                         
                         row = cursor.fetchone()
                         if row:
-                            result[img_path] = row[0]
+                            result[img_path] = row[0] # img_path is the original, potentially OS-specific
                         else:
-                            logger.warning(f"No embedding found for image: {img_path}")
+                            logger.warning(f"No embedding found for image: {img_path}") # Log original path
                             
                     except ValueError:
                         logger.warning(f"Could not parse frame number from: {filename}")

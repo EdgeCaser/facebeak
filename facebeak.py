@@ -8,6 +8,9 @@ import sys
 import pkg_resources
 import subprocess
 from db import clear_database
+import json # Added import
+from pathlib import Path # Added import
+import platform # Added import
 
 def ensure_requirements():
     """Ensure all required packages are installed."""
@@ -17,8 +20,10 @@ def ensure_requirements():
     except ImportError:
         # If not installed, install requirements
         try:
-            requirements_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'requirements.txt')
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-r', requirements_path])
+            # Use pathlib for consistency
+            script_dir = Path(__file__).resolve().parent
+            requirements_path = script_dir / 'requirements.txt'
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-r', str(requirements_path)])
         except subprocess.CalledProcessError as e:
             messagebox.showerror("Error", f"Failed to install required packages: {e}")
             sys.exit(1)
@@ -31,6 +36,34 @@ class FacebeakGUI:
     def __init__(self, root):
         self.root = root
         root.title("facebeak Launcher")
+
+        # Set application icon (cross-platform)
+        try:
+            icon_png_path = Path("facebeak_icon.png")
+            icon_ico_path = Path("Facebeak_icon.ico") # Case-sensitive as per ls() output
+
+            if icon_png_path.exists():
+                png_icon = tk.PhotoImage(file=str(icon_png_path))
+                root.iconphoto(True, png_icon)
+            elif platform.system() == "Windows" and icon_ico_path.exists():
+                root.iconbitmap(str(icon_ico_path))
+            # If neither, Tk default icon will be used.
+        except tk.TclError as e:
+            # Using print as self.output_box is not yet initialized
+            print(f"Info: Could not load application icon due to Tkinter TclError: {e}")
+        except Exception as e:
+            print(f"Info: An unexpected error occurred while setting application icon: {e}")
+
+        # Load configuration
+        self.config = {}
+        try:
+            with open("config.json", "r") as f:
+                self.config = json.load(f)
+        except FileNotFoundError:
+            messagebox.showwarning("Configuration Error", "config.json not found. Using default settings.")
+        except json.JSONDecodeError:
+            messagebox.showwarning("Configuration Error", "Error decoding config.json. Using default settings.")
+
         root.geometry("900x1100")  # Increased window height for more vertical space
 
         # Configure grid weights for resizing
@@ -67,7 +100,7 @@ class FacebeakGUI:
         ttk.Label(control_frame, text="Output Directory:").grid(row=1, column=0, sticky="w", pady=2)
         self.output_dir_entry = ttk.Entry(control_frame, width=50)
         self.output_dir_entry.grid(row=1, column=1, sticky="ew", padx=5)
-        self.output_dir_entry.insert(0, "output")
+        self.output_dir_entry.insert(0, self.config.get("output_dir", "output")) # Use config value
         ttk.Button(control_frame, text="Browse", command=self.browse_output_dir).grid(row=1, column=2, padx=5)
 
         # Detection threshold
@@ -475,9 +508,16 @@ class FacebeakGUI:
         # Get output directory
         output_dir = self.output_dir_entry.get()
         if not output_dir:
-            messagebox.showerror("Error", "Please specify an output directory")
-            return
-        
+            # Try to get from config if GUI is empty
+            output_dir = self.config.get("output_dir")
+            if not output_dir:
+                messagebox.showerror("Error", "Please specify an output directory in the GUI or config.json")
+                return
+            else:
+                # Update GUI if using config's output_dir
+                self.output_dir_entry.delete(0, tk.END)
+                self.output_dir_entry.insert(0, output_dir)
+
         # Disable clustering button while processing
         self.cluster_button.configure(state='disabled')
         
@@ -489,10 +529,12 @@ class FacebeakGUI:
                              min_samples_min: int, min_samples_max: int):
         """Run clustering in a separate thread."""
         try:
-            python_exe = get_venv_python()
-            
+            python_exe = get_venv_python() # This already uses sys.executable
+
             # Create clustering output directory
-            cluster_dir = os.path.join(output_dir, "clustering_results")
+            # Ensure cluster_dir is based on the potentially config-derived output_dir
+            cluster_output_subdir = "clustering_results" # Default, could be made configurable too
+            cluster_dir = os.path.join(output_dir, cluster_output_subdir)
             os.makedirs(cluster_dir, exist_ok=True)
             
             # Get list of processed videos
@@ -521,6 +563,11 @@ class FacebeakGUI:
                        "--min-samples-min", str(min_samples_min),
                        "--min-samples-max", str(min_samples_max)]
                 
+                # model_dir could be passed if crow_clustering.py is adapted to take it
+                # For now, crow_clustering.py is expected to load config.json itself
+                # if self.config.get("model_dir"):
+                #    cmd.extend(["--model-dir", self.config.get("model_dir")])
+
                 self.output_box.insert(tk.END, f"Running: {' '.join(cmd)}\n")
                 self.output_box.see(tk.END)
                 
@@ -552,17 +599,20 @@ class FacebeakGUI:
     def launch_image_reviewer(self):
         """Launch the image reviewer tool."""
         try:
-            python_path = get_venv_python()
-            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'image_reviewer.py')
+            python_path = get_venv_python() # This already uses sys.executable
+            script_dir = Path(__file__).resolve().parent
+            script_path = script_dir / 'image_reviewer.py'
             
             # Check if the script exists
-            if not os.path.exists(script_path):
-                messagebox.showerror("Error", f"Image reviewer script not found: {script_path}")
+            if not script_path.exists():
+                messagebox.showerror("Error", f"Image reviewer script not found: {str(script_path)}")
                 return
             
             # Launch in separate process
-            subprocess.Popen([python_path, script_path], 
-                           creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
+            creation_flags = 0
+            if platform.system() == "Windows":
+                creation_flags = subprocess.CREATE_NEW_CONSOLE
+            subprocess.Popen([python_path, str(script_path)], creationflags=creation_flags)
             
             self._update_output("Launched Image Reviewer tool\n")
             
@@ -574,17 +624,20 @@ class FacebeakGUI:
     def launch_suspect_lineup(self):
         """Launch the suspect lineup tool."""
         try:
-            python_path = get_venv_python()
-            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'suspect_lineup.py')
+            python_path = get_venv_python() # This already uses sys.executable
+            script_dir = Path(__file__).resolve().parent
+            script_path = script_dir / 'suspect_lineup.py'
             
             # Check if the script exists
-            if not os.path.exists(script_path):
-                messagebox.showerror("Error", f"Suspect lineup script not found: {script_path}")
+            if not script_path.exists():
+                messagebox.showerror("Error", f"Suspect lineup script not found: {str(script_path)}")
                 return
             
             # Launch in separate process
-            subprocess.Popen([python_path, script_path], 
-                           creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
+            creation_flags = 0
+            if platform.system() == "Windows":
+                creation_flags = subprocess.CREATE_NEW_CONSOLE
+            subprocess.Popen([python_path, str(script_path)], creationflags=creation_flags)
             
             self._update_output("Launched Suspect Lineup tool\n")
             
