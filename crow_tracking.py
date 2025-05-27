@@ -84,6 +84,10 @@ class CrowTracker:
                     # Ensure last_id exists
                     if "last_id" not in data:
                         data["last_id"] = 0
+                    # Ensure last_crop_id exists for backward compatibility
+                    if "last_crop_id" not in data:
+                        data["last_crop_id"] = 0
+                        logger.info("Added last_crop_id for backward compatibility")
                     logger.info(f"Loaded tracking data from {self.tracking_file}")
                     return data
             else:
@@ -91,6 +95,7 @@ class CrowTracker:
                 data = {
                     "crows": {},
                     "last_id": 0,
+                    "last_crop_id": 0,  # Global crop counter for uniqueness
                     "created_at": datetime.now().isoformat(),
                     "updated_at": datetime.now().isoformat()
                 }
@@ -105,6 +110,7 @@ class CrowTracker:
             data = {
                 "crows": {},
                 "last_id": 0,
+                "last_crop_id": 0,  # Global crop counter for uniqueness
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat()
             }
@@ -265,7 +271,9 @@ class CrowTracker:
                 "frame": frame_num,
                 "bbox": box.tolist(),
                 "score": float(score),
-                "timestamp": frame_time.isoformat() if frame_time else None
+                "timestamp": frame_time.isoformat() if frame_time else None,
+                "video_path": str(video_path) if video_path else None,
+                "crop_filename": None  # Will be set when crop is saved
             }
             
             # Get FPS for audio extraction
@@ -299,8 +307,10 @@ class CrowTracker:
                 }
                 
                 # Save crop and get embedding
-                crop_path = self.save_crop(crop, crow_id, frame_num)
+                crop_path = self.save_crop(crop, crow_id, frame_num, video_path)
                 if crop_path:
+                    # Record crop filename in detection record
+                    detection_record["crop_filename"] = crop_path.name
                     # Get and save embedding
                     with torch.no_grad():
                         # Handle both numpy array and tensor formats
@@ -345,8 +355,10 @@ class CrowTracker:
                 
                 # Save crop periodically (every 10 detections)
                 if crow_data["total_detections"] % 10 == 0:
-                    crop_path = self.save_crop(crop, crow_id, frame_num)
+                    crop_path = self.save_crop(crop, crow_id, frame_num, video_path)
                     if crop_path:
+                        # Record crop filename in detection record
+                        detection_record["crop_filename"] = crop_path.name
                         # Update embedding
                         with torch.no_grad():
                             # Handle both numpy array and tensor formats
@@ -423,16 +435,41 @@ class CrowTracker:
         except Exception as e:
             logger.error(f"Error cleaning up processing directory: {e}")
     
-    def save_crop(self, crop, crow_id, frame_num):
+    def save_crop(self, crop, crow_id, frame_num, video_path=None):
         """Save a crop image to disk and return the path."""
         try:
             # Create crow directory if it doesn't exist
             crow_dir = self.crows_dir / crow_id
             crow_dir.mkdir(parents=True, exist_ok=True)
             
-            # Generate filename with frame number
-            filename = f"frame_{frame_num:06d}.jpg"
+            # Generate unique filename with timestamp, video info, and global counter to prevent conflicts
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Include milliseconds
+            
+            # Increment global crop counter for absolute uniqueness
+            if "last_crop_id" not in self.tracking_data:
+                self.tracking_data["last_crop_id"] = 0
+            self.tracking_data["last_crop_id"] += 1
+            crop_id = self.tracking_data["last_crop_id"]
+            
+            # Extract video name if provided
+            video_name = "unknown"
+            if video_path:
+                video_name = Path(video_path).stem  # Get filename without extension
+                # Sanitize video name for filesystem
+                video_name = "".join(c for c in video_name if c.isalnum() or c in ('-', '_'))[:20]
+            
+            # Create unique filename: cropID_timestamp_videoname_frame_XXXXXX.jpg
+            filename = f"crop_{crop_id:08d}_{timestamp}_{video_name}_frame_{frame_num:06d}.jpg"
             crop_path = crow_dir / filename
+            
+            # Check if file already exists and add counter if needed
+            counter = 1
+            original_crop_path = crop_path
+            while crop_path.exists():
+                stem = original_crop_path.stem
+                suffix = original_crop_path.suffix
+                crop_path = original_crop_path.parent / f"{stem}_{counter:03d}{suffix}"
+                counter += 1
             
             # Handle both numpy array and tensor formats
             if isinstance(crop, dict):
