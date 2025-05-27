@@ -14,6 +14,15 @@ os.environ['KIVY_NO_CONSOLELOG'] = '1'
 os.environ['KIVY_HEADLESS'] = '1'
 # Prevent any window creation
 os.environ['SDL_VIDEODRIVER'] = 'dummy'
+# Additional environment variables to prevent window creation
+os.environ['DISPLAY'] = ':99'  # Non-existent display
+os.environ['KIVY_METRICS_DENSITY'] = '1'
+os.environ['KIVY_METRICS_FONTSCALE'] = '1'
+
+# Patch sys.modules before any Kivy imports to prevent window creation
+import unittest.mock
+sys.modules['kivy.core.window.window_sdl2'] = unittest.mock.MagicMock()
+sys.modules['kivy.core.window._window_sdl2'] = unittest.mock.MagicMock()
 
 # Add parent dir for local imports
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -23,6 +32,18 @@ from kivy_train_triplet_gui import TrainingApp as KivyTrainingApp, TrainingLayou
 from kivy_extract_training_gui import CrowExtractorApp as KivyCrowExtractorApp, ExtractorLayout
 
 from facebeak import FacebeakGUI, ensure_requirements # Keep for test_ensure_requirements
+
+# Patch App.run globally to prevent any app from actually running
+import kivy.app
+original_app_run = kivy.app.App.run
+kivy.app.App.run = lambda self: None  # Prevent any app from actually running
+
+# Patch Window creation at the core level
+try:
+    import kivy.core.window
+    kivy.core.window.Window = unittest.mock.MagicMock()
+except ImportError:
+    pass
 
 # --- Kivy Mocking Setup ---
 class MinimalKivyAppMock(object):
