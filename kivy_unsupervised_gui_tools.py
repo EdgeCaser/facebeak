@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 import json
 import threading
+from typing import Tuple, Dict
 import numpy as np # For ClusteringBasedLabelSmoother
 import cv2 # For image loading if not directly handled by Kivy Image for all cases
 from PIL import Image as PILImage # For image manipulation if needed

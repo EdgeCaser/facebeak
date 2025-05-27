@@ -13,6 +13,7 @@ from kivy.uix.image import Image as KivyImage
 from kivy.uix.spinner import Spinner
 from kivy.uix.popup import Popup
 from kivy.uix.listview import ListView, ListItemButton
+from kivy.uix.togglebutton import ToggleButton
 from kivy.adapters.listadapter import ListAdapter
 from kivy.properties import StringProperty, ObjectProperty, ListProperty, BooleanProperty, NumericProperty
 from kivy.core.window import Window

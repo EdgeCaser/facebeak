@@ -29,6 +29,9 @@ soundfile>=0.12.1  # For audio file I/O
 tensorboard>=2.14.0  # For training visualization
 Kivy>=2.1.0
 kivy-garden.matplotlib
+kivy-deps.angle>=0.4.0  # Windows-specific Kivy dependency
+kivy-deps.sdl2>=0.8.0   # Windows-specific Kivy dependency
+kivy-deps.glew>=0.3.1   # Windows-specific Kivy dependency
 
 # Detection and tracking
 ultralytics>=8.0.0  # For YOLOv8 detection

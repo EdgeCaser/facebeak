@@ -111,7 +111,7 @@ def main():
             logger.info(f"Increased batch size to {args.batch_size} due to high GPU memory ({gpu_memory:.1f} GB)")
     
     # Initialize crow tracker
-    tracker = CrowTracker(args.output_dir)
+    tracker = CrowTracker(base_dir=args.output_dir)
     
     # Create processing run directory
     run_dir = tracker.create_processing_run()

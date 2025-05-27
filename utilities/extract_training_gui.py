@@ -382,7 +382,7 @@ class CrowExtractorGUI:
         if directory:
             self.output_dir_var.set(directory)
             # Reinitialize tracker with new output directory
-            self.tracker = CrowTracker(directory)
+            self.tracker = CrowTracker(base_dir=directory)
             logger.info(f"Set output directory to: {directory}")
 
     def _start_processing(self):
@@ -406,7 +406,7 @@ class CrowExtractorGUI:
         correct_orientation = self.orientation_correction_var.get()
         
         self.tracker = CrowTracker(
-            output_dir, 
+            base_dir=output_dir, 
             enable_audio_extraction=enable_audio,
             audio_duration=audio_duration,
             correct_orientation=correct_orientation
@@ -693,7 +693,7 @@ class CrowExtractorGUI:
                 correct_orientation = self.orientation_correction_var.get()
                 
                 self.tracker = CrowTracker(
-                    self.output_dir_var.get(), 
+                    base_dir=self.output_dir_var.get(), 
                     enable_audio_extraction=enable_audio,
                     audio_duration=audio_duration,
                     correct_orientation=correct_orientation

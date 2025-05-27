@@ -114,7 +114,7 @@ def main():
     args = parser.parse_args()
     
     # Initialize crow tracker
-    tracker = CrowTracker(args.output_dir)
+    tracker = CrowTracker(base_dir=args.output_dir)
     
     # Create processing run directory
     run_dir = tracker.create_processing_run()

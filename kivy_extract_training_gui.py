@@ -88,12 +88,12 @@ class ExtractorLayout(BoxLayout):
         self.controls_panel = GridLayout(cols=1, spacing="8dp", size_hint_y=None)
         self.controls_panel.bind(minimum_height=self.controls_panel.setter('height'))
 
-        dir_section = self._create_section_layout("Directories")
+        dir_section_box, dir_section = self._create_section_layout("Directories")
         self.video_dir_text = self._add_path_selector(dir_section, "Video Directory:", "", "_select_video_dir_action")
         self.output_dir_text = self._add_path_selector(dir_section, "Output Directory:", "crow_crops", "_select_output_dir_action")
-        self.controls_panel.add_widget(dir_section)
+        self.controls_panel.add_widget(dir_section_box)
 
-        det_section = self._create_section_layout("Detection Settings")
+        det_section_box, det_section = self._create_section_layout("Detection Settings")
         self.min_confidence_slider, self.min_confidence_label = self._add_slider_setting(det_section, "Min Confidence:", 0.1, 0.9, 0.2, 0.01)
         self.min_detections_text = self._add_text_input_setting(det_section, "Min Detections (per track):", "2")
         self.mv_yolo_check = self._add_checkbox_setting(det_section, "Multi-View YOLO", False)
@@ -101,12 +101,12 @@ class ExtractorLayout(BoxLayout):
         self.orientation_check = self._add_checkbox_setting(det_section, "Auto-correct Orientation", True)
         self.nms_slider, self.nms_label = self._add_slider_setting(det_section, "Box Merge Threshold:", 0.1, 0.7, 0.3, 0.01)
         det_section.add_widget(Label(text="(Lower = merge more boxes)", font_size='10sp', size_hint_y=None, height='15dp'))
-        self.controls_panel.add_widget(det_section)
+        self.controls_panel.add_widget(det_section_box)
 
-        audio_section = self._create_section_layout("Audio Settings")
+        audio_section_box, audio_section = self._create_section_layout("Audio Settings")
         self.enable_audio_check = self._add_checkbox_setting(audio_section, "Extract Audio Segments", True)
         self.audio_duration_slider, self.audio_duration_label = self._add_slider_setting(audio_section, "Audio Duration (s):", 0.5, 5.0, 2.0, 0.1)
-        self.controls_panel.add_widget(audio_section)
+        self.controls_panel.add_widget(audio_section_box)
 
         buttons_layout = BoxLayout(orientation='horizontal', spacing="5dp", size_hint_y=None, height="44dp")
         self.start_button = Button(text="Start Processing", on_press=self.app._start_processing_action)
@@ -131,14 +131,14 @@ class ExtractorLayout(BoxLayout):
         controls_buttons_main_box.add_widget(progress_buttons_layout)
         self.controls_panel.add_widget(controls_buttons_main_box)
 
-        prog_section = self._create_section_layout("Progress")
+        prog_section_box, prog_section = self._create_section_layout("Progress")
         self.progress_bar = ProgressBar(max=100, value=0, size_hint_y=None, height="20dp")
         prog_section.add_widget(self.progress_bar)
         self.progress_label = Label(text="Ready", size_hint_y=None, height="25dp")
         prog_section.add_widget(self.progress_label)
-        self.controls_panel.add_widget(prog_section)
+        self.controls_panel.add_widget(prog_section_box)
 
-        stats_section = self._create_section_layout("Statistics")
+        stats_section_box, stats_section = self._create_section_layout("Statistics")
         self.stats_grid = GridLayout(cols=2, spacing="3dp", size_hint_y=None)
         self.stats_grid.bind(minimum_height=self.stats_grid.setter('height'))
         self.stats_labels_ui = {} 
@@ -156,7 +156,7 @@ class ExtractorLayout(BoxLayout):
             self.stats_grid.add_widget(lbl_value)
             self.stats_labels_ui[key] = lbl_value 
         stats_section.add_widget(self.stats_grid)
-        self.controls_panel.add_widget(stats_section)
+        self.controls_panel.add_widget(stats_section_box)
 
         left_scroll.add_widget(self.controls_panel)
         top_section.add_widget(left_scroll)
@@ -178,7 +178,7 @@ class ExtractorLayout(BoxLayout):
         content_grid = GridLayout(cols=1, spacing="5dp", size_hint_y=None)
         content_grid.bind(minimum_height=content_grid.setter('height'))
         section_box.add_widget(content_grid)
-        return content_grid
+        return section_box, content_grid
 
     def _add_path_selector(self, parent_grid, label_text, default_path, browse_action_name):
         row = BoxLayout(orientation='horizontal', spacing="5dp", size_hint_y=None, height="35dp")
@@ -261,7 +261,7 @@ class CrowExtractorApp(App):
         correct_orientation_flag = self.layout.orientation_check.active
         try:
             self.tracker = CrowTracker(
-                output_dir=self.output_dir,
+                base_dir=self.output_dir,
                 enable_audio_extraction=enable_audio,
                 audio_duration=audio_duration,
                 correct_orientation=correct_orientation_flag
@@ -1019,5 +1019,4 @@ if __name__ == '__main__':
     import kivy 
     # kivy.require('2.1.0') 
     CrowExtractorApp().run()
-# print("CrowExtractorApp finished.") 
->>>>>>> REPLACE
+# print("CrowExtractorApp finished.")
