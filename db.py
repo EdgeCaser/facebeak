@@ -668,8 +668,9 @@ def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_
         # Implement "innocent until proven guilty" philosophy
         # If is_training_data is not explicitly set, determine based on label
         if is_training_data is None:
-            # Exclude not_a_crow, multi_crow, and not_sure from training data by default
-            is_training_data = (label not in ['not_a_crow', 'multi_crow', 'not_sure'])
+            # Exclude not_a_crow and multi_crow from training data by default
+            # Follow "innocent until proven guilty" - only exclude definitive false positives
+            is_training_data = (label not in ['not_a_crow', 'multi_crow'])
             
         # Insert or update label
         cursor.execute('''
@@ -902,7 +903,7 @@ def get_training_suitable_images(from_directory=None):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT image_path FROM image_labels 
-            WHERE label IN ('not_a_crow', 'not_sure') OR is_training_data = 0
+            WHERE label IN ('not_a_crow', 'multi_crow') OR is_training_data = 0
         """) # Also check is_training_data flag directly
         excluded_paths_posix = {row[0] for row in cursor.fetchall()} # These are already POSIX
         

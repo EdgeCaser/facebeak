@@ -381,7 +381,7 @@ class TestDatabaseOperations(unittest.TestCase):
             self.assertEqual(stats['not_a_crow']['count'], 2)
             self.assertEqual(stats['not_sure']['count'], 1)
             self.assertEqual(stats['total_labeled'], 6)
-            self.assertEqual(stats['total_excluded'], 2)  # Only not_a_crow are excluded
+            self.assertEqual(stats['total_excluded'], 2)  # only not_a_crow are excluded (not_sure included per "innocent until proven guilty")
             
             # Verify average confidences
             self.assertAlmostEqual(stats['crow']['avg_confidence'], (0.95 + 0.90 + 0.92) / 3, places=2)
@@ -420,7 +420,7 @@ class TestDatabaseOperations(unittest.TestCase):
             add_image_label(test_paths[0], "crow", confidence=0.95)  # Should be included
             add_image_label(test_paths[1], "crow", confidence=0.90)  # Should be included
             add_image_label(test_paths[2], "not_a_crow", confidence=0.85)  # Should be excluded
-            add_image_label(test_paths[3], "not_sure", confidence=0.60)  # Should be excluded (labeled as not_sure)
+            add_image_label(test_paths[3], "not_sure", confidence=0.60)  # Should be included (innocent until proven guilty)
             # test_paths[4] remains unlabeled - should be included (innocent until proven guilty)
             
             # Get training suitable images from our test directory
@@ -432,7 +432,7 @@ class TestDatabaseOperations(unittest.TestCase):
             self.assertIn("good_crow_2.jpg", suitable_basenames)
             self.assertIn("unlabeled.jpg", suitable_basenames)  # Unlabeled should be included (innocent until proven guilty)
             self.assertNotIn("false_positive.jpg", suitable_basenames)  # Labeled as not_a_crow
-            self.assertNotIn("uncertain.jpg", suitable_basenames)  # Labeled as not_sure
+            self.assertIn("uncertain.jpg", suitable_basenames)  # Labeled as not_sure but included per "innocent until proven guilty"
             
         finally:
             # Clean up test files
@@ -575,13 +575,13 @@ class TestDatabaseSecurity(unittest.TestCase):
     def test_get_encryption_key(self):
         """Test encryption key generation and retrieval."""
         # Test that we can get an encryption key
-        key = get_encryption_key()
+        key = get_encryption_key(test_mode=True)
         self.assertIsNotNone(key)
         self.assertIsInstance(key, bytes)
-        self.assertEqual(len(key), 32)  # 256-bit key
+        self.assertEqual(len(key), 44)  # Base64-encoded 32-byte key (44 chars)
         
         # Test that the same key is returned on subsequent calls
-        key2 = get_encryption_key()
+        key2 = get_encryption_key(test_mode=True)
         self.assertEqual(key, key2)
         
         # Test key persistence (if implemented)

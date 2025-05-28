@@ -24,8 +24,10 @@ from kivy.uix.recycleview.views import RecycleDataViewBehavior
 from kivy.properties import StringProperty, ObjectProperty, ListProperty, BooleanProperty, NumericProperty
 from kivy.core.window import Window
 from kivy.clock import Clock
-from kivy.uix.listview import ListItemButton # For simple lists if RecycleView is too complex initially
-from kivy.adapters.listadapter import ListAdapter # For ListView
+from kivy.uix.spinner import Spinner
+from kivy.uix.progressbar import ProgressBar
+from kivy.uix.checkbox import CheckBox
+from kivy.uix.togglebutton import ToggleButton
 
 # Assuming db.py and other necessary modules are in the same directory or accessible
 from db import get_all_crows, get_crow_embeddings, update_crow_name, reassign_crow_embeddings, get_connection

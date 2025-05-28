@@ -18,6 +18,9 @@ os.environ['SDL_VIDEODRIVER'] = 'dummy'
 os.environ['DISPLAY'] = ':99'  # Non-existent display
 os.environ['KIVY_METRICS_DENSITY'] = '1'
 os.environ['KIVY_METRICS_FONTSCALE'] = '1'
+# Force Kivy to not create any windows
+os.environ['KIVY_NO_ARGS'] = '1'
+os.environ['KIVY_NO_FILELOG'] = '1'
 
 # Patch sys.modules before any Kivy imports to prevent window creation
 import unittest.mock
@@ -33,10 +36,15 @@ from kivy_extract_training_gui import CrowExtractorApp as KivyCrowExtractorApp, 
 
 from facebeak import FacebeakGUI, ensure_requirements # Keep for test_ensure_requirements
 
+# Import TextInput for the test specs
+from kivy.uix.textinput import TextInput
+
 # Patch App.run globally to prevent any app from actually running
 import kivy.app
-original_app_run = kivy.app.App.run
-kivy.app.App.run = lambda self: None  # Prevent any app from actually running
+# Check if App.run exists before trying to patch it
+if hasattr(kivy.app.App, 'run'):
+    original_app_run = kivy.app.App.run
+    kivy.app.App.run = lambda self: None  # Prevent any app from actually running
 
 # Patch Window creation at the core level
 try:

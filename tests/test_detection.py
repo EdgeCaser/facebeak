@@ -342,6 +342,8 @@ def test_model_initialization():
 
 def test_timeout_decorator():
     """Test the timeout decorator directly."""
+    import platform
+    
     @detection.timeout(1)
     def slow_function():
         time.sleep(2)
@@ -352,9 +354,14 @@ def test_timeout_decorator():
         time.sleep(1)
         return "success"
     
-    # Test timeout
-    with pytest.raises(detection.TimeoutException):
-        slow_function()
+    # Test timeout (only on non-Windows platforms)
+    if platform.system() != "Windows":
+        with pytest.raises(detection.TimeoutException):
+            slow_function()
+    else:
+        # On Windows, timeout is disabled, so function should complete
+        result = slow_function()
+        assert result == "success"
     
     # Test successful execution
     assert fast_function() == "success"

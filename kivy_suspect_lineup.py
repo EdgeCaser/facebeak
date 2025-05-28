@@ -1,5 +1,6 @@
 import os
 import logging
+import threading
 from pathlib import Path
 
 from kivy.app import App
@@ -12,9 +13,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.image import Image as KivyImage
 from kivy.uix.spinner import Spinner
 from kivy.uix.popup import Popup
-from kivy.uix.listview import ListView, ListItemButton
 from kivy.uix.togglebutton import ToggleButton
-from kivy.adapters.listadapter import ListAdapter
 from kivy.properties import StringProperty, ObjectProperty, ListProperty, BooleanProperty, NumericProperty
 from kivy.core.window import Window
 from kivy.clock import Clock
@@ -210,7 +209,7 @@ class SuspectLineupApp(App):
                 display_text = f"{os.path.basename(video_path)} ({sighting_count} sightings)"
                 
                 # Using ToggleButton for selection behavior in a list
-                video_button = ListItemButton(text=display_text, size_hint_y=None, height="30dp")
+                video_button = ToggleButton(text=display_text, size_hint_y=None, height="30dp")
                 video_button.video_path = video_path # Store path for later retrieval
                 video_button.bind(on_press=self.on_video_button_selected)
                 self.layout.video_list_layout.add_widget(video_button)
@@ -513,7 +512,7 @@ class SuspectLineupApp(App):
         content = BoxLayout(orientation='vertical', padding="10dp", spacing="10dp")
         content.add_widget(Label(text="Select the target crow to move images to:", size_hint_y=None, height="30dp"))
 
-        # Prepare crow data for ListView
+        # Prepare crow data for selection
         try:
             all_crows_db = get_all_crows()
             # Exclude the current crow from the list of targets
@@ -531,14 +530,35 @@ class SuspectLineupApp(App):
             Clock.schedule_once(lambda dt: callback(None)) # Ensure callback is called
             return
 
-        list_adapter = ListAdapter(data=target_crows_data,
-                                   cls=ListItemButton,
-                                   selection_mode='single',
-                                   allow_empty_selection=False,
-                                   args_converter=lambda row_index, rec: {'text': rec['text'], 'size_hint_y': None, 'height': '30dp'})
+        # Create scrollable list of crows using ScrollView + GridLayout
+        scroll_view = ScrollView(size_hint_y=1)
+        crow_list_layout = GridLayout(cols=1, spacing="2dp", size_hint_y=None)
+        crow_list_layout.bind(minimum_height=crow_list_layout.setter('height'))
         
-        crow_list_view = ListView(adapter=list_adapter, size_hint_y=1)
-        content.add_widget(crow_list_view)
+        selected_crow_id = [None]  # Use list to allow modification in nested function
+        
+        def on_crow_selected(instance):
+            # Deselect all other buttons
+            for child in crow_list_layout.children:
+                if hasattr(child, 'state'):
+                    child.state = 'normal'
+            # Select this button
+            instance.state = 'down'
+            selected_crow_id[0] = instance.crow_id
+        
+        for crow_data in target_crows_data:
+            crow_button = ToggleButton(
+                text=crow_data['text'], 
+                size_hint_y=None, 
+                height="30dp",
+                group="target_crow_selection"
+            )
+            crow_button.crow_id = crow_data['id']
+            crow_button.bind(on_press=on_crow_selected)
+            crow_list_layout.add_widget(crow_button)
+        
+        scroll_view.add_widget(crow_list_layout)
+        content.add_widget(scroll_view)
 
         buttons = BoxLayout(size_hint_y=None, height="44dp", spacing="10dp")
         select_btn = Button(text="Select Target Crow")
@@ -550,9 +570,7 @@ class SuspectLineupApp(App):
         popup = Popup(title="Select Target Crow", content=content, size_hint=(0.7, 0.8), auto_dismiss=False)
 
         def set_target(btn_instance):
-            if crow_list_view.adapter.selection:
-                selected_item_index = crow_list_view.adapter.selection[0].index # Index in the data
-                self._target_crow_id_result = target_crows_data[selected_item_index]['id']
+            self._target_crow_id_result = selected_crow_id[0]
             popup.dismiss()
         
         def cancel_selection(btn_instance):

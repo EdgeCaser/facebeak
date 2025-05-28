@@ -110,10 +110,13 @@ def test_process_detection_new_crow(crow_tracker, mock_frame, mock_detection):
     assert np.array_equal(detection["bbox"], mock_detection["bbox"].tolist())
     assert detection["score"] == mock_detection["score"]
     
-    # Verify crop was saved
-    crow_dir = crow_tracker.crows_dir / crow_id
-    assert crow_dir.exists()
-    assert len(list(crow_dir.glob("*.jpg"))) == 1
+    # Verify crop was saved (new video/frame-based organization)
+    video_dir = crow_tracker.videos_dir / "test_video"
+    assert video_dir.exists()
+    assert len(list(video_dir.glob("*.jpg"))) == 1
+    
+    # Verify crop metadata was created
+    assert len(crow_tracker.crop_metadata["crops"]) == 1
 
 def test_process_detection_existing_crow(crow_tracker, mock_frame, mock_detection):
     """Test processing a detection for an existing crow."""

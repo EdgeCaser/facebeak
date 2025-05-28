@@ -166,9 +166,12 @@ class ImprovedCrowTripletDataset(Dataset):
         for _, crow_id in self.samples:
             class_counts[crow_id] += 1
         
-        logger.info(f"Class distribution: min={min(class_counts.values())}, "
-                   f"max={max(class_counts.values())}, "
-                   f"mean={np.mean(list(class_counts.values())):.1f}")
+        if class_counts:
+            logger.info(f"Class distribution: min={min(class_counts.values())}, "
+                       f"max={max(class_counts.values())}, "
+                       f"mean={np.mean(list(class_counts.values())):.1f}")
+        else:
+            logger.info("Class distribution: No samples found")
     
     def _balance_classes(self):
         """Balance classes by oversampling."""
@@ -179,6 +182,9 @@ class ImprovedCrowTripletDataset(Dataset):
         
         # Find target count (75th percentile)
         counts = list(crow_counts.values())
+        if not counts:
+            logger.warning("No samples found for balancing. Skipping class balancing.")
+            return
         target_count = int(np.percentile(counts, 75))
         
         # Oversample minority classes
