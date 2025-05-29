@@ -55,7 +55,7 @@ def load_sample_data(crop_dir, max_crows=20, max_samples_per_crow=10):
     import torchvision.transforms as transforms
     
     transform = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((512, 512)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])

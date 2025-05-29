@@ -35,7 +35,7 @@ class SimCLRCrowDataset(Dataset):
         # Strong augmentations for contrastive learning
         self.augment = transforms.Compose([
             transforms.ToPILImage(),
-            transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
+            transforms.RandomResizedCrop(512, scale=(0.8, 1.0)),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomRotation(degrees=15),
             transforms.ColorJitter(
@@ -58,7 +58,7 @@ class SimCLRCrowDataset(Dataset):
         image = cv2.imread(str(img_path))
         if image is None:
             # Return a dummy tensor if image loading fails
-            return torch.zeros(3, 224, 224), torch.zeros(3, 224, 224)
+            return torch.zeros(3, 512, 512), torch.zeros(3, 512, 512)
         
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         

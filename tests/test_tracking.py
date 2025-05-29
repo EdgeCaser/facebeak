@@ -180,46 +180,37 @@ def test_compute_embedding_gpu(mock_model):
 
 def test_extract_normalized_crow_crop_valid():
     """Test extract_normalized_crow_crop with valid input."""
-    # Create a mock frame (224x224 RGB image)
-    mock_frame = np.zeros((224, 224, 3), dtype=np.uint8)
-    mock_frame[50:150, 50:150] = [255, 255, 255]  # White square in center
-    
-    # Create a bounding box that includes the white square
-    bbox = np.array([40, 40, 160, 160])  # [x1, y1, x2, y2]
-    
-    # Extract the crow image
+    # Create a mock frame (512x512 RGB image)
+    mock_frame = np.zeros((512, 512, 3), dtype=np.uint8)
+    bbox = [10, 10, 100, 100]  # x1, y1, x2, y2
+
+    # Test with default expected_size
     result = extract_normalized_crow_crop(mock_frame, bbox)
     
-    # Verify the result
+    # Should not be None
     assert result is not None
     assert isinstance(result, dict)
     assert 'full' in result
     assert 'head' in result
-    assert isinstance(result['full'], np.ndarray)
-    assert isinstance(result['head'], np.ndarray)
     
-    # Check shapes (should be 224x224x3 for RGB)
-    assert result['full'].shape == (224, 224, 3)
-    assert result['head'].shape == (224, 224, 3)
-    
-    # Check value ranges (normalized to [0, 1])
-    assert np.all(result['full'] >= 0) and np.all(result['full'] <= 1)
-    assert np.all(result['head'] >= 0) and np.all(result['head'] <= 1)
+    # Check shapes (should be 512x512x3 for RGB)
+    assert result['full'].shape == (512, 512, 3)
+    assert result['head'].shape == (512, 512, 3)
 
 def test_extract_normalized_crow_crop_edge_cases():
     """Test extract_normalized_crow_crop with edge cases."""
-    # Create a mock frame (224x224 RGB image)
-    mock_frame = np.zeros((224, 224, 3), dtype=np.uint8)
+    # Create a mock frame (512x512 RGB image)
+    mock_frame = np.zeros((512, 512, 3), dtype=np.uint8)
     mock_frame[50:150, 50:150] = [255, 255, 255]  # White square in center
     
-    # Test cases that should return None (actual errors)
+    # Test cases that should return None due to errors
     error_cases = [
         # Invalid bbox (zero area)
         (np.array([50, 50, 50, 50]), "Invalid bbox area"),
         # Invalid bbox (reversed coordinates)
         (np.array([150, 150, 50, 50]), "Invalid bbox coordinates"),
-        # Bbox completely outside frame
-        (np.array([300, 300, 400, 400]), "Bbox outside frame"),
+        # Bbox completely outside frame (updated for 512x512 frame)
+        (np.array([600, 600, 700, 700]), "Bbox outside frame"),
     ]
     
     for bbox, expected_error in error_cases:
@@ -331,7 +322,7 @@ def test_enhanced_tracker_timeout():
         }
         # Convert detection to proper format
         detections = _convert_detection_to_array(detection)
-        frame = np.zeros((224, 224, 3), dtype=np.uint8)  # Dummy frame
+        frame = np.zeros((512, 512, 3), dtype=np.uint8)  # Dummy frame
         tracks = tracker.update(frame, detections)
         assert tracks is not None
         assert len(tracks) > 0

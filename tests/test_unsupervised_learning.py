@@ -38,7 +38,7 @@ class TestSimCLRCrowDataset:
         for i in range(5):
             img_path = tmp_path / f"image_{i}.jpg"
             # Create a dummy image
-            img = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
+            img = np.random.randint(0, 255, (512, 512, 3), dtype=np.uint8)
             cv2.imwrite(str(img_path), img)
             image_paths.append(str(img_path))
         return image_paths
@@ -56,8 +56,8 @@ class TestSimCLRCrowDataset:
         view1, view2 = dataset[0]
         
         # Check shapes
-        assert view1.shape == (3, 224, 224)
-        assert view2.shape == (3, 224, 224)
+        assert view1.shape == (3, 512, 512)
+        assert view2.shape == (3, 512, 512)
         
         # Check data type
         assert view1.dtype == torch.float32
@@ -74,8 +74,8 @@ class TestSimCLRCrowDataset:
         view1, view2 = dataset[0]
         
         # Should return dummy tensors
-        assert torch.equal(view1, torch.zeros(3, 224, 224))
-        assert torch.equal(view2, torch.zeros(3, 224, 224))
+        assert torch.equal(view1, torch.zeros(3, 512, 512))
+        assert torch.equal(view2, torch.zeros(3, 512, 512))
     
     def test_len(self, sample_images):
         """Test dataset length."""

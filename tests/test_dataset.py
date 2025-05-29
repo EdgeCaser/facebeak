@@ -28,7 +28,7 @@ def test_dataset_initialization(test_data_dir):
     assert 'crow_id' in sample, "Sample should have crow_id"
     
     # Check image tensor shape
-    assert sample['image'].shape == (3, 224, 224), "Image should be 3x224x224"
+    assert sample['image'].shape == (3, 512, 512), "Image should be 3x512x512"
     
     # Check audio features if available
     if sample['audio'] is not None:
@@ -92,7 +92,7 @@ def test_dataset_dataloader(test_data_dir):
     
     # Check shapes
     assert batch['image'].shape[0] == 4, "Batch should have 4 images"
-    assert batch['image'].shape[1:] == (3, 224, 224), "Images should be 3x224x224"
+    assert batch['image'].shape[1:] == (3, 512, 512), "Images should be 3x512x512"
     
     if batch['audio'] is not None:
         assert 'mel_spec' in batch['audio'], "Batch audio should have mel spectrogram"

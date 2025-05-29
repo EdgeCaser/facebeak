@@ -253,7 +253,7 @@ def compute_embedding(img_tensors):
             raise
         raise EmbeddingError(f"Error in compute_embedding: {str(e)}")
 
-def extract_normalized_crow_crop(frame, bbox, expected_size=(224, 224), correct_orientation=True):
+def extract_normalized_crow_crop(frame, bbox, expected_size=(512, 512), correct_orientation=True):
     """Extract and normalize a crop of a crow from a frame. Output is float32 [0,1] HWC."""
     try:
         if not isinstance(frame, np.ndarray):
@@ -423,9 +423,9 @@ class EnhancedTracker:
                     full_crops_np.append(crops['full'])
                     head_crops_np.append(crops['head'])
                 else:
-                    # Use a consistent size for zero arrays, e.g., 224x224x3
-                    full_crops_np.append(np.zeros((224, 224, 3), dtype=np.float32))
-                    head_crops_np.append(np.zeros((224, 224, 3), dtype=np.float32))
+                    # Use a consistent size for zero arrays, e.g., 512x512x3
+                    full_crops_np.append(np.zeros((512, 512, 3), dtype=np.float32))
+                    head_crops_np.append(np.zeros((512, 512, 3), dtype=np.float32))
 
             full_tensor = torch.stack([torch.from_numpy(crop).permute(2,0,1) for crop in full_crops_np]).float()
             head_tensor = torch.stack([torch.from_numpy(crop).permute(2,0,1) for crop in head_crops_np]).float()
@@ -925,8 +925,8 @@ if __name__ == '__main__':
         try:
             # Create dummy tensors (ensure they are on the correct device, matching model)
             dummy_device = next(CROW_EMBEDDING_MODEL.parameters()).device
-            dummy_full_tensor = torch.rand(1, 3, 224, 224).to(dummy_device) # B,C,H,W
-            dummy_head_tensor = torch.rand(1, 3, 224, 224).to(dummy_device)
+            dummy_full_tensor = torch.rand(1, 3, 512, 512).to(dummy_device) # B,C,H,W
+            dummy_head_tensor = torch.rand(1, 3, 512, 512).to(dummy_device)
             
             # Test with dict input
             embedding_dict_out = CROW_EMBEDDING_MODEL.get_embedding({'full': dummy_full_tensor, 'head': dummy_head_tensor})

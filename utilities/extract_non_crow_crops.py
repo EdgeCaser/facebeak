@@ -25,7 +25,7 @@ def extract_non_crow_crops(
     confidence_threshold=0.5,
     frame_skip=10,
     max_crops_per_video=100,
-    crop_size=(224, 224)
+    crop_size=(512, 512)
 ):
     """
     Extract crops of non-crow birds from a video file.
@@ -199,8 +199,8 @@ def main():
                        help="Skip every N frames (default: 10)")
     parser.add_argument("--max-crops", "-m", type=int, default=100,
                        help="Maximum crops per video (default: 100)")
-    parser.add_argument("--size", type=int, nargs=2, default=[224, 224],
-                       help="Crop size as width height (default: 224 224)")
+    parser.add_argument("--size", type=int, nargs=2, default=[512, 512],
+                       help="Crop size as width height (default: 512 512)")
     
     args = parser.parse_args()
     

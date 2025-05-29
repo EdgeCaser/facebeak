@@ -66,14 +66,14 @@ class ImprovedCrowTripletDataset(Dataset):
         """Setup data transforms based on mode."""
         # Transform for consistent embedding generation (less augmentation)
         self.embedding_transform = transforms.Compose([
-            transforms.Resize((224, 224)),
+            transforms.Resize((512, 512)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
         # Base transforms for training
         base_transforms = [
-            transforms.Resize((224, 224)), 
+            transforms.Resize((512, 512)), 
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ]
@@ -83,8 +83,8 @@ class ImprovedCrowTripletDataset(Dataset):
             
         elif self.transform_mode == 'augmented':
             augmented_transforms = [
-                transforms.Resize((256, 256)),
-                transforms.RandomCrop((224, 224)),
+                transforms.Resize((580, 580)),
+                transforms.RandomCrop((512, 512)),
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
                 transforms.RandomRotation(10),
@@ -96,8 +96,8 @@ class ImprovedCrowTripletDataset(Dataset):
             
         elif self.transform_mode == 'heavy':
             heavy_transforms = [
-                transforms.Resize((256, 256)),
-                transforms.RandomCrop((224, 224)),
+                transforms.Resize((580, 580)),
+                transforms.RandomCrop((512, 512)),
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.15),
                 transforms.RandomRotation(15),
@@ -321,7 +321,7 @@ class ImprovedCrowTripletDataset(Dataset):
         except Exception as e:
             logger.warning(f"Failed to load image {img_path}: {e}")
             # Return a random noise image as fallback
-            return torch.randn(3, 224, 224)
+            return torch.randn(3, 512, 512)
     
     def _get_positive_sample(self, anchor_crow_id, anchor_path):
         """Get a positive sample (same crow, different image)."""
