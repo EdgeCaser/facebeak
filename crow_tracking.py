@@ -15,7 +15,7 @@ from audio import extract_and_save_crow_audio
 logger = logging.getLogger(__name__)
 
 class CrowTracker:
-    def __init__(self, base_dir="crow_crops", similarity_threshold=0.7, enable_audio_extraction=True, audio_duration=2.0, correct_orientation=True):
+    def __init__(self, base_dir="crow_crops", similarity_threshold=0.7, enable_audio_extraction=True, audio_duration=2.0, correct_orientation=True, bbox_padding=0.3):
         """
         Initialize CrowTracker with optional audio extraction and orientation correction.
         
@@ -25,12 +25,14 @@ class CrowTracker:
             enable_audio_extraction: Whether to extract audio segments during processing
             audio_duration: Duration of audio segments to extract (seconds)
             correct_orientation: Whether to auto-correct crow crop orientation
+            bbox_padding: Padding ratio for bounding box expansion (0.0-1.0)
         """
         self.base_dir = Path(base_dir)
         self.similarity_threshold = similarity_threshold
         self.enable_audio_extraction = enable_audio_extraction
         self.audio_duration = audio_duration
         self.correct_orientation = correct_orientation
+        self.bbox_padding = bbox_padding
         
         # Create directory structure - NEW: video/frame-based instead of crow-based to prevent training bias
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -323,7 +325,7 @@ class CrowTracker:
                 frame_time = datetime.now() - timedelta(seconds=frame_time)
             
             # Extract crop
-            crop = extract_normalized_crow_crop(frame, box, correct_orientation=self.correct_orientation, padding=0.3)
+            crop = extract_normalized_crow_crop(frame, box, correct_orientation=self.correct_orientation, padding=self.bbox_padding)
             if crop is None:
                 logger.debug(f"Frame {frame_num}: Failed to extract crop")
                 return None

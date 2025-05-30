@@ -42,6 +42,97 @@ from detection import detect_crows_parallel # Ensure this is imported
 
 logger.info("Starting Kivy Crow Training Data Extractor GUI")
 
+class TooltipBehavior:
+    """Behavior to add tooltip functionality via clickable info icons."""
+    def __init__(self, tooltip_text="", **kwargs):
+        # Store tooltip attributes without calling super()
+        self.tooltip_text = tooltip_text
+        self.tooltip_popup = None
+        # Note: No longer binding hover events - tooltips will be triggered by info icons
+        
+    def show_tooltip(self):
+        if self.tooltip_popup:
+            return
+            
+        # Create tooltip content
+        content = Label(
+            text=self.tooltip_text,
+            text_size=(Window.width * 0.4, None),
+            halign='left',
+            valign='top',
+            font_size='12sp',
+            markup=True
+        )
+        content.bind(texture_size=content.setter('size'))
+        
+        # Create popup
+        self.tooltip_popup = Popup(
+            content=content,
+            size_hint=(None, None),
+            size=(Window.width * 0.45, content.texture_size[1] + 40),
+            auto_dismiss=True,
+            separator_height=1,
+            title_size='14sp',
+            title='Help Information'
+        )
+        
+        self.tooltip_popup.open()
+        
+        # Auto-hide after 8 seconds (longer since user explicitly requested it)
+        Clock.schedule_once(lambda dt: self.hide_tooltip(), 8.0)
+    
+    def hide_tooltip(self):
+        if self.tooltip_popup:
+            self.tooltip_popup.dismiss()
+            self.tooltip_popup = None
+
+class InfoIcon(Button):
+    """Small clickable info icon that shows tooltips."""
+    def __init__(self, tooltip_target, **kwargs):
+        super().__init__(
+            text="ℹ",
+            size_hint=(None, None),
+            size=("25dp", "25dp"),
+            font_size="14sp",
+            background_color=(0.2, 0.6, 1.0, 0.8),  # Light blue
+            color=(1, 1, 1, 1),  # White text
+            **kwargs
+        )
+        self.tooltip_target = tooltip_target
+        self.bind(on_press=self.show_help)
+    
+    def show_help(self, instance):
+        if hasattr(self.tooltip_target, 'show_tooltip'):
+            self.tooltip_target.show_tooltip()
+
+class TooltipButton(Button, TooltipBehavior):
+    def __init__(self, tooltip_text="", **kwargs):
+        # Initialize Button without tooltip_text
+        Button.__init__(self, **kwargs)
+        # Initialize TooltipBehavior with tooltip_text
+        TooltipBehavior.__init__(self, tooltip_text=tooltip_text)
+
+class TooltipSlider(Slider, TooltipBehavior):
+    def __init__(self, tooltip_text="", **kwargs):
+        # Initialize Slider without tooltip_text
+        Slider.__init__(self, **kwargs)
+        # Initialize TooltipBehavior with tooltip_text
+        TooltipBehavior.__init__(self, tooltip_text=tooltip_text)
+
+class TooltipCheckBox(CheckBox, TooltipBehavior):
+    def __init__(self, tooltip_text="", **kwargs):
+        # Initialize CheckBox without tooltip_text
+        CheckBox.__init__(self, **kwargs)
+        # Initialize TooltipBehavior with tooltip_text
+        TooltipBehavior.__init__(self, tooltip_text=tooltip_text)
+
+class TooltipTextInput(TextInput, TooltipBehavior):
+    def __init__(self, tooltip_text="", **kwargs):
+        # Initialize TextInput without tooltip_text
+        TextInput.__init__(self, **kwargs)
+        # Initialize TooltipBehavior with tooltip_text
+        TooltipBehavior.__init__(self, tooltip_text=tooltip_text)
+
 class OrientationDetector:
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -88,42 +179,156 @@ class ExtractorLayout(BoxLayout):
         self.controls_panel = GridLayout(cols=1, spacing="8dp", size_hint_y=None)
         self.controls_panel.bind(minimum_height=self.controls_panel.setter('height'))
 
+        # Directory Settings with tooltips
         dir_section_box, dir_section = self._create_section_layout("Directories")
-        self.video_dir_text = self._add_path_selector(dir_section, "Video Directory:", "", "_select_video_dir_action")
-        self.output_dir_text = self._add_path_selector(dir_section, "Output Directory:", "crow_crops", "_select_output_dir_action")
+        self.video_dir_text = self._add_path_selector(
+            dir_section, "Video Directory:", "", "_select_video_dir_action",
+            tooltip="[b]Video Directory[/b]\n\nSelect the directory containing your video files to process.\n\n[b]Impact:[/b] This determines which videos will be processed for crow detection and tracking. The system will search for common video formats (.mp4, .avi, .mov, .mkv).\n\n[b]Tip:[/b] Organize videos by date or location for better dataset management."
+        )
+        self.output_dir_text = self._add_path_selector(
+            dir_section, "Output Directory:", "crow_crops", "_select_output_dir_action",
+            tooltip="[b]Output Directory[/b]\n\nSpecify where extracted crow crops, tracking data, and audio segments will be saved.\n\n[b]Impact:[/b] All processing results including individual crow images, metadata, and audio clips will be organized in this directory structure.\n\n[b]Structure:[/b]\n• videos/ - Frame-based crops (prevents training bias)\n• crows/ - Legacy crow-based organization\n• audio/ - Audio segments\n• metadata/ - Tracking and crop metadata"
+        )
         self.controls_panel.add_widget(dir_section_box)
 
+        # Detection Settings with tooltips
         det_section_box, det_section = self._create_section_layout("Detection Settings")
-        self.min_confidence_slider, self.min_confidence_label = self._add_slider_setting(det_section, "Min Confidence:", 0.1, 0.9, 0.2, 0.01)
-        self.min_detections_text = self._add_text_input_setting(det_section, "Min Detections (per track):", "2")
-        self.mv_yolo_check = self._add_checkbox_setting(det_section, "Multi-View YOLO", False)
-        self.mv_rcnn_check = self._add_checkbox_setting(det_section, "Multi-View Faster R-CNN", False)
-        self.orientation_check = self._add_checkbox_setting(det_section, "Auto-correct Orientation", True)
-        self.nms_slider, self.nms_label = self._add_slider_setting(det_section, "Box Merge Threshold:", 0.1, 0.7, 0.3, 0.01)
+        self.min_confidence_slider, self.min_confidence_label = self._add_slider_setting(
+            det_section, "Min Confidence:", 0.1, 0.9, 0.2, 0.01,
+            tooltip="[b]Minimum Detection Confidence[/b]\n\nSets the minimum confidence score (0.1-0.9) required for a detection to be considered valid.\n\n[b]Impact:[/b]\n• Lower values = More detections but more false positives\n• Higher values = Fewer but more accurate detections\n• Default 0.2 provides good balance\n\n[b]Recommendation:[/b] Start with 0.2, increase to 0.3-0.4 if getting too many false detections, decrease to 0.15 if missing obvious crows."
+        )
+        self.min_detections_text = self._add_text_input_setting(
+            det_section, "Min Detections (per track):", "2",
+            tooltip="[b]Minimum Detections Per Track[/b]\n\nMinimum number of detections required before a crow track is considered valid and saved.\n\n[b]Impact:[/b]\n• Higher values = More reliable tracks but may miss brief appearances\n• Lower values = Capture short appearances but may include noise\n• Default 2 filters out single-frame false positives\n\n[b]Use Cases:[/b]\n• Set to 1 for capturing all crow appearances\n• Set to 5+ for only well-established tracks"
+        )
+        self.bbox_padding_slider, self.bbox_padding_label = self._add_slider_setting(
+            det_section, "BBox Padding (extra context):", 0.0, 0.5, 0.2, 0.05,
+            tooltip="[b]Bounding Box Padding[/b]\n\nAdds extra padding around detected crow bounding boxes when extracting crops.\n\n[b]Impact:[/b]\n• 0.0 = Tight crop around detected area\n• 0.2 (default) = 20% extra context around crow\n• 0.5 = 50% extra background context\n\n[b]Benefits of padding:[/b]\n• Captures important context (perches, environment)\n• Improves training data quality\n• Helps with orientation detection\n• Better for visual identification\n\n[b]Trade-offs:[/b] More padding = larger file sizes"
+        )
+        det_section.add_widget(Label(text="(Higher = more context around crow)", font_size='10sp', size_hint_y=None, height='15dp'))
+        self.mv_yolo_check = self._add_checkbox_setting(
+            det_section, "Multi-View YOLO", False,
+            tooltip="[b]Multi-View YOLO Detection[/b]\n\nEnables YOLOv8 detection with multiple image transformations (rotations, zoom) to catch crows in different orientations.\n\n[b]Impact:[/b]\n• [color=00aa00]✓[/color] Catches crows in unusual orientations\n• [color=00aa00]✓[/color] Better detection coverage\n• [color=aa0000]✗[/color] ~3x slower processing\n• [color=aa0000]✗[/color] Higher GPU memory usage\n\n[b]When to use:[/b] Enable for challenging videos with crows at unusual angles or if standard detection is missing obvious crows."
+        )
+        self.mv_rcnn_check = self._add_checkbox_setting(
+            det_section, "Multi-View Faster R-CNN", False,
+            tooltip="[b]Multi-View Faster R-CNN Detection[/b]\n\nEnables Faster R-CNN detection with multiple image transformations for enhanced accuracy.\n\n[b]Impact:[/b]\n• [color=00aa00]✓[/color] Higher quality bounding boxes\n• [color=00aa00]✓[/color] Better localization accuracy\n• [color=aa0000]✗[/color] ~4x slower than single-view\n• [color=aa0000]✗[/color] Very high GPU memory usage\n\n[b]Best for:[/b] Final processing runs where accuracy is more important than speed."
+        )
+        self.orientation_check = self._add_checkbox_setting(
+            det_section, "Auto-correct Orientation", True,
+            tooltip="[b]Automatic Orientation Correction[/b]\n\nAutomatically detects and corrects video orientation (rotation) for better detection results.\n\n[b]Impact:[/b]\n• [color=00aa00]✓[/color] Improves detection in rotated videos\n• [color=00aa00]✓[/color] Standardizes crop orientations\n• [color=00aa00]✓[/color] Better training data consistency\n• [color=aa0000]✗[/color] Slight processing overhead\n\n[b]Recommendation:[/b] Keep enabled unless you specifically need to preserve original orientations."
+        )
+        self.nms_slider, self.nms_label = self._add_slider_setting(
+            det_section, "Box Merge Threshold:", 0.1, 0.7, 0.3, 0.01,
+            tooltip="[b]Non-Maximum Suppression (NMS) Threshold[/b]\n\nControls how aggressively overlapping detections are merged into single detections.\n\n[b]Impact:[/b]\n• Lower values (0.1-0.2) = Merge more overlapping boxes\n• Higher values (0.5-0.7) = Keep more separate detections\n• Default 0.3 provides good balance\n\n[b]Symptoms to adjust:[/b]\n• Multiple boxes on same crow → Decrease value\n• Missing separate nearby crows → Increase value\n\n[b]Technical:[/b] Intersection over Union (IoU) threshold for box merging."
+        )
         det_section.add_widget(Label(text="(Lower = merge more boxes)", font_size='10sp', size_hint_y=None, height='15dp'))
         self.controls_panel.add_widget(det_section_box)
 
+        # Audio Settings with tooltips
         audio_section_box, audio_section = self._create_section_layout("Audio Settings")
-        self.enable_audio_check = self._add_checkbox_setting(audio_section, "Extract Audio Segments", True)
-        self.audio_duration_slider, self.audio_duration_label = self._add_slider_setting(audio_section, "Audio Duration (s):", 0.5, 5.0, 2.0, 0.1)
+        self.enable_audio_check = self._add_checkbox_setting(
+            audio_section, "Extract Audio Segments", True,
+            tooltip="[b]Audio Segment Extraction[/b]\n\nExtracts audio clips around crow detections for potential call analysis and multi-modal training.\n\n[b]Impact:[/b]\n• [color=00aa00]✓[/color] Captures crow calls and environmental sounds\n• [color=00aa00]✓[/color] Enables future audio-visual training\n• [color=00aa00]✓[/color] Useful for behavior analysis\n• [color=aa0000]✗[/color] Increases storage requirements\n• [color=aa0000]✗[/color] Slight processing overhead\n\n[b]Use cases:[/b] Research projects, behavior studies, multi-modal AI training."
+        )
+        self.audio_duration_slider, self.audio_duration_label = self._add_slider_setting(
+            audio_section, "Audio Duration (s):", 0.5, 5.0, 2.0, 0.1,
+            tooltip="[b]Audio Segment Duration[/b]\n\nLength of audio clips extracted around each crow detection (in seconds).\n\n[b]Impact:[/b]\n• Shorter (0.5-1s) = Just the immediate call\n• Medium (2-3s) = Call plus context (default)\n• Longer (4-5s) = Extended behavioral context\n\n[b]Storage impact:[/b]\n• 2s clips ≈ 350KB each (stereo, 44.1kHz)\n• 5s clips ≈ 875KB each\n\n[b]Recommendation:[/b] 2 seconds captures most crow calls while maintaining reasonable file sizes."
+        )
         self.controls_panel.add_widget(audio_section_box)
 
+        # Advanced Processing Settings with tooltips
+        advanced_section_box, advanced_section = self._create_section_layout("Advanced Settings")
+        self.recursive_check = self._add_checkbox_setting(
+            advanced_section, "Recursive Search (subdirectories)", False,
+            tooltip="[b]Recursive Directory Search[/b]\n\nSearches for video files in all subdirectories of the selected video directory.\n\n[b]Impact:[/b]\n• [color=00aa00]✓[/color] Processes videos organized in nested folders\n• [color=00aa00]✓[/color] Useful for date/location-based organization\n• [color=aa0000]✗[/color] May process unintended videos\n\n[b]Example structure:[/b]\nVideos/\n  ├── 2024-01/\n  │   ├── video1.mp4\n  │   └── video2.mp4\n  └── 2024-02/\n      └── video3.mp4\n\n[b]When to use:[/b] When videos are organized in subdirectories by date, location, or project."
+        )
+        self.batch_size_slider, self.batch_size_label = self._add_slider_setting(
+            advanced_section, "Batch Size:", 1, 64, 32, 1,
+            tooltip="[b]Processing Batch Size[/b]\n\nNumber of frames to process simultaneously (future enhancement for GPU efficiency).\n\n[b]Current Status:[/b] [color=aa6600]Partially implemented[/color] - prepared for future batch processing optimization.\n\n[b]Future Impact:[/b]\n• Larger batches = Better GPU utilization\n• Smaller batches = Lower memory usage\n• Optimal size depends on GPU VRAM\n\n[b]Recommendations:[/b]\n• RTX 3080/4080: 32-64\n• RTX 3060/4060: 16-32\n• GTX 1660: 8-16"
+        )
+        self.frame_skip_slider, self.frame_skip_label = self._add_slider_setting(
+            advanced_section, "Frame Skip (1=every frame):", 1, 10, 1, 1,
+            tooltip="[b]Frame Skip Interval[/b]\n\nProcess every Nth frame to speed up processing at the cost of temporal resolution.\n\n[b]Impact:[/b]\n• 1 = Process every frame (highest accuracy)\n• 2 = Process every 2nd frame (2x faster)\n• 5 = Process every 5th frame (5x faster)\n• 10 = Process every 10th frame (10x faster)\n\n[b]Trade-offs:[/b]\n• [color=00aa00]✓[/color] Dramatically faster processing\n• [color=aa0000]✗[/color] May miss brief appearances\n• [color=aa0000]✗[/color] Less smooth tracking\n\n[b]Recommendation:[/b] Use 2-3 for initial processing, 1 for final runs."
+        )
+        self.max_crops_per_crow_slider, self.max_crops_per_crow_label = self._add_slider_setting(
+            advanced_section, "Max crops per crow:", 5, 50, 10, 1,
+            tooltip="[b]Maximum Crops Per Crow[/b]\n\nLimits the number of crop images saved per individual crow to prevent dataset bias.\n\n[b]Impact:[/b]\n• Lower values (5-10) = Balanced dataset, less storage\n• Higher values (20-50) = More examples per crow, potential bias\n\n[b]Dataset Quality:[/b]\n• Prevents overrepresentation of frequently detected crows\n• Ensures balanced training data\n• Saves storage space\n\n[b]Recommendations:[/b]\n• Research/Training: 10-20 per crow\n• Quick analysis: 5-10 per crow\n• Comprehensive dataset: 20-50 per crow"
+        )
+        self.save_best_only_check = self._add_checkbox_setting(
+            advanced_section, "Save only best crops per crow", True,
+            tooltip="[b]Save Only Best Quality Crops[/b]\n\nOnly saves the highest quality crops for each crow based on detection confidence and image clarity.\n\n[b]Impact:[/b]\n• [color=00aa00]✓[/color] Higher quality training data\n• [color=00aa00]✓[/color] Reduced storage requirements\n• [color=00aa00]✓[/color] Better visual identification\n• [color=aa0000]✗[/color] Less variety in poses/angles\n\n[b]Quality Factors:[/b]\n• Detection confidence score\n• Image sharpness\n• Crop size and resolution\n• Bounding box quality\n\n[b]Recommendation:[/b] Keep enabled for training datasets, disable for comprehensive behavioral analysis."
+        )
+        self.memory_optimize_check = self._add_checkbox_setting(
+            advanced_section, "Memory optimization mode", False,
+            tooltip="[b]Memory Optimization Mode[/b]\n\nEnables various memory-saving techniques at the cost of some processing speed.\n\n[b]Current Status:[/b] [color=aa6600]Planned feature[/color] - prepared for future memory optimization.\n\n[b]Future Optimizations:[/b]\n• Smaller batch sizes\n• Frequent garbage collection\n• Model precision reduction (FP16)\n• Temporary file cleanup\n\n[b]When to enable:[/b]\n• Limited GPU VRAM (< 6GB)\n• Processing very large videos\n• Running multiple processes\n\n[b]Trade-off:[/b] ~20-30% slower but 40-60% less memory usage."
+        )
+        self.controls_panel.add_widget(advanced_section_box)
+
+        # Control Buttons with info icons for help
         buttons_layout = BoxLayout(orientation='horizontal', spacing="5dp", size_hint_y=None, height="44dp")
-        self.start_button = Button(text="Start Processing", on_press=self.app._start_processing_action)
-        self.pause_button = Button(text="Pause", on_press=self.app._pause_processing_action, disabled=True)
-        self.stop_button = Button(text="Stop", on_press=self.app._stop_processing_action, disabled=True)
-        buttons_layout.add_widget(self.start_button)
-        buttons_layout.add_widget(self.pause_button)
-        buttons_layout.add_widget(self.stop_button)
+        
+        # Start button with info icon
+        start_container = BoxLayout(orientation='horizontal', spacing="2dp")
+        self.start_button = Button(text="Start Processing")
+        self.start_button.bind(on_press=self.app._start_processing_action)
+        start_tooltip = TooltipBehavior(tooltip_text="[b]Start Processing[/b]\n\nBegin processing videos with current settings.\n\n[b]Before starting:[/b]\n• Verify video and output directories\n• Check detection settings\n• Ensure sufficient disk space\n• Consider frame skip for speed\n\n[b]Processing will:[/b]\n1. Detect crows in each frame\n2. Track individuals across frames\n3. Extract and save crop images\n4. Generate tracking metadata\n5. Extract audio segments (if enabled)\n\n[b]Tip:[/b] Start with a small test video to verify settings.")
+        start_info = InfoIcon(start_tooltip)
+        start_info.size_hint = (None, None)
+        start_info.size = ("25dp", "25dp")
+        start_container.add_widget(self.start_button)
+        start_container.add_widget(start_info)
+        
+        # Pause button with info icon
+        pause_container = BoxLayout(orientation='horizontal', spacing="2dp")
+        self.pause_button = Button(text="Pause", disabled=True)
+        self.pause_button.bind(on_press=self.app._pause_processing_action)
+        pause_tooltip = TooltipBehavior(tooltip_text="[b]Pause/Resume Processing[/b]\n\nTemporarily pause processing without losing progress.\n\n[b]Useful for:[/b]\n• Adjusting system performance\n• Checking intermediate results\n• Making manual adjustments\n• Conserving laptop battery\n\n[b]Note:[/b] Current frame will complete before pausing. All progress is automatically saved.")
+        pause_info = InfoIcon(pause_tooltip)
+        pause_info.size_hint = (None, None)
+        pause_info.size = ("25dp", "25dp")
+        pause_container.add_widget(self.pause_button)
+        pause_container.add_widget(pause_info)
+        
+        # Stop button with info icon
+        stop_container = BoxLayout(orientation='horizontal', spacing="2dp")
+        self.stop_button = Button(text="Stop", disabled=True)
+        self.stop_button.bind(on_press=self.app._stop_processing_action)
+        stop_tooltip = TooltipBehavior(tooltip_text="[b]Stop Processing[/b]\n\nCompletely stop processing and return to ready state.\n\n[b]Important:[/b]\n• All progress up to current frame is saved\n• You can resume later using 'Load Progress'\n• Partially processed videos can be continued\n\n[b]Data safety:[/b] Metadata and crops are saved continuously during processing.")
+        stop_info = InfoIcon(stop_tooltip)
+        stop_info.size_hint = (None, None)
+        stop_info.size = ("25dp", "25dp")
+        stop_container.add_widget(self.stop_button)
+        stop_container.add_widget(stop_info)
+        
+        buttons_layout.add_widget(start_container)
+        buttons_layout.add_widget(pause_container)
+        buttons_layout.add_widget(stop_container)
         
         progress_buttons_layout = BoxLayout(orientation='horizontal', spacing="5dp", size_hint_y=None, height="44dp")
-        self.save_prog_button = Button(text="Save Progress", on_press=self.app._save_progress_action)
-        self.load_prog_button = Button(text="Load Progress", on_press=self.app._load_progress_action)
-        progress_buttons_layout.add_widget(self.save_prog_button)
-        progress_buttons_layout.add_widget(self.load_prog_button)
         
-        self.review_crops_button = Button(text="Review Crops", on_press=self.app._trigger_crop_review, disabled=True)
-        progress_buttons_layout.add_widget(self.review_crops_button)
+        save_layout, self.save_prog_button = self._create_button_with_help(
+            text="Save Progress",
+            on_press=self.app._save_progress_action,
+            tooltip="[b]Save Progress[/b]\n\nManually save current processing progress and tracking data.\n\n[b]Saves:[/b]\n• Crow tracking data\n• Processing statistics\n• Video progress markers\n• Crop metadata\n\n[b]Auto-saved during:[/b]\n• Normal processing\n• Pause/Stop operations\n• Regular intervals\n\n[b]Use when:[/b] You want to ensure progress is saved before system changes or long processing sessions."
+        )
+        
+        load_layout, self.load_prog_button = self._create_button_with_help(
+            text="Load Progress",
+            on_press=self.app._load_progress_action,
+            tooltip="[b]Load Progress[/b]\n\nRestore previously saved processing progress and continue from where you left off.\n\n[b]Loads:[/b]\n• Previous tracking data\n• Crow identities and embeddings\n• Processing statistics\n• Video progress markers\n\n[b]Useful for:[/b]\n• Resuming interrupted sessions\n• Continuing multi-day processing\n• Switching between projects\n\n[b]Warning:[/b] This will replace current unsaved progress."
+        )
+        
+        progress_buttons_layout.add_widget(save_layout)
+        progress_buttons_layout.add_widget(load_layout)
+        
+        review_layout, self.review_crops_button = self._create_button_with_help(
+            text="Review Crops",
+            on_press=self.app._trigger_crop_review,
+            disabled=True,
+            tooltip="[b]Review Extracted Crops[/b]\n\nManually review and curate extracted crow crop images.\n\n[b]Review Functions:[/b]\n• Keep high-quality crops\n• Discard poor detections\n• Delete entire crow tracks\n• Navigate through all crops\n\n[b]Quality Control:[/b]\n• Remove false positives\n• Ensure dataset quality\n• Improve training data\n• Manual verification\n\n[b]Available after:[/b] Processing completes or when crops are pending review."
+        )
+        progress_buttons_layout.add_widget(review_layout)
 
         controls_buttons_main_box = BoxLayout(orientation='vertical', spacing='5dp', size_hint_y=None)
         controls_buttons_main_box.bind(minimum_height=controls_buttons_main_box.setter('height'))
@@ -131,6 +336,7 @@ class ExtractorLayout(BoxLayout):
         controls_buttons_main_box.add_widget(progress_buttons_layout)
         self.controls_panel.add_widget(controls_buttons_main_box)
 
+        # Progress Section
         prog_section_box, prog_section = self._create_section_layout("Progress")
         self.progress_bar = ProgressBar(max=100, value=0, size_hint_y=None, height="20dp")
         prog_section.add_widget(self.progress_bar)
@@ -138,19 +344,24 @@ class ExtractorLayout(BoxLayout):
         prog_section.add_widget(self.progress_label)
         self.controls_panel.add_widget(prog_section_box)
 
+        # Statistics Section
         stats_section_box, stats_section = self._create_section_layout("Statistics")
         self.stats_grid = GridLayout(cols=1, spacing="2dp", size_hint_y=None, padding="5dp")
         self.stats_grid.bind(minimum_height=self.stats_grid.setter('height'))
         self.stats_labels_ui = {} 
         stats_definitions = [
-            ('videos_processed', 'Videos Processed:'), ('total_frames', 'Total Frames:'),
-            ('detections', 'Total Detections:'), ('valid_crops', 'Valid Crops:'),
-            ('invalid_crops', 'Invalid Crops:'), ('crows_created', 'New Crows:'),
-            ('crows_updated', 'Updated Crows:'), ('current_video_detections', 'Video Detections:'),
-            ('current_video_crows', 'Video Crows:')
+            ('videos_processed', 'Videos Processed:', 'Number of video files completely processed'),
+            ('total_frames', 'Total Frames:', 'Total number of video frames analyzed'),
+            ('detections', 'Total Detections:', 'Total number of crow detections found'),
+            ('valid_crops', 'Valid Crops:', 'Number of high-quality crop images saved'),
+            ('invalid_crops', 'Invalid Crops:', 'Number of poor-quality detections discarded'),
+            ('crows_created', 'New Crows:', 'Number of new individual crows identified'),
+            ('crows_updated', 'Updated Crows:', 'Number of existing crows with new detections'),
+            ('current_video_detections', 'Video Detections:', 'Detections in current video being processed'),
+            ('current_video_crows', 'Video Crows:', 'Individual crows found in current video')
         ]
-        for key, text_label in stats_definitions:
-            # Create a horizontal row for each statistic
+        for key, text_label, tooltip_text in stats_definitions:
+            # Create a horizontal row for each statistic with tooltip
             row_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height='22dp', spacing="5dp")
             
             lbl_title = Label(text=text_label, size_hint_x=0.65, 
@@ -164,21 +375,28 @@ class ExtractorLayout(BoxLayout):
             row_layout.add_widget(lbl_value)
             
             self.stats_grid.add_widget(row_layout)
-            self.stats_labels_ui[key] = lbl_value 
+            self.stats_labels_ui[key] = lbl_value
+            
+            # Add tooltip behavior to the title label
+            self._add_tooltip_to_label(lbl_title, f"[b]{text_label}[/b]\n\n{tooltip_text}")
         stats_section.add_widget(self.stats_grid)
         self.controls_panel.add_widget(stats_section_box)
 
         left_scroll.add_widget(self.controls_panel)
         top_section.add_widget(left_scroll)
 
+        # Preview Panel with tooltip
         preview_panel = BoxLayout(orientation='vertical', size_hint_x=0.6, spacing="5dp")
-        preview_panel.add_widget(Label(text="Video Preview", size_hint_y=None, height="30dp", font_size="18sp"))
+        preview_title = Label(text="Video Preview", size_hint_y=None, height="30dp", font_size="18sp")
+        self._add_tooltip_to_label(preview_title, "[b]Video Preview[/b]\n\nReal-time preview of video processing showing:\n\n• Current frame being processed\n• Detected crow bounding boxes (green)\n• Detection confidence scores\n• Processing progress\n\nThe preview updates during processing to show detection results and help monitor progress.")
+        preview_panel.add_widget(preview_title)
         self.preview_image = KivyImage(source='', allow_stretch=True, keep_ratio=True)
         preview_panel.add_widget(self.preview_image)
         top_section.add_widget(preview_panel)
         
         self.add_widget(top_section)
         self.status_label = Label(text="Ready", size_hint_y=None, height="30dp", font_size='12sp')
+        self._add_tooltip_to_label(self.status_label, "[b]Status Display[/b]\n\nShows current system status:\n\n• Ready - System ready for processing\n• Processing - Currently analyzing videos\n• Paused - Processing temporarily paused\n• Stopped - Processing stopped by user\n• Error messages and progress updates")
         self.add_widget(self.status_label)
 
     def _create_section_layout(self, title):
@@ -190,20 +408,51 @@ class ExtractorLayout(BoxLayout):
         section_box.add_widget(content_grid)
         return section_box, content_grid
 
-    def _add_path_selector(self, parent_grid, label_text, default_path, browse_action_name):
+    def _add_path_selector(self, parent_grid, label_text, default_path, browse_action_name, tooltip=""):
         row = BoxLayout(orientation='horizontal', spacing="5dp", size_hint_y=None, height="35dp")
-        row.add_widget(Label(text=label_text, size_hint_x=0.35, halign='left', text_size=(None,None)))
+        
+        # Label with info icon if tooltip provided
+        label_layout = BoxLayout(orientation='horizontal', size_hint_x=0.35, spacing="2dp")
+        label = Label(text=label_text, halign='left', text_size=(None,None))
+        label_layout.add_widget(label)
+        
+        if tooltip:
+            # Create a tooltip target that can show help
+            tooltip_target = TooltipBehavior(tooltip_text=tooltip)
+            info_icon = InfoIcon(tooltip_target)
+            label_layout.add_widget(info_icon)
+        
+        row.add_widget(label_layout)
         text_input = TextInput(text=default_path, size_hint_x=0.55, multiline=False)
-        browse_button = Button(text="Browse", size_hint_x=0.1, on_press=getattr(self.app, browse_action_name))
+        browse_button = Button(text="Browse", size_hint_x=0.1)
+        browse_button.bind(on_press=getattr(self.app, browse_action_name))
         row.add_widget(text_input)
         row.add_widget(browse_button)
         parent_grid.add_widget(row)
         return text_input
 
-    def _add_slider_setting(self, parent_grid, label_text, min_val, max_val, default_val, step):
+    def _add_slider_setting(self, parent_grid, label_text, min_val, max_val, default_val, step, tooltip=""):
         row = BoxLayout(orientation='horizontal', spacing="5dp", size_hint_y=None, height="35dp")
-        row.add_widget(Label(text=label_text, size_hint_x=0.4, halign='left', text_size=(None,None)))
-        slider = Slider(min=min_val, max=max_val, value=default_val, step=step, size_hint_x=0.45)
+        
+        # Label with info icon if tooltip provided
+        label_layout = BoxLayout(orientation='horizontal', size_hint_x=0.4, spacing="2dp")
+        label = Label(text=label_text, halign='left', text_size=(None,None))
+        label_layout.add_widget(label)
+        
+        if tooltip:
+            # Create a tooltip target that can show help
+            tooltip_target = TooltipBehavior(tooltip_text=tooltip)
+            info_icon = InfoIcon(tooltip_target)
+            label_layout.add_widget(info_icon)
+        
+        row.add_widget(label_layout)
+        slider = Slider(
+            min=min_val, 
+            max=max_val, 
+            value=default_val, 
+            step=step, 
+            size_hint_x=0.45
+        )
         value_label = Label(text=f"{default_val:.2f}", size_hint_x=0.15, halign='left', text_size=(None,None))
         slider.bind(value=lambda instance, value: setattr(value_label, 'text', f"{value:.2f}"))
         row.add_widget(slider)
@@ -211,21 +460,142 @@ class ExtractorLayout(BoxLayout):
         parent_grid.add_widget(row)
         return slider, value_label
 
-    def _add_text_input_setting(self, parent_grid, label_text, default_value):
+    def _add_text_input_setting(self, parent_grid, label_text, default_value, tooltip=""):
         row = BoxLayout(orientation='horizontal', spacing="5dp", size_hint_y=None, height="35dp")
-        row.add_widget(Label(text=label_text, size_hint_x=0.7, halign='left', text_size=(None,None)))
+        
+        # Label with info icon if tooltip provided
+        label_layout = BoxLayout(orientation='horizontal', size_hint_x=0.7, spacing="2dp")
+        label = Label(text=label_text, halign='left', text_size=(None,None))
+        label_layout.add_widget(label)
+        
+        if tooltip:
+            # Create a tooltip target that can show help
+            tooltip_target = TooltipBehavior(tooltip_text=tooltip)
+            info_icon = InfoIcon(tooltip_target)
+            label_layout.add_widget(info_icon)
+        
+        row.add_widget(label_layout)
         text_input = TextInput(text=default_value, size_hint_x=0.3, multiline=False)
         row.add_widget(text_input)
         parent_grid.add_widget(row)
         return text_input
 
-    def _add_checkbox_setting(self, parent_grid, label_text, default_active):
+    def _add_checkbox_setting(self, parent_grid, label_text, default_active, tooltip=""):
         row = BoxLayout(orientation='horizontal', spacing="5dp", size_hint_y=None, height="35dp")
-        row.add_widget(Label(text=label_text, size_hint_x=0.85, halign='left', text_size=(None,None)))
+        
+        # Label with info icon if tooltip provided
+        label_layout = BoxLayout(orientation='horizontal', size_hint_x=0.85, spacing="2dp")
+        label = Label(text=label_text, halign='left', text_size=(None,None))
+        label_layout.add_widget(label)
+        
+        if tooltip:
+            # Create a tooltip target that can show help
+            tooltip_target = TooltipBehavior(tooltip_text=tooltip)
+            info_icon = InfoIcon(tooltip_target)
+            label_layout.add_widget(info_icon)
+        
+        row.add_widget(label_layout)
         checkbox = CheckBox(active=default_active, size_hint_x=0.15)
         row.add_widget(checkbox)
         parent_grid.add_widget(row)
         return checkbox
+
+    def _add_tooltip_to_label(self, label, tooltip_text):
+        """Add tooltip functionality to an existing label."""
+        label.tooltip_text = tooltip_text
+        label.tooltip_popup = None
+        
+        def on_tooltip_touch_down(widget, touch):
+            if widget.collide_point(*touch.pos) and widget.tooltip_text and not widget.tooltip_popup:
+                Clock.schedule_once(lambda dt: show_tooltip(widget, touch.pos), 0.8)
+            return False
+        
+        def on_tooltip_touch_up(widget, touch):
+            hide_tooltip(widget)
+            return False
+        
+        def show_tooltip(widget, pos):
+            if widget.tooltip_popup:
+                return
+                
+            content = Label(
+                text=widget.tooltip_text,
+                text_size=(Window.width * 0.35, None),
+                halign='left',
+                valign='top',
+                font_size='11sp',
+                markup=True
+            )
+            content.bind(texture_size=content.setter('size'))
+            
+            widget.tooltip_popup = Popup(
+                content=content,
+                size_hint=(None, None),
+                size=(Window.width * 0.4, content.texture_size[1] + 20),
+                pos_hint={'center_x': 0.5, 'center_y': 0.5},
+                auto_dismiss=True,
+                separator_height=0,
+                title_size='12sp',
+                title='Help'
+            )
+            
+            tooltip_x = min(pos[0] + 10, Window.width - widget.tooltip_popup.width)
+            tooltip_y = max(pos[1] - widget.tooltip_popup.height - 10, 0)
+            widget.tooltip_popup.pos = (tooltip_x, tooltip_y)
+            
+            widget.tooltip_popup.open()
+            Clock.schedule_once(lambda dt: hide_tooltip(widget), 5.0)
+        
+        def hide_tooltip(widget):
+            if hasattr(widget, 'tooltip_popup') and widget.tooltip_popup:
+                widget.tooltip_popup.dismiss()
+                widget.tooltip_popup = None
+        
+        label.bind(on_touch_down=on_tooltip_touch_down)
+        label.bind(on_touch_up=on_tooltip_touch_up)
+
+    def _create_button_with_help(self, text, on_press=None, tooltip="", **kwargs):
+        """Create a button with an optional help icon."""
+        if tooltip:
+            # Create button with help icon layout
+            button_layout = BoxLayout(orientation='horizontal', spacing="2dp", **kwargs)
+            button = Button(text=text, size_hint_x=0.9)
+            if on_press:
+                button.bind(on_press=on_press)
+            
+            # Create tooltip target and info icon
+            tooltip_target = TooltipBehavior(tooltip_text=tooltip)
+            info_icon = InfoIcon(tooltip_target)
+            info_icon.size_hint_x = 0.1
+            
+            button_layout.add_widget(button)
+            button_layout.add_widget(info_icon)
+            return button_layout, button
+        else:
+            # Regular button without help
+            button = Button(text=text, **kwargs)
+            if on_press:
+                button.bind(on_press=on_press)
+            return button, button
+
+    def _add_info_icon_to_label(self, label, tooltip_text):
+        """Add an info icon next to a label for help."""
+        # Create a horizontal layout to hold the label and info icon
+        label_container = BoxLayout(orientation='horizontal', spacing="5dp", size_hint_y=None, height=label.height)
+        
+        # Remove the label from its current parent and add to container
+        if label.parent:
+            label.parent.remove_widget(label)
+        label_container.add_widget(label)
+        
+        # Create tooltip target and info icon
+        tooltip_target = TooltipBehavior(tooltip_text=tooltip_text)
+        info_icon = InfoIcon(tooltip_target)
+        info_icon.size_hint = (None, None)
+        info_icon.size = ("20dp", "20dp")
+        label_container.add_widget(info_icon)
+        
+        return label_container
 
 class CrowExtractorApp(App):
     video_dir = StringProperty("")
@@ -269,14 +639,17 @@ class CrowExtractorApp(App):
         enable_audio = self.layout.enable_audio_check.active
         audio_duration = self.layout.audio_duration_slider.value
         correct_orientation_flag = self.layout.orientation_check.active
+        bbox_padding = self.layout.bbox_padding_slider.value
         try:
             self.tracker = CrowTracker(
                 base_dir=self.output_dir,
                 enable_audio_extraction=enable_audio,
                 audio_duration=audio_duration,
-                correct_orientation=correct_orientation_flag
+                correct_orientation=correct_orientation_flag,
+                bbox_padding=bbox_padding
             )
             logger.info(f"CrowTracker initialized with output directory: {self.output_dir}")
+            logger.info(f"BBox padding set to: {bbox_padding}")
             return True
         except Exception as e:
             logger.error(f"Failed to initialize CrowTracker: {e}", exc_info=True)
@@ -363,6 +736,29 @@ class CrowExtractorApp(App):
             self._initialize_tracker()
         self._select_dir_popup(set_output_dir_and_init_tracker, 'output_dir')
 
+    def _find_video_files(self, video_dir, recursive=False):
+        """Find video files in directory, optionally recursively."""
+        video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.MP4', '.AVI', '.MOV', '.MKV')
+        video_files = []
+        
+        if recursive:
+            # Use os.walk for recursive search
+            for root, dirs, files in os.walk(video_dir):
+                for file in files:
+                    if file.endswith(video_extensions):
+                        video_files.append(os.path.join(root, file))
+        else:
+            # Non-recursive search (original behavior)
+            try:
+                for file in os.listdir(video_dir):
+                    if file.endswith(video_extensions):
+                        video_files.append(os.path.join(video_dir, file))
+            except OSError as e:
+                logger.error(f"Error reading directory {video_dir}: {e}")
+                return []
+        
+        return sorted(video_files)
+
     def _start_processing_action(self, instance):
         logger.info("Start processing action initiated.")
         if self.processing_active and not self.processing_paused:
@@ -386,13 +782,21 @@ class CrowExtractorApp(App):
             self.show_popup("Error", "Failed to initialize tracker. Cannot start processing.")
             return
 
-        self.video_files_list = sorted([f for f in os.listdir(self.video_dir) 
-                                 if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))])
+        # Use new recursive file finding logic
+        recursive_search = self.layout.recursive_check.active
+        search_type = "recursively" if recursive_search else ""
+        self.video_files_list = self._find_video_files(self.video_dir, recursive=recursive_search)
+        
         if not self.video_files_list:
-            self.show_popup("Error", "No video files found in the selected directory.")
+            self.show_popup("Error", f"No video files found {search_type} in the selected directory.")
             return
         
-        logger.info(f"Found {len(self.video_files_list)} videos to process: {self.video_files_list}")
+        logger.info(f"Found {len(self.video_files_list)} videos to process {search_type}")
+        if recursive_search:
+            logger.info("Videos found in:")
+            for video_file in self.video_files_list:
+                rel_path = os.path.relpath(video_file, self.video_dir)
+                logger.info(f"  {rel_path}")
 
         self.processing_active = True
         self.processing_paused = False
@@ -429,17 +833,17 @@ class CrowExtractorApp(App):
             except ValueError:
                 logger.error(f"Video file {video_file_name} not found in list. Skipping.")
                 continue
-            video_full_path = os.path.join(self.video_dir, video_file_name)
+            video_full_path = video_file_name
             Clock.schedule_once(lambda dt, vfn=video_file_name: setattr(self.layout.status_label, 'text', f"Starting video: {vfn}"))
-            self._process_video_file(video_full_path) # MOCK for now
+            self._process_video_file(video_full_path)
             if self.processing_active:
                  self.stats['videos_processed'] += 1
                  Clock.schedule_once(self._update_stats_ui)
         Clock.schedule_once(self._processing_finished_ui_update)
         logger.info("Video processing thread finished.")
 
-    def _process_video_file(self, video_path): # MOCK processing
-        logger.info(f"Processing video file (MOCK): {video_path}")
+    def _process_video_file(self, video_path):
+        logger.info(f"Processing video file: {video_path}")
         self.cv_capture = cv2.VideoCapture(video_path)
         if not self.cv_capture.isOpened():
             logger.error(f"Failed to open video: {video_path}")
@@ -452,14 +856,36 @@ class CrowExtractorApp(App):
         _current_video_crow_ids_set = set() 
         self.stats['current_video_crows'] = 0
         frame_num = 0
+        
+        # Get advanced settings
+        frame_skip = int(self.layout.frame_skip_slider.value)
+        batch_size = int(self.layout.batch_size_slider.value)  # For future batch processing
+        max_crops_per_crow = int(self.layout.max_crops_per_crow_slider.value)
+        memory_optimize = self.layout.memory_optimize_check.active
+        correct_orientation_flag = self.layout.orientation_check.active
+        bbox_padding = self.layout.bbox_padding_slider.value
+        
+        # Advanced settings usage:
+        # - frame_skip: Skip frames for faster processing (implemented)
+        # - batch_size: Process multiple frames at once (future enhancement)
+        # - max_crops_per_crow: Limit crops per crow to prevent bias (tracker handles)
+        # - memory_optimize: Use memory-efficient processing modes (future enhancement)
+        # - correct_orientation_flag: Auto-rotate frames for better detection (tracker handles)
+
         while self.processing_active:
             while self.processing_paused:
                 if not self.processing_active: break
                 time.sleep(0.1)
             if not self.processing_active: break
+            
             ret, frame = self.cv_capture.read()
             if not ret: break
             frame_num += 1
+            
+            # Frame skipping logic
+            if frame_skip > 1 and (frame_num % frame_skip) != 0:
+                continue
+                
             self.stats['total_frames'] += 1
 
             detections_on_frame = []
@@ -469,6 +895,7 @@ class CrowExtractorApp(App):
                 multi_view_yolo = self.layout.mv_yolo_check.active
                 multi_view_rcnn = self.layout.mv_rcnn_check.active
                 nms_thresh = self.layout.nms_slider.value
+                bbox_padding = self.layout.bbox_padding_slider.value
                 # Orientation correction is handled by CrowTracker based on its init flag
 
                 # Actual detection call

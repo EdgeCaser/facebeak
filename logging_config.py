@@ -2,8 +2,7 @@ import logging
 from pathlib import Path
 import os
 import sys
-import torch
-import json # Added import
+import json
 
 # Load configuration at the start of the script
 CONFIG = {}
@@ -61,7 +60,65 @@ def setup_logging():
     logger.info("=== Starting new session ===")
     logger.info(f"Log file: {log_file}")
     logger.info(f"Python version: {os.sys.version}")
-    logger.info(f"PyTorch version: {torch.__version__}")
-    logger.info(f"CUDA available: {torch.cuda.is_available()}")
+    
+    # Log PyTorch info if available (import only when needed)
+    try:
+        import torch
+        logger.info(f"PyTorch version: {torch.__version__}")
+        logger.info(f"CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
+    except ImportError:
+        logger.info("PyTorch not available")
+    except Exception as e:
+        logger.warning(f"Error getting PyTorch info: {e}")
     
     return logger 
+
+def log_system_info(logger):
+    """Log comprehensive system information for ML applications."""
+    logger.info("=== System Information ===")
+    
+    # Log available ML libraries
+    try:
+        import cv2
+        logger.info(f"OpenCV version: {cv2.__version__}")
+    except ImportError:
+        logger.warning("OpenCV not available")
+    
+    try:
+        import kivy
+        logger.info(f"Kivy version: {kivy.__version__}")
+    except ImportError:
+        logger.warning("Kivy not available")
+    
+    try:
+        import numpy as np
+        logger.info(f"NumPy version: {np.__version__}")
+    except ImportError:
+        logger.warning("NumPy not available")
+    
+    try:
+        import ultralytics
+        logger.info(f"Ultralytics version: {ultralytics.__version__}")
+    except ImportError:
+        logger.warning("Ultralytics not available")
+    
+    logger.info("=== End System Information ===")
+
+def log_torch_info_detailed(logger):
+    """Log detailed PyTorch information."""
+    try:
+        import torch
+        logger.info(f"PyTorch version: {torch.__version__}")
+        logger.info(f"CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            logger.info(f"CUDA device count: {torch.cuda.device_count()}")
+            for i in range(torch.cuda.device_count()):
+                logger.info(f"CUDA device {i}: {torch.cuda.get_device_name(i)}")
+                props = torch.cuda.get_device_properties(i)
+                logger.info(f"  Memory: {props.total_memory / 1e9:.1f} GB")
+    except ImportError:
+        logger.warning("PyTorch not available")
+    except Exception as e:
+        logger.warning(f"Error getting detailed PyTorch info: {e}") 
