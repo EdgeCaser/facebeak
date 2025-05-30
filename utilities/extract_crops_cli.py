@@ -100,6 +100,38 @@ def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detect
     
     return detections_by_crow
 
+def find_video_files(video_dir, recursive=False):
+    """
+    Find video files in directory, optionally recursively.
+    
+    Args:
+        video_dir: Directory to search for videos
+        recursive: Whether to search subdirectories recursively
+        
+    Returns:
+        List of video file paths
+    """
+    video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.MP4', '.AVI', '.MOV', '.MKV')
+    video_files = []
+    
+    if recursive:
+        # Use os.walk for recursive search
+        for root, dirs, files in os.walk(video_dir):
+            for file in files:
+                if file.endswith(video_extensions):
+                    video_files.append(os.path.join(root, file))
+    else:
+        # Non-recursive search (original behavior)
+        try:
+            for file in os.listdir(video_dir):
+                if file.endswith(video_extensions):
+                    video_files.append(os.path.join(video_dir, file))
+        except OSError as e:
+            logger.error(f"Error reading directory {video_dir}: {e}")
+            return []
+    
+    return sorted(video_files)
+
 def main():
     parser = argparse.ArgumentParser(description="Extract crow crops from videos with full parameter control")
     parser.add_argument("video_dir", help="Directory containing input videos")
@@ -110,8 +142,14 @@ def main():
     parser.add_argument("--multi-view-yolo", action="store_true", help="Enable multi-view for YOLO")
     parser.add_argument("--multi-view-rcnn", action="store_true", help="Enable multi-view for R-CNN")
     parser.add_argument("--nms-threshold", type=float, default=0.3, help="NMS/IOU threshold for merging boxes")
+    parser.add_argument("--recursive", action="store_true", help="Search for videos recursively in subdirectories")
     
     args = parser.parse_args()
+    
+    # Validate video directory
+    if not os.path.isdir(args.video_dir):
+        logger.error(f"Video directory does not exist: {args.video_dir}")
+        sys.exit(1)
     
     # Initialize crow tracker
     tracker = CrowTracker(base_dir=args.output_dir)
@@ -122,19 +160,30 @@ def main():
     logger.info(f"Parameters: confidence={args.min_confidence}, min_detections={args.min_detections}")
     logger.info(f"Multi-view: YOLO={args.multi_view_yolo}, RCNN={args.multi_view_rcnn}")
     logger.info(f"NMS threshold: {args.nms_threshold}")
+    logger.info(f"Recursive search: {args.recursive}")
     
-    # Process all videos in directory
-    video_extensions = ('.mp4', '.avi', '.mov', '.mkv')
-    video_files = [f for f in os.listdir(args.video_dir) if f.lower().endswith(video_extensions)]
+    # Find all video files
+    video_files = find_video_files(args.video_dir, recursive=args.recursive)
+    
+    if not video_files:
+        logger.warning(f"No video files found in {args.video_dir}")
+        logger.info("Supported formats: .mp4, .avi, .mov, .mkv")
+        sys.exit(0)
+    
     logger.info(f"Found {len(video_files)} video files to process")
+    if args.recursive:
+        logger.info("Videos found in:")
+        for video_file in video_files:
+            rel_path = os.path.relpath(video_file, args.video_dir)
+            logger.info(f"  {rel_path}")
     
     total_crows_before = len(tracker.list_crows())
     
     for video_file in video_files:
-        video_path = os.path.join(args.video_dir, video_file)
-        logger.info(f"\nProcessing {video_file}...")
+        rel_path = os.path.relpath(video_file, args.video_dir)
+        logger.info(f"\nProcessing {rel_path}...")
         extract_crops_from_video(
-            video_path,
+            video_file,  # Use full path instead of joining again
             tracker,
             min_confidence=args.min_confidence,
             min_detections=args.min_detections,
@@ -153,6 +202,9 @@ def main():
     logger.info(f"\nExtraction complete:")
     logger.info(f"Total crows in database: {total_crows_after}")
     logger.info(f"New crows added: {new_crows}")
+    
+    if args.recursive and video_files:
+        logger.info(f"Processed videos from {len(set(os.path.dirname(f) for f in video_files))} directories")
 
 if __name__ == "__main__":
     main() 
