@@ -323,7 +323,7 @@ class CrowTracker:
                 frame_time = datetime.now() - timedelta(seconds=frame_time)
             
             # Extract crop
-            crop = extract_normalized_crow_crop(frame, box, correct_orientation=self.correct_orientation)
+            crop = extract_normalized_crow_crop(frame, box, correct_orientation=self.correct_orientation, padding=0.3)
             if crop is None:
                 logger.debug(f"Frame {frame_num}: Failed to extract crop")
                 return None

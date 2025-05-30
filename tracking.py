@@ -253,7 +253,7 @@ def compute_embedding(img_tensors):
             raise
         raise EmbeddingError(f"Error in compute_embedding: {str(e)}")
 
-def extract_normalized_crow_crop(frame, bbox, expected_size=(512, 512), correct_orientation=True):
+def extract_normalized_crow_crop(frame, bbox, expected_size=(512, 512), correct_orientation=True, padding=0.2):
     """Extract and normalize a crop of a crow from a frame. Output is float32 [0,1] HWC."""
     try:
         if not isinstance(frame, np.ndarray):
@@ -265,17 +265,31 @@ def extract_normalized_crow_crop(frame, bbox, expected_size=(512, 512), correct_
         
         if x1 >= x2 or y1 >= y2:
             raise ValueError(f"Invalid bbox coordinates: {bbox} (x1 >= x2 or y1 >= y2)")
-        if x1 < 0 or y1 < 0 or x2 > frame.shape[1] or y2 > frame.shape[0]:
-            # Clamp bbox to frame dimensions if slightly outside, or raise error
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(frame.shape[1], x2), min(frame.shape[0], y2)
-            if x1 >= x2 or y1 >= y2: # If clamping results in invalid box
-                 raise ValueError(f"Clamped bbox invalid: {bbox} for frame size {frame.shape[1]}x{frame.shape[0]}")
-            logger.warning(f"Bbox {bbox} was outside frame {frame.shape[:2]}. Clamped to {(x1,y1,x2,y2)}")
-
-        crop = frame[y1:y2, x1:x2]
+        
+        # Add padding to ensure entire crow is captured and centered
+        h, w = frame.shape[:2]
+        bbox_w = x2 - x1
+        bbox_h = y2 - y1
+        
+        # Calculate padding
+        pad_w = int(bbox_w * padding)
+        pad_h = int(bbox_h * padding)
+        
+        # Apply padding and clamp to frame boundaries
+        x1_padded = max(0, x1 - pad_w)
+        y1_padded = max(0, y1 - pad_h)
+        x2_padded = min(w, x2 + pad_w)
+        y2_padded = min(h, y2 + pad_h)
+        
+        # Ensure we still have a valid box after padding
+        if x1_padded >= x2_padded or y1_padded >= y2_padded:
+            # Fallback to original bbox if padding causes issues
+            logger.warning(f"Padding resulted in invalid bbox, using original: {bbox}")
+            x1_padded, y1_padded, x2_padded, y2_padded = x1, y1, x2, y2
+            
+        crop = frame[y1_padded:y2_padded, x1_padded:x2_padded]
         if crop.size == 0:
-            raise ValueError(f"Crop resulted in empty image for bbox {bbox}")
+            raise ValueError(f"Crop resulted in empty image for bbox {bbox} with padding")
 
         if correct_orientation:
             try:
@@ -418,7 +432,7 @@ class EnhancedTracker:
             full_crops_np, head_crops_np = [], []
             for det in detections: # detections are expected to be [x1,y1,x2,y2, possibly score]
                 bbox = det[:4]
-                crops = self.extract_normalized_crow_crop(frame, bbox) 
+                crops = self.extract_normalized_crow_crop(frame, bbox, padding=0.3) 
                 if crops:
                     full_crops_np.append(crops['full'])
                     head_crops_np.append(crops['head'])
