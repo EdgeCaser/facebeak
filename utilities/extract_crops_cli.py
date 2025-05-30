@@ -41,12 +41,12 @@ def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detect
     fps = cap.get(cv2.CAP_PROP_FPS)
     logger.info(f"Video info: {total_frames} frames, {fps} FPS")
     
-    frames = []
-    frame_numbers = []
+    # First pass: collect all detections without saving crops
+    all_detections = []  # Store (frame, frame_num, det, frame_time) tuples
     detections_by_crow = defaultdict(list)
     
-    logger.info("Extracting frames and detecting crows...")
-    with tqdm(total=total_frames) as pbar:
+    logger.info("First pass: Detecting crows and building tracks...")
+    with tqdm(total=total_frames, desc="Detecting") as pbar:
         while True:
             frames = []
             frame_numbers = []
@@ -68,35 +68,62 @@ def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detect
                 nms_threshold=nms_threshold
             )
             
-            logger.info(f"Batch of {len(frames)} frames: found {sum(len(d) for d in detections)} total detections")
-            
             for frame_idx, frame_dets in enumerate(detections):
                 frame = frames[frame_idx]
                 frame_num = frame_numbers[frame_idx]
                 frame_time = frame_num / fps if fps > 0 else None
                 
-                if frame_dets:
-                    logger.info(f"Frame {frame_num}: Found {len(frame_dets)} detections")
-                    for det in frame_dets:
-                        logger.info(f"  Detection: class={det.get('class', 'unknown')}, score={det['score']:.3f}, bbox={det['bbox']}")
-                
                 for det in frame_dets:
                     if det['score'] < min_confidence:
                         continue
                     
-                    # Process detection and get crow_id
-                    crow_id = tracker.process_detection(frame, frame_num, det, video_path, frame_time)
-                    if crow_id:
-                        detections_by_crow[crow_id].append((frame_num, det))
+                    # Store detection for second pass
+                    all_detections.append((frame.copy(), frame_num, det, frame_time))
             
             pbar.update(len(frames))
     
     cap.release()
     
+    # Second pass: process detections and assign crow IDs
+    logger.info("Second pass: Assigning crow IDs...")
+    for frame, frame_num, det, frame_time in tqdm(all_detections, desc="Assigning IDs"):
+        crow_id = tracker.process_detection(frame, frame_num, det, video_path, frame_time)
+        if crow_id:
+            detections_by_crow[crow_id].append((frame_num, det))
+    
+    # Third pass: save crops only for crows meeting minimum detections threshold
+    logger.info("Third pass: Saving crops for qualifying crows...")
+    qualifying_crows = {crow_id: dets for crow_id, dets in detections_by_crow.items() 
+                       if len(dets) >= min_detections}
+    
+    crops_saved = 0
+    for crow_id, crow_detections in qualifying_crows.items():
+        logger.info(f"Saving crops for {crow_id} ({len(crow_detections)} detections)")
+        # For qualifying crows, process a subset of their best detections
+        # Sort by confidence and take up to 10 best detections
+        sorted_dets = sorted(crow_detections, key=lambda x: x[1]['score'], reverse=True)[:10]
+        
+        for frame_num, det in sorted_dets:
+            # Re-extract the frame for this detection
+            cap = cv2.VideoCapture(video_path)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+            ret, frame = cap.read()
+            cap.release()
+            
+            if ret:
+                # Force save crop by calling tracker's save_crop directly
+                from tracking import extract_normalized_crow_crop
+                crop = extract_normalized_crow_crop(frame, det['bbox'], padding=0.3)
+                if crop:
+                    crop_path = tracker.save_crop(crop, crow_id, frame_num, video_path)
+                    if crop_path:
+                        crops_saved += 1
+    
     # Log summary
     total_crows = len(detections_by_crow)
-    crows_with_min_detections = sum(1 for dets in detections_by_crow.values() if len(dets) >= min_detections)
+    crows_with_min_detections = len(qualifying_crows)
     logger.info(f"Found {total_crows} crows, {crows_with_min_detections} with {min_detections}+ detections")
+    logger.info(f"Saved {crops_saved} crop files")
     
     return detections_by_crow
 
