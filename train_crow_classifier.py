@@ -37,7 +37,8 @@ class CrowDataset(Dataset):
         self.label_to_idx = {
             'crow': 0,
             'not_a_crow': 1, 
-            'multi_crow': 2
+            'multi_crow': 2,
+            'bad_crow': 1  # Treat bad_crow same as not_a_crow
         }
         self.idx_to_label = {v: k for k, v in self.label_to_idx.items()}
         

@@ -657,8 +657,8 @@ def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_
             logger.warning(f"Image path does not exist: {str(image_path_obj)}")
             return False
             
-        if not label or label not in ['crow', 'not_a_crow', 'not_sure', 'multi_crow']:
-            logger.warning(f"Invalid label: {label}. Must be 'crow', 'not_a_crow', 'not_sure', or 'multi_crow'")
+        if not label or label not in ['crow', 'not_a_crow', 'bad_crow', 'not_sure', 'multi_crow']:
+            logger.warning(f"Invalid label: {label}. Must be 'crow', 'not_a_crow', 'bad_crow', 'not_sure', or 'multi_crow'")
             return False
             
         if confidence is not None and not 0 <= confidence <= 1:
@@ -668,9 +668,9 @@ def add_image_label(image_path, label, confidence=None, reviewer_notes=None, is_
         # Implement "innocent until proven guilty" philosophy
         # If is_training_data is not explicitly set, determine based on label
         if is_training_data is None:
-            # Exclude not_a_crow and multi_crow from training data by default
-            # Follow "innocent until proven guilty" - only exclude definitive false positives
-            is_training_data = (label not in ['not_a_crow', 'multi_crow'])
+            # Exclude not_a_crow, bad_crow, and multi_crow from training data by default
+            # Follow "innocent until proven guilty" - only exclude definitive false positives and poor quality
+            is_training_data = (label not in ['not_a_crow', 'bad_crow', 'multi_crow'])
             
         # Insert or update label
         cursor.execute('''
@@ -856,6 +856,7 @@ def get_training_data_stats(from_directory=None):
             return {
                 'crow': {'count': 0, 'avg_confidence': 0.0},
                 'not_a_crow': {'count': 0, 'avg_confidence': 0.0},
+                'bad_crow': {'count': 0, 'avg_confidence': 0.0},
                 'not_sure': {'count': 0, 'avg_confidence': 0.0},
                 'multi_crow': {'count': 0, 'avg_confidence': 0.0},
                 'total_labeled': 0,
@@ -866,6 +867,7 @@ def get_training_data_stats(from_directory=None):
         stats = {
             'crow': {'count': 0, 'total_confidence': 0.0},
             'not_a_crow': {'count': 0, 'total_confidence': 0.0},
+            'bad_crow': {'count': 0, 'total_confidence': 0.0},
             'not_sure': {'count': 0, 'total_confidence': 0.0},
             'multi_crow': {'count': 0, 'total_confidence': 0.0},
             'total_labeled': 0,
@@ -882,7 +884,7 @@ def get_training_data_stats(from_directory=None):
                     stats['total_excluded'] += 1
         
         # Calculate averages
-        for label in ['crow', 'not_a_crow', 'not_sure', 'multi_crow']:
+        for label in ['crow', 'not_a_crow', 'bad_crow', 'not_sure', 'multi_crow']:
             count = stats[label]['count']
             if count > 0:
                 stats[label]['avg_confidence'] = stats[label]['total_confidence'] / count
@@ -898,6 +900,7 @@ def get_training_data_stats(from_directory=None):
         return {
             'crow': {'count': 0, 'avg_confidence': 0.0},
             'not_a_crow': {'count': 0, 'avg_confidence': 0.0},
+            'bad_crow': {'count': 0, 'avg_confidence': 0.0},
             'not_sure': {'count': 0, 'avg_confidence': 0.0},
             'multi_crow': {'count': 0, 'avg_confidence': 0.0},
             'total_labeled': 0,
@@ -965,8 +968,8 @@ def is_image_training_suitable(image_path):
         result = cursor.fetchone()
         if result:
             label, is_training_data = result
-            # Suitable if marked as training data and not labeled as 'not_a_crow' or 'not_sure'
-            return is_training_data and label not in ('not_a_crow', 'not_sure')
+            # Suitable if marked as training data and not labeled as 'not_a_crow', 'bad_crow', or 'not_sure'
+            return is_training_data and label not in ('not_a_crow', 'bad_crow', 'not_sure')
         else:
             # If not labeled, assume it's suitable (for backward compatibility)
             return True
