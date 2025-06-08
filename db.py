@@ -779,6 +779,40 @@ def get_image_label(image_path):
         if conn:
             conn.close()
 
+def get_all_labeled_images():
+    """Get all labeled images from the database."""
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT image_path, label, confidence, reviewer_notes, is_training_data, created_at, updated_at
+            FROM image_labels 
+            ORDER BY created_at DESC
+        ''')
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                'image_path': row[0],
+                'label': row[1],
+                'confidence': row[2],
+                'reviewer_notes': row[3],
+                'is_training_data': bool(row[4]),
+                'created_at': row[5],
+                'updated_at': row[6]
+            })
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error getting all labeled images: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
 def remove_from_training_data(image_path):
     """Mark an image as not suitable for training data."""
     return add_image_label(image_path, 'not_a_crow', is_training_data=False)
