@@ -1,0 +1,1020 @@
+{
+  "timestamp": "20250608_091222",
+  "model_path": "crow_classifier.pth",
+  "confidence_threshold": 0.75,
+  "total_processed": 100,
+  "high_confidence_count": 30,
+  "uncertain_count": 70,
+  "predictions_summary": {
+    "crow": 72,
+    "not_a_crow": 13,
+    "multi_crow": 15
+  },
+  "high_confidence_summary": {
+    "crow": 28,
+    "not_a_crow": 1,
+    "multi_crow": 1
+  },
+  "detailed_results": [
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_005890_crop_002.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.5941020250320435,
+      "class_probabilities": {
+        "crow": 0.5941020250320435,
+        "not_a_crow": 0.11506061255931854,
+        "multi_crow": 0.2908373773097992
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7207/frame_006312_crop_001.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.5687874555587769,
+      "class_probabilities": {
+        "crow": 0.10997749119997025,
+        "not_a_crow": 0.5687874555587769,
+        "multi_crow": 0.3212350904941559
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_001353_crop_002.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.5635566115379333,
+      "class_probabilities": {
+        "crow": 0.3094122111797333,
+        "not_a_crow": 0.5635566115379333,
+        "multi_crow": 0.12703116238117218
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_003729_crop_001.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.6060658693313599,
+      "class_probabilities": {
+        "crow": 0.14579595625400543,
+        "not_a_crow": 0.2481381744146347,
+        "multi_crow": 0.6060658693313599
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250311_1/frame_001460_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.7051602005958557,
+      "class_probabilities": {
+        "crow": 0.7051602005958557,
+        "not_a_crow": 0.15933838486671448,
+        "multi_crow": 0.13550150394439697
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7604/frame_000785_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.4631618559360504,
+      "class_probabilities": {
+        "crow": 0.4631618559360504,
+        "not_a_crow": 0.3091004192829132,
+        "multi_crow": 0.22773775458335876
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241018_2/frame_002692_crop_001.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.5151838660240173,
+      "class_probabilities": {
+        "crow": 0.35072290897369385,
+        "not_a_crow": 0.5151838660240173,
+        "multi_crow": 0.13409318029880524
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_6926/frame_000413_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.925248384475708,
+      "class_probabilities": {
+        "crow": 0.925248384475708,
+        "not_a_crow": 0.0566987544298172,
+        "multi_crow": 0.018052805215120316
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241018_2/frame_001226_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8073512315750122,
+      "class_probabilities": {
+        "crow": 0.8073512315750122,
+        "not_a_crow": 0.030439455062150955,
+        "multi_crow": 0.16220927238464355
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241019_0/frame_000641_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.7942373752593994,
+      "class_probabilities": {
+        "crow": 0.7942373752593994,
+        "not_a_crow": 0.10759081691503525,
+        "multi_crow": 0.09817183762788773
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241018_2/frame_007467_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6657366752624512,
+      "class_probabilities": {
+        "crow": 0.6657366752624512,
+        "not_a_crow": 0.058679576963186264,
+        "multi_crow": 0.27558374404907227
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250303_1/frame_011016_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.7026160955429077,
+      "class_probabilities": {
+        "crow": 0.7026160955429077,
+        "not_a_crow": 0.22135524451732635,
+        "multi_crow": 0.07602863758802414
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_1409/frame_000021_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.9256349205970764,
+      "class_probabilities": {
+        "crow": 0.9256349205970764,
+        "not_a_crow": 0.05013873055577278,
+        "multi_crow": 0.02422638051211834
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_001542_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.4444085955619812,
+      "class_probabilities": {
+        "crow": 0.4444085955619812,
+        "not_a_crow": 0.2953972816467285,
+        "multi_crow": 0.2601941227912903
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_1423/frame_001601_crop_001.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.7646169066429138,
+      "class_probabilities": {
+        "crow": 0.1541636884212494,
+        "not_a_crow": 0.7646169066429138,
+        "multi_crow": 0.08121941238641739
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241012_1/frame_002292_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.5038671493530273,
+      "class_probabilities": {
+        "crow": 0.5038671493530273,
+        "not_a_crow": 0.09519881010055542,
+        "multi_crow": 0.40093401074409485
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_001981_crop_001.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.6264772415161133,
+      "class_probabilities": {
+        "crow": 0.25753581523895264,
+        "not_a_crow": 0.6264772415161133,
+        "multi_crow": 0.11598695814609528
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_002124_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.9431845545768738,
+      "class_probabilities": {
+        "crow": 0.9431845545768738,
+        "not_a_crow": 0.021380167454481125,
+        "multi_crow": 0.03543519228696823
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_007039_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.9197331070899963,
+      "class_probabilities": {
+        "crow": 0.9197331070899963,
+        "not_a_crow": 0.031136764213442802,
+        "multi_crow": 0.04913011193275452
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250303_1/frame_008930_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8401064872741699,
+      "class_probabilities": {
+        "crow": 0.8401064872741699,
+        "not_a_crow": 0.06008853390812874,
+        "multi_crow": 0.09980498254299164
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250314_2/frame_006051_crop_001.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.5067018270492554,
+      "class_probabilities": {
+        "crow": 0.47827526926994324,
+        "not_a_crow": 0.015022927895188332,
+        "multi_crow": 0.5067018270492554
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_005971_crop_002.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.46062248945236206,
+      "class_probabilities": {
+        "crow": 0.46062248945236206,
+        "not_a_crow": 0.40889209508895874,
+        "multi_crow": 0.13048537075519562
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_000034_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8710368871688843,
+      "class_probabilities": {
+        "crow": 0.8710368871688843,
+        "not_a_crow": 0.07652543485164642,
+        "multi_crow": 0.0524376705288887
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250314_2/frame_005120_crop_002.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.8462304472923279,
+      "class_probabilities": {
+        "crow": 0.07780405879020691,
+        "not_a_crow": 0.07596546411514282,
+        "multi_crow": 0.8462304472923279
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241018_2/frame_006860_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8979967832565308,
+      "class_probabilities": {
+        "crow": 0.8979967832565308,
+        "not_a_crow": 0.055766794830560684,
+        "multi_crow": 0.046236440539360046
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250311_1/frame_001152_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6395503878593445,
+      "class_probabilities": {
+        "crow": 0.6395503878593445,
+        "not_a_crow": 0.12170141190290451,
+        "multi_crow": 0.23874817788600922
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_001393_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6200488209724426,
+      "class_probabilities": {
+        "crow": 0.6200488209724426,
+        "not_a_crow": 0.12412117421627045,
+        "multi_crow": 0.2558300197124481
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240909_1/frame_000009_crop_005.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.54250568151474,
+      "class_probabilities": {
+        "crow": 0.3837951719760895,
+        "not_a_crow": 0.54250568151474,
+        "multi_crow": 0.07369910925626755
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250314_2/frame_005824_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.76120525598526,
+      "class_probabilities": {
+        "crow": 0.76120525598526,
+        "not_a_crow": 0.14949555695056915,
+        "multi_crow": 0.08929920196533203
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240909_1/frame_000536_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.7937248945236206,
+      "class_probabilities": {
+        "crow": 0.7937248945236206,
+        "not_a_crow": 0.0497831366956234,
+        "multi_crow": 0.1564919352531433
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7841/frame_001435_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8924704194068909,
+      "class_probabilities": {
+        "crow": 0.8924704194068909,
+        "not_a_crow": 0.07272040098905563,
+        "multi_crow": 0.0348091796040535
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_1423/frame_000052_crop_001.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.46559378504753113,
+      "class_probabilities": {
+        "crow": 0.2952985167503357,
+        "not_a_crow": 0.46559378504753113,
+        "multi_crow": 0.23910768330097198
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250303_1/frame_008636_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8030676245689392,
+      "class_probabilities": {
+        "crow": 0.8030676245689392,
+        "not_a_crow": 0.06386741995811462,
+        "multi_crow": 0.13306501507759094
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7841/frame_002815_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.4596335291862488,
+      "class_probabilities": {
+        "crow": 0.4596335291862488,
+        "not_a_crow": 0.3194015324115753,
+        "multi_crow": 0.2209649682044983
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_005553_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.45367953181266785,
+      "class_probabilities": {
+        "crow": 0.45367953181266785,
+        "not_a_crow": 0.18138174712657928,
+        "multi_crow": 0.3649387061595917
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_002831_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6574451923370361,
+      "class_probabilities": {
+        "crow": 0.6574451923370361,
+        "not_a_crow": 0.201851949095726,
+        "multi_crow": 0.14070290327072144
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7491/frame_001150_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.5442014336585999,
+      "class_probabilities": {
+        "crow": 0.5442014336585999,
+        "not_a_crow": 0.25929009914398193,
+        "multi_crow": 0.19650845229625702
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7146/frame_004121_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.7897554636001587,
+      "class_probabilities": {
+        "crow": 0.7897554636001587,
+        "not_a_crow": 0.19178378582000732,
+        "multi_crow": 0.01846076175570488
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241018_1/frame_000601_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8766987919807434,
+      "class_probabilities": {
+        "crow": 0.8766987919807434,
+        "not_a_crow": 0.04932688921689987,
+        "multi_crow": 0.07397433370351791
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7491/frame_000600_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.5009552240371704,
+      "class_probabilities": {
+        "crow": 0.5009552240371704,
+        "not_a_crow": 0.19746708869934082,
+        "multi_crow": 0.3015776574611664
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_005814_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.9370419979095459,
+      "class_probabilities": {
+        "crow": 0.9370419979095459,
+        "not_a_crow": 0.039138004183769226,
+        "multi_crow": 0.023819977417588234
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250314_2/frame_006812_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6739368438720703,
+      "class_probabilities": {
+        "crow": 0.6739368438720703,
+        "not_a_crow": 0.27645012736320496,
+        "multi_crow": 0.04961301386356354
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250303_1/frame_010181_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.7371057271957397,
+      "class_probabilities": {
+        "crow": 0.7371057271957397,
+        "not_a_crow": 0.047400977462530136,
+        "multi_crow": 0.21549329161643982
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_001421_crop_002.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6081359386444092,
+      "class_probabilities": {
+        "crow": 0.6081359386444092,
+        "not_a_crow": 0.32300737500190735,
+        "multi_crow": 0.0688566192984581
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250303_1/frame_008519_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.9355762004852295,
+      "class_probabilities": {
+        "crow": 0.9355762004852295,
+        "not_a_crow": 0.04905281215906143,
+        "multi_crow": 0.015370922163128853
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241014_1/frame_001406_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.4005473256111145,
+      "class_probabilities": {
+        "crow": 0.4005473256111145,
+        "not_a_crow": 0.3217966556549072,
+        "multi_crow": 0.2776559591293335
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7518/frame_000793_crop_001.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.7313454747200012,
+      "class_probabilities": {
+        "crow": 0.1884823739528656,
+        "not_a_crow": 0.7313454747200012,
+        "multi_crow": 0.08017216622829437
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_002351_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.812202513217926,
+      "class_probabilities": {
+        "crow": 0.812202513217926,
+        "not_a_crow": 0.13094663619995117,
+        "multi_crow": 0.056850798428058624
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241014_1/frame_002824_crop_001.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.5236170887947083,
+      "class_probabilities": {
+        "crow": 0.18561410903930664,
+        "not_a_crow": 0.2907688021659851,
+        "multi_crow": 0.5236170887947083
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_4142/frame_003095_crop_001.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.45917215943336487,
+      "class_probabilities": {
+        "crow": 0.3041931986808777,
+        "not_a_crow": 0.45917215943336487,
+        "multi_crow": 0.23663464188575745
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_004574_crop_001.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.558699369430542,
+      "class_probabilities": {
+        "crow": 0.22523286938667297,
+        "not_a_crow": 0.558699369430542,
+        "multi_crow": 0.21606777608394623
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_6848/frame_002288_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.7913629412651062,
+      "class_probabilities": {
+        "crow": 0.7913629412651062,
+        "not_a_crow": 0.16078543663024902,
+        "multi_crow": 0.04785163700580597
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241018_1/frame_000309_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.3749200403690338,
+      "class_probabilities": {
+        "crow": 0.3749200403690338,
+        "not_a_crow": 0.36722424626350403,
+        "multi_crow": 0.25785571336746216
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_004178_crop_002.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.7057345509529114,
+      "class_probabilities": {
+        "crow": 0.17218461632728577,
+        "not_a_crow": 0.12208078801631927,
+        "multi_crow": 0.7057345509529114
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_003597_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.7824229001998901,
+      "class_probabilities": {
+        "crow": 0.7824229001998901,
+        "not_a_crow": 0.12190322577953339,
+        "multi_crow": 0.09567384421825409
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_005300_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6806857585906982,
+      "class_probabilities": {
+        "crow": 0.6806857585906982,
+        "not_a_crow": 0.01116065215319395,
+        "multi_crow": 0.30815356969833374
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241014_1/frame_000044_crop_002.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.5147281885147095,
+      "class_probabilities": {
+        "crow": 0.4127691984176636,
+        "not_a_crow": 0.07250262796878815,
+        "multi_crow": 0.5147281885147095
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_000122_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8311614394187927,
+      "class_probabilities": {
+        "crow": 0.8311614394187927,
+        "not_a_crow": 0.04011969268321991,
+        "multi_crow": 0.12871888279914856
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7207/frame_006422_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.970848560333252,
+      "class_probabilities": {
+        "crow": 0.970848560333252,
+        "not_a_crow": 0.013261050917208195,
+        "multi_crow": 0.015890460461378098
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241018_2/frame_012945_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.4823329448699951,
+      "class_probabilities": {
+        "crow": 0.4823329448699951,
+        "not_a_crow": 0.3049309551715851,
+        "multi_crow": 0.21273615956306458
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_003038_crop_002.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.5067330598831177,
+      "class_probabilities": {
+        "crow": 0.38010939955711365,
+        "not_a_crow": 0.11315757036209106,
+        "multi_crow": 0.5067330598831177
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/Videoshop_2024-10-08/frame_000953_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.5180750489234924,
+      "class_probabilities": {
+        "crow": 0.5180750489234924,
+        "not_a_crow": 0.32172903418540955,
+        "multi_crow": 0.16019585728645325
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_001182_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.9430861473083496,
+      "class_probabilities": {
+        "crow": 0.9430861473083496,
+        "not_a_crow": 0.015404805541038513,
+        "multi_crow": 0.041509076952934265
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_001064_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.672510027885437,
+      "class_probabilities": {
+        "crow": 0.672510027885437,
+        "not_a_crow": 0.1381956785917282,
+        "multi_crow": 0.1892942190170288
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_003883_crop_002.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.5110571980476379,
+      "class_probabilities": {
+        "crow": 0.5110571980476379,
+        "not_a_crow": 0.22582842409610748,
+        "multi_crow": 0.26311439275741577
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_6926/frame_000012_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.4867193400859833,
+      "class_probabilities": {
+        "crow": 0.4867193400859833,
+        "not_a_crow": 0.1942502111196518,
+        "multi_crow": 0.31903043389320374
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_006139_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.7124794125556946,
+      "class_probabilities": {
+        "crow": 0.7124794125556946,
+        "not_a_crow": 0.18537688255310059,
+        "multi_crow": 0.10214371979236603
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240909_1/frame_000475_crop_001.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.4721851050853729,
+      "class_probabilities": {
+        "crow": 0.21606525778770447,
+        "not_a_crow": 0.4721851050853729,
+        "multi_crow": 0.3117496371269226
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241014_1/frame_000015_crop_002.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.5514565110206604,
+      "class_probabilities": {
+        "crow": 0.5514565110206604,
+        "not_a_crow": 0.37788447737693787,
+        "multi_crow": 0.07065898180007935
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241012_1/frame_004201_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.3905338943004608,
+      "class_probabilities": {
+        "crow": 0.3905338943004608,
+        "not_a_crow": 0.3385103642940521,
+        "multi_crow": 0.27095577120780945
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_003867_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6574335098266602,
+      "class_probabilities": {
+        "crow": 0.6574335098266602,
+        "not_a_crow": 0.16997161507606506,
+        "multi_crow": 0.17259487509727478
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241014_1/frame_000238_crop_001.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.452951580286026,
+      "class_probabilities": {
+        "crow": 0.32811111211776733,
+        "not_a_crow": 0.21893726289272308,
+        "multi_crow": 0.452951580286026
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_001846_crop_002.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6847600936889648,
+      "class_probabilities": {
+        "crow": 0.6847600936889648,
+        "not_a_crow": 0.1466219276189804,
+        "multi_crow": 0.16861802339553833
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_003888_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8306669592857361,
+      "class_probabilities": {
+        "crow": 0.8306669592857361,
+        "not_a_crow": 0.06695341318845749,
+        "multi_crow": 0.10237965732812881
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_006978_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.4084163010120392,
+      "class_probabilities": {
+        "crow": 0.4084163010120392,
+        "not_a_crow": 0.29974204301834106,
+        "multi_crow": 0.29184165596961975
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250303_1/frame_008576_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6917353272438049,
+      "class_probabilities": {
+        "crow": 0.6917353272438049,
+        "not_a_crow": 0.09760898351669312,
+        "multi_crow": 0.21065561473369598
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240909_1/frame_000464_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.5548820495605469,
+      "class_probabilities": {
+        "crow": 0.5548820495605469,
+        "not_a_crow": 0.30080199241638184,
+        "multi_crow": 0.14431597292423248
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_005843_crop_001.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.4359021782875061,
+      "class_probabilities": {
+        "crow": 0.3907374143600464,
+        "not_a_crow": 0.1733604520559311,
+        "multi_crow": 0.4359021782875061
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250303_1/frame_011081_crop_001.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.6052272915840149,
+      "class_probabilities": {
+        "crow": 0.34274062514305115,
+        "not_a_crow": 0.0520319901406765,
+        "multi_crow": 0.6052272915840149
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_1409/frame_000016_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.602581799030304,
+      "class_probabilities": {
+        "crow": 0.602581799030304,
+        "not_a_crow": 0.2244909703731537,
+        "multi_crow": 0.17292724549770355
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7207/frame_001840_crop_001.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.4887239933013916,
+      "class_probabilities": {
+        "crow": 0.3282550275325775,
+        "not_a_crow": 0.18302100896835327,
+        "multi_crow": 0.4887239933013916
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_6927/frame_002937_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.9070279598236084,
+      "class_probabilities": {
+        "crow": 0.9070279598236084,
+        "not_a_crow": 0.08167098462581635,
+        "multi_crow": 0.011301123537123203
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241018_1/frame_000316_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8187263011932373,
+      "class_probabilities": {
+        "crow": 0.8187263011932373,
+        "not_a_crow": 0.07752805203199387,
+        "multi_crow": 0.10374567657709122
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_001177_crop_001.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.458077073097229,
+      "class_probabilities": {
+        "crow": 0.294711172580719,
+        "not_a_crow": 0.458077073097229,
+        "multi_crow": 0.247211754322052
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_6927/frame_002721_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6789835691452026,
+      "class_probabilities": {
+        "crow": 0.6789835691452026,
+        "not_a_crow": 0.05547051876783371,
+        "multi_crow": 0.26554587483406067
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7841/frame_009088_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.425874263048172,
+      "class_probabilities": {
+        "crow": 0.425874263048172,
+        "not_a_crow": 0.15913505852222443,
+        "multi_crow": 0.41499072313308716
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7207/frame_000460_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8928195834159851,
+      "class_probabilities": {
+        "crow": 0.8928195834159851,
+        "not_a_crow": 0.0542030967772007,
+        "multi_crow": 0.052977245301008224
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7517/frame_002523_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.6312500238418579,
+      "class_probabilities": {
+        "crow": 0.6312500238418579,
+        "not_a_crow": 0.3320598900318146,
+        "multi_crow": 0.036690108478069305
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_3845/frame_000009_crop_001.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.6051691770553589,
+      "class_probabilities": {
+        "crow": 0.23393851518630981,
+        "not_a_crow": 0.1608922928571701,
+        "multi_crow": 0.6051691770553589
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_1423/frame_001380_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.5094972252845764,
+      "class_probabilities": {
+        "crow": 0.5094972252845764,
+        "not_a_crow": 0.2590527832508087,
+        "multi_crow": 0.23145003616809845
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_001518_crop_002.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.8843725323677063,
+      "class_probabilities": {
+        "crow": 0.8843725323677063,
+        "not_a_crow": 0.08031672239303589,
+        "multi_crow": 0.03531074896454811
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241018_2/frame_002976_crop_001.jpg",
+      "predicted_label": "not_a_crow",
+      "confidence": 0.4662182033061981,
+      "class_probabilities": {
+        "crow": 0.4138695001602173,
+        "not_a_crow": 0.4662182033061981,
+        "multi_crow": 0.11991237848997116
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241012_1/frame_002233_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.4225107431411743,
+      "class_probabilities": {
+        "crow": 0.4225107431411743,
+        "not_a_crow": 0.18911747634410858,
+        "multi_crow": 0.3883717358112335
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20250216_1/frame_001117_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.594749391078949,
+      "class_probabilities": {
+        "crow": 0.594749391078949,
+        "not_a_crow": 0.045325372368097305,
+        "multi_crow": 0.35992521047592163
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_005499_crop_001.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.5015211701393127,
+      "class_probabilities": {
+        "crow": 0.2167462706565857,
+        "not_a_crow": 0.2817324995994568,
+        "multi_crow": 0.5015211701393127
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_6927/frame_002607_crop_001.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.41144612431526184,
+      "class_probabilities": {
+        "crow": 0.41144612431526184,
+        "not_a_crow": 0.21266868710517883,
+        "multi_crow": 0.3758851885795593
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20240831_1/frame_003563_crop_002.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.39219382405281067,
+      "class_probabilities": {
+        "crow": 0.39219382405281067,
+        "not_a_crow": 0.3862612247467041,
+        "multi_crow": 0.22154490649700165
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/IMG_7517/frame_001026_crop_001.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.4574996829032898,
+      "class_probabilities": {
+        "crow": 0.15637677907943726,
+        "not_a_crow": 0.3861236274242401,
+        "multi_crow": 0.4574996829032898
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241018_2/frame_006032_crop_002.jpg",
+      "predicted_label": "crow",
+      "confidence": 0.7043547630310059,
+      "class_probabilities": {
+        "crow": 0.7043547630310059,
+        "not_a_crow": 0.13310937583446503,
+        "multi_crow": 0.16253584623336792
+      }
+    },
+    {
+      "image_path": "crow_crops/videos/RingVideo_20241018_2/frame_002827_crop_001.jpg",
+      "predicted_label": "multi_crow",
+      "confidence": 0.4925585985183716,
+      "class_probabilities": {
+        "crow": 0.3745749592781067,
+        "not_a_crow": 0.13286647200584412,
+        "multi_crow": 0.4925585985183716
+      }
+    }
+  ]
+}

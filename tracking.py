@@ -300,12 +300,12 @@ def extract_normalized_crow_crop(frame, bbox, expected_size=(512, 512), correct_
             except Exception as e:
                 logger.warning(f"Error applying orientation correction: {e}. Using original crop.")
         
-        crop_resized = cv2.resize(crop, (expected_size[1], expected_size[0]))
+        crop_resized = cv2.resize(crop, (expected_size[1], expected_size[0]), interpolation=cv2.INTER_LANCZOS4)
         crop_normalized = crop_resized.astype(np.float32) / 255.0 # HWC, [0,1]
         
         head_height = expected_size[0] // 3
         head_crop_region = crop_normalized[:head_height, :, :] # Slice from already normalized full crop
-        head_crop_resized = cv2.resize(head_crop_region, (expected_size[1], expected_size[0]))
+        head_crop_resized = cv2.resize(head_crop_region, (expected_size[1], expected_size[0]), interpolation=cv2.INTER_LANCZOS4)
         
         return {'full': crop_normalized, 'head': head_crop_resized}
         

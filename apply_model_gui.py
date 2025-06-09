@@ -11,10 +11,11 @@ import json
 from datetime import datetime
 from pathlib import Path
 import logging
+from PIL import Image, ImageTk
 
 # Import the core functionality
 from apply_model_to_unlabeled import CrowClassifier, apply_model_to_unlabeled
-from db import get_unlabeled_images
+from db import get_unlabeled_images, add_image_label
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -24,12 +25,14 @@ class ModelApplicationGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Crow Classifier - Apply Model to Unlabeled Images")
-        self.root.geometry("1000x700")
+        self.root.geometry("1400x800")
         
         # State variables
         self.processing = False
         self.results = None
         self.current_predictions = []
+        self.current_image_index = -1
+        self.current_image_data = None
         
         self.create_widgets()
         self.update_status()
@@ -43,15 +46,20 @@ class ModelApplicationGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(2, weight=1)
+        main_frame.columnconfigure(2, weight=1)
+        main_frame.rowconfigure(0, weight=1)
         
         # Left panel for controls
         left_frame = ttk.Frame(main_frame)
-        left_frame.grid(row=0, column=0, rowspan=3, sticky=(tk.N, tk.S), padx=(0, 10))
+        left_frame.grid(row=0, column=0, sticky=(tk.N, tk.S), padx=(0, 10))
         
-        # Right panel for results
-        right_frame = ttk.LabelFrame(main_frame, text="Prediction Results", padding="5")
-        right_frame.grid(row=0, column=1, rowspan=3, sticky=(tk.W, tk.E, tk.N, tk.S))
+        # Middle panel for results
+        middle_frame = ttk.LabelFrame(main_frame, text="Prediction Results", padding="5")
+        middle_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
+        
+        # Right panel for image review
+        right_frame = ttk.LabelFrame(main_frame, text="Image Review", padding="5")
+        right_frame.grid(row=0, column=2, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # === LEFT PANEL ===
         
@@ -156,23 +164,23 @@ class ModelApplicationGUI:
         self.stats_label = ttk.Label(status_frame, text="", font=('TkDefaultFont', 9))
         self.stats_label.pack(anchor=tk.W)
         
-        # === RIGHT PANEL ===
-        right_frame.columnconfigure(0, weight=1)
-        right_frame.rowconfigure(1, weight=1)
+        # === MIDDLE PANEL ===
+        middle_frame.columnconfigure(0, weight=1)
+        middle_frame.rowconfigure(1, weight=1)
         
         # Summary display
-        summary_frame = ttk.Frame(right_frame)
+        summary_frame = ttk.Frame(middle_frame)
         summary_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
         summary_frame.columnconfigure(1, weight=1)
         
-        self.summary_text = tk.Text(summary_frame, height=6, width=50)
+        self.summary_text = tk.Text(summary_frame, height=6, width=40)
         summary_scroll = ttk.Scrollbar(summary_frame, orient=tk.VERTICAL, command=self.summary_text.yview)
         self.summary_text.configure(yscrollcommand=summary_scroll.set)
         self.summary_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         summary_scroll.grid(row=0, column=1, sticky=(tk.N, tk.S))
         
         # Predictions table
-        table_frame = ttk.LabelFrame(right_frame, text="Sample Predictions", padding="5")
+        table_frame = ttk.LabelFrame(middle_frame, text="Predictions (click to review)", padding="5")
         table_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
@@ -188,10 +196,10 @@ class ModelApplicationGUI:
         self.predictions_tree.heading('status', text='Status')
         
         # Configure column widths
-        self.predictions_tree.column('filename', width=200)
-        self.predictions_tree.column('prediction', width=100)
-        self.predictions_tree.column('confidence', width=80)
-        self.predictions_tree.column('status', width=120)
+        self.predictions_tree.column('filename', width=150)
+        self.predictions_tree.column('prediction', width=80)
+        self.predictions_tree.column('confidence', width=70)
+        self.predictions_tree.column('status', width=100)
         
         # Add scrollbar to treeview
         tree_scroll = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.predictions_tree.yview)
@@ -200,13 +208,83 @@ class ModelApplicationGUI:
         self.predictions_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         tree_scroll.grid(row=0, column=1, sticky=(tk.N, tk.S))
         
+        # Bind double-click event to tree
+        self.predictions_tree.bind('<Double-1>', self.on_prediction_select)
+        self.predictions_tree.bind('<Button-1>', self.on_prediction_click)
+        
         # Buttons for results
-        button_frame = ttk.Frame(right_frame)
+        button_frame = ttk.Frame(middle_frame)
         button_frame.grid(row=2, column=0, pady=5)
         
-        ttk.Button(button_frame, text="Export Results", command=self.export_results).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Review Uncertain", command=self.review_uncertain).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Clear Results", command=self.clear_results).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Export Results", command=self.export_results).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="Clear Results", command=self.clear_results).pack(side=tk.LEFT, padx=2)
+        
+        # === RIGHT PANEL - IMAGE REVIEW ===
+        right_frame.columnconfigure(0, weight=1)
+        right_frame.rowconfigure(1, weight=1)
+        
+        # Image display
+        image_display_frame = ttk.Frame(right_frame)
+        image_display_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5))
+        image_display_frame.columnconfigure(0, weight=1)
+        image_display_frame.rowconfigure(0, weight=1)
+        
+        # Canvas for image with scrollbars
+        self.image_canvas = tk.Canvas(image_display_frame, bg='white', width=300, height=300)
+        self.image_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Image info
+        self.image_info_label = ttk.Label(right_frame, text="Select a prediction to review", 
+                                         font=('TkDefaultFont', 10))
+        self.image_info_label.grid(row=1, column=0, pady=5)
+        
+        # Labeling controls
+        label_frame = ttk.LabelFrame(right_frame, text="Label Controls", padding="5")
+        label_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
+        
+        # Current prediction display
+        self.current_prediction_label = ttk.Label(label_frame, text="Predicted: --", 
+                                                 font=('TkDefaultFont', 10, 'bold'))
+        self.current_prediction_label.pack(pady=2)
+        
+        self.current_confidence_label = ttk.Label(label_frame, text="Confidence: --")
+        self.current_confidence_label.pack(pady=2)
+        
+        # Label buttons
+        button_grid = ttk.Frame(label_frame)
+        button_grid.pack(pady=5)
+        
+        self.confirm_btn = ttk.Button(button_grid, text="✓ Confirm", 
+                                     command=self.confirm_label, state=tk.DISABLED)
+        self.confirm_btn.grid(row=0, column=0, padx=2, pady=2)
+        
+        ttk.Button(button_grid, text="Crow", 
+                  command=lambda: self.set_manual_label("crow")).grid(row=0, column=1, padx=2, pady=2)
+        
+        ttk.Button(button_grid, text="Not Crow", 
+                  command=lambda: self.set_manual_label("not_a_crow")).grid(row=1, column=0, padx=2, pady=2)
+        
+        ttk.Button(button_grid, text="Multi Crow", 
+                  command=lambda: self.set_manual_label("multi_crow")).grid(row=1, column=1, padx=2, pady=2)
+        
+        ttk.Button(button_grid, text="Bad Crow", 
+                  command=lambda: self.set_manual_label("bad_crow")).grid(row=2, column=0, columnspan=2, padx=2, pady=2)
+        
+        # Navigation
+        nav_frame = ttk.Frame(right_frame)
+        nav_frame.grid(row=3, column=0, pady=5)
+        
+        self.prev_btn = ttk.Button(nav_frame, text="◀ Previous", 
+                                  command=self.previous_image, state=tk.DISABLED)
+        self.prev_btn.pack(side=tk.LEFT, padx=2)
+        
+        self.next_btn = ttk.Button(nav_frame, text="Next ▶", 
+                                  command=self.next_image, state=tk.DISABLED)
+        self.next_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Status
+        self.review_status_label = ttk.Label(right_frame, text="", font=('TkDefaultFont', 9))
+        self.review_status_label.grid(row=4, column=0, pady=2)
         
     def update_confidence_label(self, value):
         """Update confidence percentage label"""
@@ -291,7 +369,7 @@ class ModelApplicationGUI:
         self.processing_thread.daemon = True
         self.processing_thread.start()
         
-        def run_processing(self):
+    def run_processing(self):
         """Run the actual model application in background"""
         try:
             # Get parameters
@@ -361,12 +439,15 @@ class ModelApplicationGUI:
             
         self.summary_text.insert(1.0, summary)
         
+        # Store predictions for image review
+        self.current_predictions = results['detailed_results']
+        
         # Display sample predictions in table
         for item in self.predictions_tree.get_children():
             self.predictions_tree.delete(item)
             
-        # Show up to 100 predictions
-        sample_predictions = results['detailed_results'][:100]
+        # Show all predictions (they can scroll if needed)
+        sample_predictions = self.current_predictions
         
         for pred in sample_predictions:
             filename = Path(pred['image_path']).name
@@ -473,14 +554,205 @@ class ModelApplicationGUI:
     def clear_results(self):
         """Clear all results and reset display"""
         self.results = None
+        self.current_predictions = []
+        self.current_image_index = -1
+        self.current_image_data = None
+        
         self.summary_text.delete(1.0, tk.END)
         
         for item in self.predictions_tree.get_children():
             self.predictions_tree.delete(item)
             
+        # Clear image display
+        self.image_canvas.delete("all")
+        self.image_info_label.config(text="Select a prediction to review")
+        self.current_prediction_label.config(text="Predicted: --")
+        self.current_confidence_label.config(text="Confidence: --")
+        self.confirm_btn.config(state=tk.DISABLED)
+        self.prev_btn.config(state=tk.DISABLED)
+        self.next_btn.config(state=tk.DISABLED)
+        self.review_status_label.config(text="")
+            
         self.progress_var.set(0)
         if not self.processing:
             self.status_label.config(text="Ready")
+            
+    def on_prediction_click(self, event):
+        """Handle single click on prediction"""
+        item = self.predictions_tree.selection()[0] if self.predictions_tree.selection() else None
+        if item:
+            # Get the index of the clicked item
+            children = self.predictions_tree.get_children()
+            self.current_image_index = children.index(item)
+            self.load_current_image()
+            
+    def on_prediction_select(self, event):
+        """Handle double-click on prediction"""
+        self.on_prediction_click(event)
+        
+    def load_current_image(self):
+        """Load and display the current image"""
+        if not self.current_predictions or self.current_image_index < 0:
+            return
+            
+        try:
+            prediction = self.current_predictions[self.current_image_index]
+            image_path = prediction['image_path']
+            
+            # Load image
+            pil_image = Image.open(image_path)
+            
+            # Resize image to fit canvas while maintaining aspect ratio
+            canvas_width = 300
+            canvas_height = 300
+            
+            # Calculate scaling
+            img_width, img_height = pil_image.size
+            scale = min(canvas_width / img_width, canvas_height / img_height)
+            
+            new_width = int(img_width * scale)
+            new_height = int(img_height * scale)
+            
+            # Resize image
+            pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Convert to PhotoImage
+            self.current_image_data = ImageTk.PhotoImage(pil_image)
+            
+            # Clear canvas and display image
+            self.image_canvas.delete("all")
+            x = (canvas_width - new_width) // 2
+            y = (canvas_height - new_height) // 2
+            self.image_canvas.create_image(x, y, anchor=tk.NW, image=self.current_image_data)
+            
+            # Update info labels
+            filename = Path(image_path).name
+            self.image_info_label.config(text=f"Image: {filename}")
+            
+            pred_label = prediction['predicted_label']
+            confidence = prediction['confidence']
+            
+            self.current_prediction_label.config(text=f"Predicted: {pred_label}")
+            self.current_confidence_label.config(text=f"Confidence: {confidence:.3f}")
+            
+            # Enable confirm button
+            self.confirm_btn.config(state=tk.NORMAL)
+            
+            # Update navigation buttons
+            self.prev_btn.config(state=tk.NORMAL if self.current_image_index > 0 else tk.DISABLED)
+            self.next_btn.config(state=tk.NORMAL if self.current_image_index < len(self.current_predictions) - 1 else tk.DISABLED)
+            
+            # Update status
+            self.review_status_label.config(text=f"Image {self.current_image_index + 1} of {len(self.current_predictions)}")
+            
+        except Exception as e:
+            logger.error(f"Error loading image: {e}")
+            messagebox.showerror("Error", f"Failed to load image: {e}")
+            
+    def previous_image(self):
+        """Go to previous image"""
+        if self.current_image_index > 0:
+            self.current_image_index -= 1
+            self.load_current_image()
+            
+            # Update selection in tree
+            children = self.predictions_tree.get_children()
+            if self.current_image_index < len(children):
+                self.predictions_tree.selection_set(children[self.current_image_index])
+                self.predictions_tree.see(children[self.current_image_index])
+                
+    def next_image(self):
+        """Go to next image"""
+        if self.current_image_index < len(self.current_predictions) - 1:
+            self.current_image_index += 1
+            self.load_current_image()
+            
+            # Update selection in tree
+            children = self.predictions_tree.get_children()
+            if self.current_image_index < len(children):
+                self.predictions_tree.selection_set(children[self.current_image_index])
+                self.predictions_tree.see(children[self.current_image_index])
+                
+    def confirm_label(self):
+        """Confirm the predicted label"""
+        if self.current_image_index < 0 or not self.current_predictions:
+            return
+            
+        prediction = self.current_predictions[self.current_image_index]
+        predicted_label = prediction['predicted_label']
+        
+        self.save_label(predicted_label, f"Confirmed prediction (conf: {prediction['confidence']:.3f})")
+        
+    def set_manual_label(self, label):
+        """Set a manual label for the current image"""
+        if self.current_image_index < 0 or not self.current_predictions:
+            return
+            
+        prediction = self.current_predictions[self.current_image_index]
+        self.save_label(label, f"Manual override of '{prediction['predicted_label']}' (conf: {prediction['confidence']:.3f})")
+        
+    def save_label(self, label, notes):
+        """Save the label to database"""
+        try:
+            prediction = self.current_predictions[self.current_image_index]
+            image_path = prediction['image_path']
+            confidence = prediction['confidence']
+            
+            # Determine if this should be training data
+            is_training_data = label == "crow"  # Only good quality crows are training data
+            
+            # Save to database
+            add_image_label(
+                image_path=image_path,
+                label=label,
+                confidence=confidence,
+                reviewer_notes=notes,
+                is_training_data=is_training_data
+            )
+            
+            # Update the prediction in our local data
+            prediction['user_labeled'] = True
+            prediction['final_label'] = label
+            
+            # Update the tree display
+            children = self.predictions_tree.get_children()
+            if self.current_image_index < len(children):
+                item = children[self.current_image_index]
+                filename = Path(image_path).name
+                self.predictions_tree.set(item, 'status', f'✅ Labeled: {label}')
+                
+            # Show success message
+            self.review_status_label.config(text=f"✅ Saved: {label}", foreground="green")
+            
+            # Auto-advance to next image
+            self.root.after(1000, self.auto_advance)
+            
+            logger.info(f"Labeled {Path(image_path).name} as {label}")
+            
+        except Exception as e:
+            logger.error(f"Error saving label: {e}")
+            messagebox.showerror("Error", f"Failed to save label: {e}")
+            
+    def auto_advance(self):
+        """Auto-advance to next unlabeled image"""
+        # Reset status color
+        self.review_status_label.config(foreground="black")
+        
+        # Find next unlabeled image
+        start_index = self.current_image_index + 1
+        for i in range(start_index, len(self.current_predictions)):
+            if not self.current_predictions[i].get('user_labeled', False):
+                self.current_image_index = i
+                self.load_current_image()
+                
+                # Update tree selection
+                children = self.predictions_tree.get_children()
+                self.predictions_tree.selection_set(children[i])
+                self.predictions_tree.see(children[i])
+                return
+                
+        # If no more unlabeled images, stay on current
+        self.review_status_label.config(text="All remaining images labeled!")
 
 def main():
     root = tk.Tk()

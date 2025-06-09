@@ -29,6 +29,38 @@ from collections import defaultdict
 # Log startup
 logger.info("Starting Crow Training Data Extractor GUI")
 
+def find_video_files(video_dir, recursive=False):
+    """
+    Find video files in directory, optionally recursively.
+    
+    Args:
+        video_dir: Directory to search for videos
+        recursive: Whether to search subdirectories recursively
+        
+    Returns:
+        List of video file paths
+    """
+    video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.MP4', '.AVI', '.MOV', '.MKV')
+    video_files = []
+    
+    if recursive:
+        # Use os.walk for recursive search
+        for root, dirs, files in os.walk(video_dir):
+            for file in files:
+                if file.endswith(video_extensions):
+                    video_files.append(os.path.join(root, file))
+    else:
+        # Non-recursive search (original behavior)
+        try:
+            for file in os.listdir(video_dir):
+                if file.endswith(video_extensions):
+                    video_files.append(os.path.join(video_dir, file))
+        except OSError as e:
+            logger.error(f"Error reading directory {video_dir}: {e}")
+            return []
+    
+    return sorted(video_files)
+
 class OrientationDetector:
     def __init__(self):
         # Initialize face detector for orientation detection
@@ -158,7 +190,7 @@ class CropReviewWindow:
         h, w = crop.shape[:2]
         scale = min(400/w, 400/h)
         new_size = (int(w*scale), int(h*scale))
-        crop_resized = cv2.resize(crop, new_size)
+        crop_resized = cv2.resize(crop, new_size, interpolation=cv2.INTER_LANCZOS4)
         
         # Convert to PhotoImage
         crop_rgb = cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB)
@@ -245,15 +277,19 @@ class CrowExtractorGUI:
         self.orientation_correction_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(settings_frame, text="Auto-correct crow orientation", variable=self.orientation_correction_var).grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=2)
         
+        # Recursive search checkbox
+        self.recursive_search_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(settings_frame, text="Search subdirectories recursively", variable=self.recursive_search_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=2)
+        
         # NMS merge threshold
         self.nms_threshold_var = tk.DoubleVar(value=0.3)
-        ttk.Label(settings_frame, text="Box Merge Threshold:").grid(row=5, column=0, sticky=tk.W)
+        ttk.Label(settings_frame, text="Box Merge Threshold:").grid(row=6, column=0, sticky=tk.W)
         ttk.Scale(settings_frame, from_=0.1, to=0.7, variable=self.nms_threshold_var, 
-                 orient=tk.HORIZONTAL, length=150).grid(row=5, column=1, padx=5)
-        ttk.Label(settings_frame, textvariable=self.nms_threshold_var).grid(row=5, column=2)
+                 orient=tk.HORIZONTAL, length=150).grid(row=6, column=1, padx=5)
+        ttk.Label(settings_frame, textvariable=self.nms_threshold_var).grid(row=6, column=2)
         
         # Tooltip-like label for NMS threshold
-        ttk.Label(settings_frame, text="(Lower = merge more boxes)", font=('TkDefaultFont', 8)).grid(row=6, column=0, columnspan=3, sticky=tk.W)
+        ttk.Label(settings_frame, text="(Lower = merge more boxes)", font=('TkDefaultFont', 8)).grid(row=7, column=0, columnspan=3, sticky=tk.W)
         
         # Audio settings frame
         audio_frame = ttk.LabelFrame(self.left_panel, text="Audio Settings", padding="5")
@@ -420,15 +456,34 @@ class CrowExtractorGUI:
         # Enable save button when processing starts
         self.save_button.config(state=tk.NORMAL)
         
-        self.video_files = [f for f in os.listdir(video_dir) 
-                      if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))]
+        # Get recursive search setting
+        recursive_search = self.recursive_search_var.get()
+        logger.info(f"Recursive search: {'enabled' if recursive_search else 'disabled'}")
         
-        if not self.video_files:
+        # Find video files using the new function
+        video_file_paths = find_video_files(video_dir, recursive=recursive_search)
+        
+        if not video_file_paths:
             logger.error("No video files found in selected directory")
             messagebox.showerror("Error", "No video files found in selected directory")
             return
         
+        # Convert to relative paths for display and processing
+        self.video_files = []
+        for video_path in video_file_paths:
+            if recursive_search:
+                # For recursive search, store the full path
+                self.video_files.append(video_path)
+            else:
+                # For non-recursive, store just the filename for compatibility
+                self.video_files.append(os.path.basename(video_path))
+        
         logger.info(f"Found {len(self.video_files)} video files to process")
+        if recursive_search:
+            logger.info("Videos found in:")
+            for video_file in video_file_paths:
+                rel_path = os.path.relpath(video_file, video_dir)
+                logger.info(f"  {rel_path}")
         
         # Create processing run directory
         self.run_dir = self.tracker.create_processing_run()
@@ -460,10 +515,19 @@ class CrowExtractorGUI:
         self.current_video_index = current_index
         
         video_file = video_files[current_index]
-        self.current_video = os.path.join(self.video_dir_var.get(), video_file)
         
-        self.status_var.set(f"Processing {video_file}...")
-        logger.info(f"Processing video: {video_file}")
+        # Handle both full paths (recursive) and filenames (non-recursive)
+        if os.path.isabs(video_file):
+            # Full path (recursive search)
+            self.current_video = video_file
+            display_name = os.path.relpath(video_file, self.video_dir_var.get())
+        else:
+            # Filename only (non-recursive search)
+            self.current_video = os.path.join(self.video_dir_var.get(), video_file)
+            display_name = video_file
+        
+        self.status_var.set(f"Processing {display_name}...")
+        logger.info(f"Processing video: {display_name}")
         
         self.cap = cv2.VideoCapture(self.current_video)
         if not self.cap.isOpened():
