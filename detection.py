@@ -83,8 +83,8 @@ faster_rcnn_model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
 faster_rcnn_model.eval()
 
 # Configure more aggressive NMS threshold to reduce overlapping bounding boxes
-faster_rcnn_model.roi_heads.nms_thresh = 0.2  # More aggressive: suppress boxes with >20% overlap (was 0.3)
-faster_rcnn_model.roi_heads.score_thresh = 0.3  # Lower threshold to catch more detections before our own filtering (was 0.5)
+faster_rcnn_model.roi_heads.nms_thresh = 0.1  # Very low threshold to let our custom NMS handle merging
+faster_rcnn_model.roi_heads.score_thresh = 0.2  # Lower threshold to catch more detections before our own filtering
 
 if torch.cuda.is_available():
     faster_rcnn_model = faster_rcnn_model.cuda()
@@ -273,6 +273,8 @@ def detect_crows_parallel(
 ):
     print("[DEBUG] Entered detect_crows_parallel")
     print(f"[DEBUG] detect_crows_parallel: {len(frames)} frames, score_threshold={score_threshold}, yolo_threshold={yolo_threshold}")
+    print(f"[DEBUG] NMS threshold: {nms_threshold}, Multi-view: YOLO={multi_view_yolo}, RCNN={multi_view_rcnn}")
+    print(f"[DEBUG] Faster R-CNN NMS: {faster_rcnn_model.roi_heads.nms_thresh}, Score: {faster_rcnn_model.roi_heads.score_thresh}")
     detections = []
     print("[DEBUG] Setting up multi-view extractor if needed...")
     # Set up multi-view extractor if needed
@@ -294,7 +296,7 @@ def detect_crows_parallel(
                     for view in yolo_views:
                         try:
                             print(f"[DEBUG] Frame {idx}: Before YOLO model inference (multi-view)")
-                            yolo_results = _run_model_inference(yolo_model, view.copy(), conf=yolo_threshold)[0]  # Make a copy of the view
+                            yolo_results = _run_model_inference(yolo_model, view.copy(), conf=yolo_threshold, iou=0.1)[0]  # Very low NMS threshold
                             print(f"[DEBUG] Frame {idx}: After YOLO model inference (multi-view)")
                             for bbox, score, cls in zip(yolo_results.boxes.xyxy, yolo_results.boxes.conf, yolo_results.boxes.cls):
                                 print(f"[DEBUG] YOLO bbox: {bbox}, score: {score}, cls: {cls}")
@@ -312,7 +314,7 @@ def detect_crows_parallel(
                 else:
                     try:
                         print(f"[DEBUG] Frame {idx}: Before YOLO model inference (single-view)")
-                        yolo_results = _run_model_inference(yolo_model, frame.copy(), conf=yolo_threshold)[0]  # Make a copy of the frame
+                        yolo_results = _run_model_inference(yolo_model, frame.copy(), conf=yolo_threshold, iou=0.1)[0]  # Very low NMS threshold
                         print(f"[DEBUG] Frame {idx}: After YOLO model inference (single-view)")
                         print("[DEBUG] YOLO results:", yolo_results)
                         for bbox, score, cls in zip(yolo_results.boxes.xyxy, yolo_results.boxes.conf, yolo_results.boxes.cls):
