@@ -446,7 +446,7 @@ class EnhancedTracker:
             full_crops_np, head_crops_np = [], []
             for det in detections: # detections are expected to be [x1,y1,x2,y2, possibly score]
                 bbox = det[:4]
-                crops = self.extract_normalized_crow_crop(frame, bbox, padding=0.3) 
+                crops = extract_normalized_crow_crop(frame, bbox, correct_orientation=True, padding=0.3) 
                 if crops:
                     full_crops_np.append(crops['full'])
                     head_crops_np.append(crops['head'])

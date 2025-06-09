@@ -17,13 +17,14 @@ from detection import detect_crows_parallel
 from crow_tracking import CrowTracker
 from collections import defaultdict
 from logging_config import setup_logging
+from video_orientation import apply_video_orientation
 
 # Configure logging
 logger = setup_logging()
 
 def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detections=2, 
                            batch_size=32, multi_view_yolo=False, multi_view_rcnn=False, 
-                           nms_threshold=0.3):
+                           nms_threshold=0.3, apply_video_orientation_correction=True):
     """
     Extract crow crops from a video for training with full parameter control.
     """
@@ -54,6 +55,11 @@ def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detect
                 ret, frame = cap.read()
                 if not ret:
                     break
+                
+                # Apply video orientation correction if enabled
+                if apply_video_orientation_correction:
+                    frame = apply_video_orientation(frame, video_path)
+                
                 frames.append(frame)
                 frame_numbers.append(int(cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1)
             if not frames:
@@ -113,7 +119,7 @@ def extract_crops_from_video(video_path, tracker, min_confidence=0.2, min_detect
             if ret:
                 # Force save crop by calling tracker's save_crop directly
                 from tracking import extract_normalized_crow_crop
-                crop = extract_normalized_crow_crop(frame, det['bbox'], padding=0.3)
+                crop = extract_normalized_crow_crop(frame, det['bbox'], correct_orientation=True, padding=0.3)
                 if crop:
                     crop_path = tracker.save_crop(crop, crow_id, frame_num, video_path)
                     if crop_path:

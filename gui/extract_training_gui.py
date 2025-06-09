@@ -25,6 +25,7 @@ import queue
 from PIL import Image, ImageTk
 import time
 from collections import defaultdict
+from video_orientation import apply_video_orientation, get_video_orientation
 
 # Log startup
 logger.info("Starting Crow Training Data Extractor GUI")
@@ -273,23 +274,27 @@ class CrowExtractorGUI:
         ttk.Checkbutton(settings_frame, text="Enable Multi-View for YOLO", variable=self.mv_yolo_var).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=2)
         ttk.Checkbutton(settings_frame, text="Enable Multi-View for Faster R-CNN", variable=self.mv_rcnn_var).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=2)
         
-        # Orientation correction checkbox
-        self.orientation_correction_var = tk.BooleanVar(value=True)
+        # Orientation correction checkbox  
+        self.orientation_correction_var = tk.BooleanVar(value=False)  # DISABLED by default
         ttk.Checkbutton(settings_frame, text="Auto-correct crow orientation", variable=self.orientation_correction_var).grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=2)
+        
+        # Video orientation correction checkbox
+        self.video_orientation_var = tk.BooleanVar(value=True)  # ENABLED by default for video orientation
+        ttk.Checkbutton(settings_frame, text="Auto-correct video orientation (portrait→landscape)", variable=self.video_orientation_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=2)
         
         # Recursive search checkbox
         self.recursive_search_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(settings_frame, text="Search subdirectories recursively", variable=self.recursive_search_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=2)
+        ttk.Checkbutton(settings_frame, text="Search subdirectories recursively", variable=self.recursive_search_var).grid(row=6, column=0, columnspan=2, sticky=tk.W, pady=2)
         
         # NMS merge threshold
         self.nms_threshold_var = tk.DoubleVar(value=0.3)
-        ttk.Label(settings_frame, text="Box Merge Threshold:").grid(row=6, column=0, sticky=tk.W)
+        ttk.Label(settings_frame, text="Box Merge Threshold:").grid(row=7, column=0, sticky=tk.W)
         ttk.Scale(settings_frame, from_=0.1, to=0.7, variable=self.nms_threshold_var, 
-                 orient=tk.HORIZONTAL, length=150).grid(row=6, column=1, padx=5)
-        ttk.Label(settings_frame, textvariable=self.nms_threshold_var).grid(row=6, column=2)
+                 orient=tk.HORIZONTAL, length=150).grid(row=7, column=1, padx=5)
+        ttk.Label(settings_frame, textvariable=self.nms_threshold_var).grid(row=7, column=2)
         
         # Tooltip-like label for NMS threshold
-        ttk.Label(settings_frame, text="(Lower = merge more boxes)", font=('TkDefaultFont', 8)).grid(row=7, column=0, columnspan=3, sticky=tk.W)
+        ttk.Label(settings_frame, text="(Lower = merge more boxes)", font=('TkDefaultFont', 8)).grid(row=8, column=0, columnspan=3, sticky=tk.W)
         
         # Audio settings frame
         audio_frame = ttk.LabelFrame(self.left_panel, text="Audio Settings", padding="5")
@@ -564,6 +569,10 @@ class CrowExtractorGUI:
                 self._update_stats()
                 self._process_next_video(video_files, current_video_index + 1)
                 return
+            
+            # Apply video orientation correction if enabled
+            if self.video_orientation_var.get():
+                frame = apply_video_orientation(frame, self.current_video)
             
             # Update progress
             self.current_frame_num += 1

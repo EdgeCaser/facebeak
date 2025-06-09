@@ -58,6 +58,7 @@ class CrowOrientationDetector:
     def _score_orientation(self, crop: np.ndarray, rotation: int, flip: bool) -> float:
         """
         Score how good a particular orientation is for a crow crop.
+        Uses much more conservative and reliable heuristics.
         
         Args:
             crop: Input crop
@@ -83,73 +84,103 @@ class CrowOrientationDetector:
             else:
                 gray = oriented_crop
                 
-            # 1. Body axis analysis - crows should be taller than wide when upright
-            aspect_ratio = h / w
-            if aspect_ratio > 1.0:  # Taller than wide
-                score += 2.0 * min(aspect_ratio / 1.5, 2.0)  # Cap the bonus
+            # 1. CONSERVATIVE: Prefer minimal rotation (original orientation is often correct)
+            if rotation == 0:
+                score += 1.0  # Bias toward original orientation
+            elif rotation == 180:
+                score += 0.5  # Second preference (just flipped)
             else:
-                score -= 1.0  # Penalty for being wider than tall
+                score -= 0.5  # Penalty for 90/270 degree rotations
                 
-            # 2. Mass distribution - crow's body mass should be in lower 2/3
-            upper_third = gray[:h//3, :]
-            middle_third = gray[h//3:2*h//3, :]
-            lower_third = gray[2*h//3:, :]
+            # 2. CENTER OF MASS ANALYSIS
+            # Find the dark regions (crow body) and check their distribution
+            # Threshold to find dark regions (crow body)
+            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
             
-            upper_mass = np.mean(upper_third)
-            middle_mass = np.mean(middle_third)
-            lower_mass = np.mean(lower_third)
-            
-            # Body should have more mass in middle and lower thirds
-            if lower_mass > upper_mass:
-                score += 1.0
-            if middle_mass > upper_mass:
-                score += 0.5
+            # Calculate center of mass of dark regions
+            moments = cv2.moments(thresh)
+            if moments['m00'] > 0:  # Avoid division by zero
+                cx = moments['m10'] / moments['m00']  # Center X
+                cy = moments['m01'] / moments['m00']  # Center Y
                 
-            # 3. Edge orientation analysis
-            edges = cv2.Canny(gray, 50, 150)
-            
-            # Calculate vertical vs horizontal edge strength
-            sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-            sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-            
-            vertical_strength = np.mean(np.abs(sobel_y))
-            horizontal_strength = np.mean(np.abs(sobel_x))
-            
-            # Crows should have strong vertical edges (body outline, legs)
-            if vertical_strength > horizontal_strength:
-                score += 1.0
+                # For upright crow, center of mass should be:
+                # - Horizontally centered (cx near w/2)
+                # - Vertically in lower 2/3 (cy > h/3)
                 
-            # 4. Symmetry analysis - check for vertical symmetry
-            left_half = gray[:, :w//2]
-            right_half = cv2.flip(gray[:, w//2:], 1)  # Flip right half
-            
-            # Resize to match in case of odd width
-            min_width = min(left_half.shape[1], right_half.shape[1])
-            left_half = left_half[:, :min_width]
-            right_half = right_half[:, :min_width]
-            
-            # Calculate symmetry score
-            if left_half.shape == right_half.shape:
-                symmetry = cv2.matchTemplate(left_half, right_half, cv2.TM_CCOEFF_NORMED)[0, 0]
-                score += symmetry * 0.5  # Moderate weight for symmetry
+                horizontal_centering = 1.0 - abs(cx - w/2) / (w/2)  # 1.0 = perfectly centered
+                vertical_position = cy / h  # 0.0 = top, 1.0 = bottom
                 
-            # 5. Head region analysis - head should be in upper portion
-            head_region = gray[:h//3, :]  # Top third
-            head_variance = np.var(head_region)
+                score += horizontal_centering * 0.5  # Moderate weight
+                
+                # Prefer center of mass in middle-to-lower region (0.4 to 0.8)
+                if 0.4 <= vertical_position <= 0.8:
+                    score += 1.0
+                elif 0.3 <= vertical_position <= 0.9:
+                    score += 0.5
+                else:
+                    score -= 0.5
+                    
+            # 3. SHAPE COMPACTNESS
+            # Find main contour and analyze its shape
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
-            # Head region should have features (higher variance)
-            if head_variance > np.var(gray) * 0.5:
-                score += 0.5
+            if contours:
+                # Get largest contour (should be the crow)
+                main_contour = max(contours, key=cv2.contourArea)
+                area = cv2.contourArea(main_contour)
                 
-            # 6. Leg/bottom analysis - bottom should have thin features (legs)
-            bottom_strip = gray[int(0.8*h):, :]  # Bottom 20%
-            if bottom_strip.size > 0:
-                # Look for thin vertical features that could be legs
-                bottom_edges = cv2.Canny(bottom_strip, 50, 150)
-                leg_features = np.sum(bottom_edges) / bottom_strip.size
-                score += min(leg_features * 10, 1.0)  # Normalize and cap
+                if area > 100:  # Reasonable size
+                    # Calculate bounding rectangle
+                    x, y, w_rect, h_rect = cv2.boundingRect(main_contour)
+                    
+                    # For upright crow, height should be >= width
+                    rect_aspect = h_rect / (w_rect + 1e-6)
+                    
+                    if rect_aspect >= 1.2:  # Clearly taller than wide
+                        score += 1.5
+                    elif rect_aspect >= 1.0:  # Roughly square or slightly tall
+                        score += 0.5
+                    elif rect_aspect >= 0.8:  # Slightly wide
+                        score += 0.0
+                    else:  # Very wide (probably sideways)
+                        score -= 1.0
+                        
+                    # Calculate fill ratio (how much of bounding rect is filled)
+                    fill_ratio = area / (w_rect * h_rect)
+                    
+                    # Crows should have reasonable fill ratio (not too sparse)
+                    if 0.3 <= fill_ratio <= 0.8:
+                        score += 0.5
+                        
+            # 4. EDGE DISTRIBUTION ANALYSIS
+            # Look for strong edges that suggest correct orientation
+            edges = cv2.Canny(gray, 30, 100)
+            
+            # Split into regions and analyze edge patterns
+            top_edges = edges[:h//3, :]
+            middle_edges = edges[h//3:2*h//3, :]
+            bottom_edges = edges[2*h//3:, :]
+            
+            top_density = np.sum(top_edges) / (top_edges.size + 1e-6)
+            middle_density = np.sum(middle_edges) / (middle_edges.size + 1e-6)
+            bottom_density = np.sum(bottom_edges) / (bottom_edges.size + 1e-6)
+            
+            # For upright crow:
+            # - Top should have moderate edges (head features)
+            # - Middle should have strong edges (body outline)
+            # - Bottom should have fewer edges (legs, ground)
+            
+            if middle_density > top_density and middle_density > bottom_density:
+                score += 0.5  # Body region has most edges
                 
-            return score
+            # 5. VERY CONSERVATIVE: Avoid dramatic changes unless clearly better
+            # Only apply orientation correction if the alternative is CLEARLY better
+            score_threshold_bonus = 0.0
+            if rotation != 0:
+                # Require higher confidence for non-zero rotations
+                score_threshold_bonus = -0.5
+                
+            return score + score_threshold_bonus
             
         except Exception as e:
             self.logger.warning(f"Error scoring orientation: {e}")
@@ -209,7 +240,10 @@ class CrowOrientationDetector:
             corrected = self._apply_orientation(crop, rotation, flip)
             
             if corrected is not None:
-                self.logger.debug(f"Applied orientation correction: rotation={rotation}°, flip={flip}")
+                if rotation != 0 or flip != False:
+                    self.logger.info(f"Applied orientation correction: rotation={rotation}°, flip={flip}")
+                else:
+                    self.logger.debug(f"No orientation correction needed: rotation={rotation}°, flip={flip}")
                 return corrected
             else:
                 self.logger.warning("Failed to apply orientation correction, returning original")
