@@ -108,72 +108,76 @@
 
 ### Phase 1: Data Extraction (30-60 min per video hour)
 ```
-Input Videos ──► Detection Models ──► Crow Images ──► Audio Segments
-     │                  │                  │              │
-     │            ┌─────────────┐          │              │
-     │            │ Faster R-CNN│          │              │
-     │            │   YOLOv8    │          │              │
-     │            └─────────────┘          │              │
-     │                                     │              │
-     └─────────────────────────────────────┼──────────────┘
-                                           │
-                                           ▼
-                                    crow_crops/
-                                    ├── crow_0001/
-                                    ├── crow_0002/
-                                    └── audio/
+Input Videos ──► Detection Models ──► Crow Crops & Metadata ──► Audio Segments
+     │                  │                    │                       │
+     │            ┌─────────────┐            │                       │
+     │            │ Faster R-CNN│            │                       │
+     │            │   YOLOv8    │            │                       │
+     │            └─────────────┘            │                       │
+     │                                       │                       │
+     └───────────────────────────────────────┼───────────────────────┘
+                                             │
+                                             ▼
+                                 crow_crops/
+                                 ├── videos/VIDEO_NAME/frame_XXXXXX_crop_XXX.jpg (One crop per detection)
+                                 ├── metadata/crop_metadata.json (Maps crops to crow_id, frame, video)
+                                 └── audio/ (If extracted)
 ```
+*Key Change Note: System now saves one crop image per detection, not just one per frame.*
 
 ### Phase 2: Data Cleaning (15-30 min per 1000 images)
 ```
-Raw Crow Images ──► Manual Review ──► Clean Dataset
-       │                  │                │
-   ┌───────────┐    ┌─────────────┐   ┌─────────────┐
-   │ All crops │    │1=Crow       │   │ Verified    │
-   │ (mixed    │───►│2=Not crow   │──►│ crow images │
-   │ quality)  │    │3=Unsure     │   │ only        │
-   └───────────┘    │4=Multiple   │   └─────────────┘
+Raw Crow Crops ──► Manual Review (ImageReviewer) ──► Labeled Data in DB ──► Clean Dataset for Training
+       │                  │                                  │                       │
+   ┌───────────┐    ┌─────────────┐                  ┌───────────────┐          ┌─────────────┐
+   │ All crops │    │1=Crow       │                  │ Labels stored │          │ Verified    │
+   │ (from     │───►│2=Not_a_crow │─────────────────►│ in database   │─────────►│ crow images │
+   │ videos/)  │    │3=Unsure     │                  │ (facebeak.db) │          │ (for model) │
+   └───────────┘    │4=Multi_crow │                  └───────────────┘          └─────────────┘
+                    │5=Bad_crow   │
                     └─────────────┘
 ```
+*Note: Labels ('not_a_crow', 'multi_crow', 'bad_crow') stored in the database are crucial for filtering during dataset preparation.*
 
 ### Phase 3: Training Setup (5 min)
 ```
-Clean Dataset ──► Analysis ──► Configuration ──► Ready to Train
-      │              │             │                  │
-  ┌─────────┐   ┌─────────┐   ┌─────────────┐   ┌─────────────┐
-  │ Count   │   │Optimal  │   │training_    │   │ Estimated   │
-  │ crows   │──►│batch    │──►│config.json  │──►│ time &      │
-  │ images  │   │size etc │   │             │   │ resources   │
-  └─────────┘   └─────────┘   └─────────────┘   └─────────────┘
+Clean Dataset (via DB labels & metadata) ──► Analysis ──► Configuration ──► Ready to Train
+              │                                  │             │                  │
+  ┌──────────────────────────┐             ┌─────────┐   ┌─────────────┐   ┌─────────────┐
+  │ Uses crop_metadata.json  │             │Optimal  │   │training_    │   │ Estimated   │
+  │ & DB labels to select    │────────────►│batch    │──►│config.json  │──►│ time &      │
+  │ valid training images    │             │size etc │   │(uses base_dir)│   │ resources   │
+  └──────────────────────────┘             └─────────┘   └─────────────┘   └─────────────┘
 ```
 
 ### Phase 4: Model Training (8-72 hours)
 ```
-Training Data ──► Neural Network ──► Trained Model
-      │                  │                │
-  ┌─────────┐      ┌─────────────┐   ┌─────────────┐
-  │ Triplet │      │ ResNet-18   │   │ 512D        │
-  │ samples │─────►│ + Triplet   │──►│ embeddings  │
-  │         │      │ Loss        │   │ model       │
-  └─────────┘      └─────────────┘   └─────────────┘
-                         │
-                         ▼
-                   ┌─────────────┐
-                   │ Checkpoints │
-                   │ every 10    │
-                   │ epochs      │
-                   └─────────────┘
+Training Data (from ImprovedCrowTripletDataset) ──► Neural Network ──► Trained Model
+                  │                                       │                │
+  ┌───────────────────────────────────┐      ┌─────────────┐   ┌─────────────┐
+  │ - Loads images via crop_metadata  │      │ ResNet-18   │   │ Embeddings  │
+  │ - Reads from videos/ dir          │─────►│ + Triplet   │──►│ model       │
+  │ - Filters using DB labels         │      │ Loss        │   │ (.pth file) │
+  │   (excludes 'multi_crow', etc.)   │      └─────────────┘   └─────────────┘
+  └───────────────────────────────────┘            │
+                                                   ▼
+                                             ┌─────────────┐
+                                             │ Checkpoints │
+                                             │ (e.g. every │
+                                             │ 10 epochs)  │
+                                             └─────────────┘
 ```
 
 ### Phase 5: Validation (5-10 min)
 ```
-Trained Model ──► Test Data ──► Performance Metrics
-      │              │               │
-  ┌─────────┐   ┌─────────┐    ┌─────────────┐
-  │ .pth    │   │ Held-out│    │Separability │
-  │ file    │──►│ crow    │───►│Same/Diff    │
-  │         │   │ images  │    │similarity   │
-  └─────────┘   └─────────┘    └─────────────┘
+Trained Model ──► Test Data (from metadata & DB) ──► Performance Metrics
+      │                        │                            │
+  ┌─────────┐   ┌───────────────────────────────┐    ┌──────────────────────────┐
+  │ .pth    │   │ Loads crow & 'not_a_crow'     │    │ - Crow ID Metrics        │
+  │ file    │──►│ samples via crop_metadata.json│───►│   (Precision, Recall)    │
+  │         │   │ and DB labels.                │    │ - Crow vs. Non-Crow      │
+  └─────────┘   └───────────────────────────────┘    │   (Rejection/Alarm Rates)│
+                                                     └──────────────────────────┘
 ```
 
 ### Phase 6: Deployment (10-30 min per video hour)

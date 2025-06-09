@@ -73,45 +73,65 @@ python -c "import sklearn; print('✅ Scikit-learn installed successfully')"
 ### Phase 1: Data Extraction and Preparation
 
 #### Step 1: Extract Training Data from Videos
+The primary script for this is `utilities/extract_training_data.py`. While a GUI like `extract_training_gui.py` might exist as a wrapper, the core logic relies on the command-line tool.
+Example command:
 ```bash
 # Extract crow images from your video files
-python utilities/extract_training_gui.py
+python utilities/extract_training_data.py "path/to/your/video_directory" --output-dir "crow_crops" --min-confidence 0.3 --frame-batch-size 16 --target-fps 10 --enable-audio --correct-orientation
 ```
 
 **What this does:**
-- Scans your videos for crow detections
-- Saves individual crow images to `crow_crops/` folder
-- Extracts synchronized audio segments (if available)
-- Creates organized folders for each detected crow
+- Scans videos in your `video_directory` for crow detections.
+- **Crop Storage**: Saves one crop image per *detected bounding box*. This means if multiple crows are detected in a single frame, multiple crop images will be saved.
+- **Directory Structure**: Organizes extracted crops primarily by video source:
+    - `crow_crops/videos/VIDEO_NAME/frame_XXXXXX_crop_XXX.jpg`
+- **Metadata File**: Creates `crow_crops/metadata/crop_metadata.json`. This crucial file maps each crop image (e.g., `videos/VIDEO_NAME/frame_XXXXXX_crop_XXX.jpg`) to its assigned `crow_id`, the original video name, frame number, and other detection details. This file is essential for linking crops back to individual identities and their context.
+- Extracts synchronized audio segments (if `--enable-audio` is used and audio is available).
+- Applies automatic orientation correction if `--correct-orientation` is used.
+- The `CrowTracker` module, used internally, manages crow identities and decides when to assign new IDs or match existing ones.
 
-**Expected time:** 30-60 minutes per hour of video
+**Command-Line Arguments for `extract_training_data.py`:**
+- `video_dir`: Path to the directory containing your video files.
+- `--output-dir`: The base directory where the `crow_crops` structure (including `videos/` and `metadata/`) will be created. This directory becomes the `base_dir` for subsequent training and evaluation steps. (Default: `crow_crops`)
+- `--min-confidence`: Minimum detection score to consider a detection valid. (Default: 0.2)
+- `--frame-batch-size`: Number of frames to process in a batch for detection. (Default: 16, adjust based on GPU memory)
+- `--target-fps`: Target frames per second to process. The script will skip frames to approximate this rate. (Default: None, process all frames subject to `--frame-skip`)
+- `--frame-skip`: Number of frames to skip between processed frames if `--target-fps` is not set. (Default: 0)
+- `--enable-audio`: If specified, attempts to extract audio segments corresponding to detections.
+- `--correct-orientation`: If specified, attempts to auto-correct the orientation of crow crops.
+
+**Expected time:** 30-60 minutes per hour of video, depending on settings and hardware.
 
 #### Step 2: Review and Clean Data
 ```bash
-# Launch image reviewer to clean up false detections
-python image_reviewer.py
+# Launch image reviewer to clean up false detections and label data
+python image_reviewer.py --base-dir crow_crops
+# (Assuming image_reviewer.py is updated or adapted to use the new structure and DB labels)
 ```
 
 **What to do:**
-- Press `1` for "This is a crow"
+- **Multi-Crop Awareness**: You might encounter multiple distinct crop images extracted from the same original video frame if multiple crows were detected. Review each crop independently.
+- Press `1` for "This is a crow" (good quality, single crow)
 - Press `2` for "This is NOT a crow" 
 - Press `3` for "Unsure"
-- Press `4` for "Multiple crows in image"
-- Press `q` to quit and save progress
+- Press `4` for "Multiple crows in image" (label as 'multi_crow')
+- Press `5` for "Bad crow image" (e.g., blurry, partial, label as 'bad_crow')
+- Press `q` to quit and save progress.
+- **Labeling Importance**: Accurately labeling images is crucial. Images labeled as 'multi_crow', 'not_a_crow', or 'bad_crow' in the database will be automatically excluded from the training dataset by the `ImprovedCrowTripletDataset` loader.
 
-**Expected time:** 15-30 minutes for 1000 images
+**Expected time:** 15-30 minutes for 1000 images.
 
 #### Step 3: Setup Training Configuration
 ```bash
 # Analyze your dataset and create optimal training settings
-python utilities/setup_improved_training.py
+python utilities/setup_improved_training.py --base-dir crow_crops
 ```
 
 **What this does:**
-- Analyzes your crow image collection
-- Determines optimal training parameters
-- Creates `training_config.json` with recommended settings
-- Provides training time estimates
+- Analyzes your crow image collection using `crop_metadata.json` and database labels to consider only valid training images.
+- Determines optimal training parameters based on the filtered dataset.
+- Creates `training_config.json` with recommended settings. This configuration file will use `base_dir` (e.g., "crow_crops") to specify the root data directory.
+- Provides training time estimates.
 
 ### Phase 2: Model Training
 
@@ -122,45 +142,63 @@ python train_improved.py --config training_config.json
 ```
 
 **What this does:**
-- Trains a neural network to recognize individual crows
-- Uses triplet loss to learn visual similarities and differences
-- Saves progress checkpoints every 10 epochs
-- Creates visualizations of training progress
+- Trains a neural network to recognize individual crows using `ImprovedCrowTripletDataset`.
+- **Dataset Source**: The `ImprovedCrowTripletDataset` loads images based on the `crop_metadata.json` file (found within the `base_dir` specified in the config) and reads the actual image files from the `crow_crops/videos/` subdirectories.
+- **Filtering**: The dataset loader automatically filters out images that are labeled in the database as 'multi_crow', 'not_a_crow', or 'bad_crow', ensuring only clean data is used for training.
+- Uses triplet loss to learn visual similarities and differences.
+- Saves progress checkpoints (e.g., every 10 epochs, configurable).
+- Creates visualizations of training progress.
 
 **Expected time:** 
-- **With GPU:** 8-12 hours for 100 epochs
-- **CPU only:** 48-72 hours for 100 epochs
+- **With GPU:** 8-12 hours for 100 epochs (varies greatly with dataset size and GPU model).
+- **CPU only:** 48-72+ hours for 100 epochs.
 
 **⚠️ Important:** Don't close the command window during training!
 
 #### Step 5: Monitor Training Progress
 Open a new command window and run:
 ```bash
-# Check training logs
-tail -f training.log
+# Check training logs (path might be inside a timestamped run folder within your base_output_dir from config)
+tail -f training_output/your_model_timestamp/training.log
 
-# Or view progress plots (updates every 10 epochs)
-python -c "import matplotlib.pyplot as plt; import json; 
-with open('training_output_improved/metrics_history.json') as f: 
-    data = json.load(f); 
-plt.plot(data['train_loss']); 
-plt.title('Training Loss'); 
-plt.show()"
+# Or view progress plots (updates as configured)
+# Example: python -c "import matplotlib.pyplot as plt; import json;
+# with open('training_output/your_model_timestamp/metrics_history.json') as f:
+#    data = json.load(f);
+# plt.plot(data['train_loss']);
+# plt.title('Training Loss');
+# plt.show()"
 ```
+*(Adjust paths to `metrics_history.json` based on your actual output directory structure defined in `training_config.json`)*
 
 ### Phase 3: Model Validation and Testing
 
 #### Step 6: Evaluate Model Performance
+Update the command to use `--base-dir` and new threshold arguments:
 ```bash
 # Test the trained model
-python simple_evaluate.py --model-path training_output_improved/crow_resnet_triplet_improved.pth
+python utilities/simple_evaluate.py --model-path training_output/your_model_timestamp/best_model.pth --base-dir crow_crops --id-similarity-threshold 0.5 --non-crow-similarity-threshold 0.4
 ```
 
 **What this shows:**
-- Model accuracy metrics
-- Separability scores (higher = better)
-- Same-crow vs different-crow similarity scores
-- Recommendations for improvement
+The evaluation script has been enhanced:
+- **Data Loading**: It now also uses `crop_metadata.json` and database labels (from the specified `base_dir`) to load appropriate samples, including images labeled as 'not_a_crow' for comprehensive testing.
+- **Crow Identification Metrics**:
+    - Precision, Recall, F1-Score, Accuracy for distinguishing between *known crow IDs*.
+    - Average similarity for same-crow pairs and different-crow pairs.
+    - Separability score for known crow IDs.
+- **Crow vs. Non-Crow Distinction Metrics (New)**:
+    - `non_crow_true_rejection_rate`: How often 'not_a_crow' images are correctly identified as not matching any known crow below the `--non-crow-similarity-threshold`.
+    - `non_crow_false_alarm_rate`: How often 'not_a_crow' images are mistakenly matched to a known crow above the `--non-crow-similarity-threshold`.
+- The thresholds used for both types of evaluations are reported.
+
+**Command-Line Arguments for `simple_evaluate.py`:**
+- `--model-path`: Path to your trained model file (e.g., `best_model.pth` or a specific checkpoint).
+- `--base-dir`: The root directory containing the `crow_crops` structure (especially `metadata/crop_metadata.json` and the `videos/` image folders).
+- `--id-similarity-threshold`: Cosine similarity threshold for considering two known crow images as a match. (Default: 0.5)
+- `--non-crow-similarity-threshold`: Cosine similarity threshold for deciding if a 'not_a_crow' image is distinct enough from all known crows. (Default: 0.4)
+- `--max-crows`: Maximum number of unique crow individuals to sample for evaluation.
+- `--max-samples-per-crow`: Maximum image samples per crow individual.
 
 #### Step 7: Advanced Analysis (Optional)
 ```bash
@@ -209,16 +247,16 @@ python facebeak.py
 ### Phase 2: Data Extraction
 
 #### Step 2: Extract Training Data
-1. **In the Facebeak GUI:**
-   - Click **"Launch Training Data Extractor"** (if available)
-   - **OR** close Facebeak and run: `python utilities/extract_training_gui.py`
+1.  **In the Facebeak GUI (if it wraps `extract_training_data.py`):**
+    *   Look for options to set the source video directory and the main output directory (this will be your `base_dir`, e.g., `crow_crops`).
+    *   Configure parameters like detection confidence, target FPS, audio extraction, and orientation correction as available.
+    *   Start the extraction.
+    *   **Output**: The process will create the `crow_crops/videos/VIDEO_NAME/...` structure and `crow_crops/metadata/crop_metadata.json` as described in the command-line section.
 
-2. **In the Extraction GUI:**
-   - Click **"Browse"** to select your video files
-   - Set **Detection Threshold** to `0.3` (lower = more sensitive)
-   - Set **YOLO Threshold** to `0.2` 
-   - Check **"Extract Audio"** if you want audio analysis
-   - Click **"Start Extraction"**
+2.  **If using `extract_training_gui.py` directly (assuming it's updated or a wrapper):**
+    *   The GUI should allow specifying the video source and the main output directory (which becomes `base_dir`).
+    *   It should reflect new parameters like target FPS, frame batch size, etc.
+    *   **Crop Storage & Metadata**: Understand that it saves one crop per detection and creates the `crop_metadata.json` file.
 
 3. **Wait for completion:**
    - Progress bar shows current status
@@ -230,44 +268,42 @@ python facebeak.py
 ### Phase 3: Data Quality Control
 
 #### Step 3: Review Extracted Images
-1. **From main Facebeak GUI:**
-   - Click **"Launch Image Reviewer"**
+1.  **From main Facebeak GUI (or by running `python image_reviewer.py --base-dir crow_crops`):**
+    *   Launch the Image Reviewer. Ensure it's configured to use the database for storing labels.
+2.  **In the Image Reviewer:**
+    *   **Multi-Crop Awareness**: Remember that you might be reviewing multiple crops from the same original video frame. Each is a distinct detection.
+    *   Label images using categories like:
+        *   "Crow" (good, single, clear crow)
+        *   "Not Crow"
+        *   "Unsure"
+        *   "Multiple Crows" (important for exclusion from triplet training)
+        *   "Bad Crow Image" (blurry, partial, etc.)
+    *   These labels are saved to the database and are critical for later dataset preparation.
+3.  **Review diligently.** The quality of your dataset heavily depends on this step.
+    *   Images labeled as 'multi_crow', 'not_a_crow', or 'bad_crow' (and potentially others based on dataset loader configuration) will be automatically excluded from certain training datasets (like `ImprovedCrowTripletDataset`).
 
-2. **In the Image Reviewer:**
-   - Images appear one by one
-   - Click **"Crow"** for valid crow images
-   - Click **"Not Crow"** for false detections
-   - Click **"Unsure"** if you can't tell
-   - Click **"Multiple Crows"** if image has multiple birds
-   - Progress shows how many you've reviewed
-
-3. **Review until satisfied:**
-   - Aim to review at least 500-1000 images
-   - Focus on removing obvious false positives
-   - Click **"Save and Exit"** when done
-
-**Expected time:** 15-30 minutes for 1000 images
+**Expected time:** 15-30 minutes for 1000 images.
 
 ### Phase 4: Model Training
 
 #### Step 4: Setup Training
-1. **Close Image Reviewer and return to main GUI**
-
-2. **Open a command window and run:**
-   ```bash
-   python utilities/setup_improved_training.py
-   ```
-
-3. **Review the output:**
-   - Note the recommended training parameters
-   - Check estimated training time
-   - Ensure you have enough disk space
+1.  **Close Image Reviewer and return to main GUI (if applicable).**
+2.  **Open a command window and run:**
+    ```bash
+    python utilities/setup_improved_training.py --base-dir crow_crops
+    # This script now uses --base-dir
+    ```
+3.  **Review the output:**
+    *   The script analyzes the data (from `crop_metadata.json` and filtered by DB labels) in your `base_dir` (e.g., `crow_crops`).
+    *   It recommends training parameters and creates `training_config.json`.
+    *   The `training_config.json` will now use a `base_dir` key (e.g., value: "crow_crops") for the dataset loader.
 
 #### Step 5: Start Training
-1. **In command window:**
-   ```bash
-   python train_improved.py --config training_config.json
-   ```
+1.  **In command window:**
+    ```bash
+    python train_improved.py --config training_config.json
+    ```
+    *   The `ImprovedCrowTripletDataset` (or similar used by `train_improved.py`) will load data using `crop_metadata.json` from the `base_dir` specified in the config. It will read images from the `videos/` subdirectory and automatically filter out images based on their database labels ('multi_crow', 'not_a_crow', 'bad_crow').
 
 2. **Monitor progress:**
    - Training logs appear in the command window
@@ -282,16 +318,21 @@ python facebeak.py
 ### Phase 5: Validation and Analysis
 
 #### Step 6: Evaluate Your Model
-1. **After training completes, run:**
-   ```bash
-   python simple_evaluate.py --model-path training_output_improved/crow_resnet_triplet_improved.pth
-   ```
+1.  **After training completes, run (note the updated arguments):**
+    ```bash
+    python utilities/simple_evaluate.py --model-path training_output/your_model_timestamp/best_model.pth --base-dir crow_crops --id-similarity-threshold 0.5 --non-crow-similarity-threshold 0.4
+    ```
+    *(Adjust model path and thresholds as needed)*
 
-2. **Review the results:**
-   - **Separability > 0.3:** Good model
-   - **Separability > 0.5:** Excellent model
-   - **Same-crow similarity > 0.7:** Good recognition
-   - **Different-crow similarity < 0.4:** Good discrimination
+2.  **Review the results:**
+    *   The script now uses `crop_metadata.json` and DB labels from the `--base-dir` to load evaluation samples, including 'crow' and 'not_a_crow' images.
+    *   **Crow Identification Metrics**:
+        *   `precision_id`, `recall_id`, `f1_id`, `accuracy_id`: Performance on distinguishing between known crow IDs.
+        *   `avg_similarity_pos_id`, `avg_similarity_neg_id`, `separability_id`: Analyze similarity scores for same vs. different known crows.
+    *   **Crow vs. Non-Crow Distinction Metrics**:
+        *   `non_crow_true_rejection_rate`: Percentage of 'not_a_crow' images correctly identified as not matching any known crow (below `--non-crow-similarity-threshold`).
+        *   `non_crow_false_alarm_rate`: Percentage of 'not_a_crow' images incorrectly flagged as similar to a known crow.
+    *   A good model will have high values for ID precision/recall/F1, good separability for ID, a high non-crow true rejection rate, and a low non-crow false alarm rate.
 
 #### Step 7: Advanced Quality Control
 1. **From main Facebeak GUI:**

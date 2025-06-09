@@ -12,15 +12,15 @@ from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from improved_dataset import DatasetStats
 
-def setup_training_config(crop_dir='crow_crops', output_file='training_config.json'):
+def setup_training_config(base_dir='crow_crops', output_file='training_config.json'): # crop_dir -> base_dir
     """Setup training configuration based on dataset analysis."""
     
-    print("🔍 Analyzing your dataset...")
+    print(f"🔍 Analyzing your dataset at base_dir: {base_dir}...") # Updated log
     print("="*60)
     
     # Analyze dataset
     try:
-        recommendations, stats = DatasetStats.recommend_training_params(crop_dir)
+        recommendations, stats = DatasetStats.recommend_training_params(base_dir) # crop_dir -> base_dir
         
         # Display dataset statistics
         print("📊 DATASET STATISTICS:")
@@ -45,7 +45,7 @@ def setup_training_config(crop_dir='crow_crops', output_file='training_config.js
             "dataset_stats": stats,
             "recommended_params": recommendations,
             "training_config": {
-                "crop_dir": crop_dir,
+                "base_dir": base_dir, # crop_dir -> base_dir
                 "embedding_dim": recommendations.get('embedding_dim', 256),
                 "epochs": recommendations.get('epochs', 50),
                 "batch_size": recommendations.get('batch_size', 32),
@@ -94,7 +94,7 @@ def setup_training_config(crop_dir='crow_crops', output_file='training_config.js
         # Default config
         default_config = {
             "training_config": {
-                "crop_dir": crop_dir,
+                "base_dir": base_dir, # crop_dir -> base_dir
                 "embedding_dim": 256,
                 "epochs": 50,
                 "batch_size": 32,
@@ -137,7 +137,7 @@ def main():
         # Build command
         cmd = [
             sys.executable, 'train_improved.py',
-            '--crop-dir', str(train_config['crop_dir']),
+            '--base-dir', str(train_config['base_dir']), # --crop-dir -> --base-dir
             '--embedding-dim', str(train_config['embedding_dim']),
             '--epochs', str(train_config['epochs']),
             '--batch-size', str(train_config['batch_size']),
@@ -176,7 +176,7 @@ if __name__ == '__main__':
 
 def main():
     parser = argparse.ArgumentParser(description='Setup improved training configuration')
-    parser.add_argument('--crop-dir', default='crow_crops', help='Crop directory')
+    parser.add_argument('--base-dir', default='crow_crops', help='Base directory for crow data (e.g., crow_crops)') # --crop-dir -> --base-dir
     parser.add_argument('--output', default='training_config.json', help='Output config file')
     parser.add_argument('--create-launcher', action='store_true', help='Create training launcher script')
     
@@ -186,7 +186,7 @@ def main():
     print("="*60)
     
     # Setup configuration
-    config = setup_training_config(args.crop_dir, args.output)
+    config = setup_training_config(args.base_dir, args.output) # args.crop_dir -> args.base_dir
     
     # Create launcher script
     if args.create_launcher:
