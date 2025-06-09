@@ -300,6 +300,20 @@ def extract_normalized_crow_crop(frame, bbox, expected_size=(512, 512), correct_
             except Exception as e:
                 logger.warning(f"Error applying orientation correction: {e}. Using original crop.")
         
+        # Apply super-resolution if crop is small (before final resize)
+        crop_h, crop_w = crop.shape[:2]
+        if crop_h < 100 or crop_w < 100:
+            try:
+                logger.debug(f"Applying super-resolution to small crop: {crop_w}x{crop_h}")
+                # Convert to tensor format for super-resolution
+                crop_tensor = torch.from_numpy(crop.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0)  # HWC -> CHW -> BCHW
+                enhanced_tensor = apply_super_resolution(crop_tensor, min_size=100)
+                # Convert back to numpy HWC format
+                crop = (enhanced_tensor.squeeze().permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+                logger.debug(f"Super-resolution enhanced crop to: {crop.shape[1]}x{crop.shape[0]}")
+            except Exception as e:
+                logger.warning(f"Super-resolution failed, using original crop: {e}")
+        
         crop_resized = cv2.resize(crop, (expected_size[1], expected_size[0]), interpolation=cv2.INTER_LANCZOS4)
         crop_normalized = crop_resized.astype(np.float32) / 255.0 # HWC, [0,1]
         
