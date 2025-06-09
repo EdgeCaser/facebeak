@@ -198,12 +198,13 @@ def merge_overlapping_detections(detections, iou_threshold=0.5):
             unique_views = len(set(views))
             view_bonus = 0.15 * (unique_views - 1) if unique_views > 1 else 0
             
-            # Use weighted average of boxes with squared confidence-based weighting
-            weights = np.array(scores) ** 2  # Square the weights to favor higher confidence more strongly
-            weights = weights / np.sum(weights)  # Normalize weights
-            
-            # Calculate merged box using weighted average
-            merged_box = np.average(boxes, weights=weights, axis=0)
+            # Calculate merged box using union of all boxes (encompasses entire crow)
+            # This ensures no part of the crow is missed regardless of confidence distribution
+            x1 = min(box[0] for box in boxes)  # Leftmost edge
+            y1 = min(box[1] for box in boxes)  # Topmost edge
+            x2 = max(box[2] for box in boxes)  # Rightmost edge
+            y2 = max(box[3] for box in boxes)  # Bottommost edge
+            merged_box = [x1, y1, x2, y2]
             
             # Calculate final score
             base_score = max(scores)  # Use highest confidence as base
@@ -211,7 +212,7 @@ def merge_overlapping_detections(detections, iou_threshold=0.5):
             final_score = min(base_score + view_bonus + confidence_bonus, 1.0)  # Cap at 1.0
             
             merged.append({
-                'bbox': merged_box.tolist(),  # Convert to list for consistency
+                'bbox': merged_box,  # Already a list from union calculation
                 'score': float(final_score),  # Ensure float type
                 'class': 'crow' if any(d['class'] == 'crow' for d in current_group) else 'bird',
                 'model': 'merged',
