@@ -229,6 +229,16 @@ class CrowExtractorGUI:
         self.cap = None
         self.current_video = None
         
+        # Initialize progress tracking for resume functionality
+        self.processing_progress = {
+            'video_files': [],           # List of all video files to process
+            'current_video_index': 0,    # Index of current video being processed
+            'current_frame_num': 0,      # Current frame number within video
+            'processed_videos': [],      # List of fully processed video paths
+            'last_save_time': None,      # When progress was last saved
+            'total_videos': 0            # Total number of videos in current session
+        }
+        
         # Create main frame
         self.main_frame = ttk.Frame(root, padding="10")
         self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -295,6 +305,16 @@ class CrowExtractorGUI:
         
         # Tooltip-like label for NMS threshold
         ttk.Label(settings_frame, text="(Lower = merge more boxes)", font=('TkDefaultFont', 8)).grid(row=8, column=0, columnspan=3, sticky=tk.W)
+        
+        # Bounding box padding slider
+        self.bbox_padding_var = tk.DoubleVar(value=0.3)
+        ttk.Label(settings_frame, text="BBox Padding:").grid(row=9, column=0, sticky=tk.W)
+        ttk.Scale(settings_frame, from_=0.1, to=0.8, variable=self.bbox_padding_var, 
+                 orient=tk.HORIZONTAL, length=150).grid(row=9, column=1, padx=5)
+        ttk.Label(settings_frame, textvariable=self.bbox_padding_var).grid(row=9, column=2)
+        
+        # Tooltip-like label for bbox padding
+        ttk.Label(settings_frame, text="(Higher = more context around crow)", font=('TkDefaultFont', 8)).grid(row=10, column=0, columnspan=3, sticky=tk.W)
         
         # Audio settings frame
         audio_frame = ttk.LabelFrame(self.left_panel, text="Audio Settings", padding="5")
@@ -445,50 +465,106 @@ class CrowExtractorGUI:
         enable_audio = self.enable_audio_var.get()
         audio_duration = self.audio_duration_var.get()
         correct_orientation = self.orientation_correction_var.get()
+        bbox_padding = self.bbox_padding_var.get()
         
         self.tracker = CrowTracker(
             base_dir=output_dir, 
             enable_audio_extraction=enable_audio,
             audio_duration=audio_duration,
-            correct_orientation=correct_orientation
+            correct_orientation=correct_orientation,
+            bbox_padding=bbox_padding
         )
         
         logger.info(f"Audio extraction: {'enabled' if enable_audio else 'disabled'}")
         if enable_audio:
             logger.info(f"Audio duration: {audio_duration} seconds")
         logger.info(f"Orientation correction: {'enabled' if correct_orientation else 'disabled'}")
+        logger.info(f"BBox padding: {bbox_padding}")
         
         # Enable save button when processing starts
         self.save_button.config(state=tk.NORMAL)
         
-        # Get recursive search setting
-        recursive_search = self.recursive_search_var.get()
-        logger.info(f"Recursive search: {'enabled' if recursive_search else 'disabled'}")
+        # Check if we're resuming from saved progress
+        resume_from_progress = (
+            self.processing_progress.get('video_files') and 
+            self.processing_progress.get('current_video_index', 0) < len(self.processing_progress['video_files']) and
+            self.processing_progress.get('total_videos', 0) > 0
+        )
         
-        # Find video files using the new function
-        video_file_paths = find_video_files(video_dir, recursive=recursive_search)
+        if resume_from_progress:
+            # Resume from saved progress
+            self.video_files = self.processing_progress['video_files'].copy()
+            self.current_video_index = self.processing_progress['current_video_index']
+            resume_frame = self.processing_progress['current_frame_num']
+            
+            logger.info(f"Resuming from saved progress:")
+            logger.info(f"  Video {self.current_video_index + 1} of {len(self.video_files)}")
+            logger.info(f"  Starting from frame {resume_frame}")
+            
+            # Verify video files still exist and are accessible
+            missing_videos = []
+            for video_file in self.video_files:
+                if os.path.isabs(video_file):
+                    video_path = video_file
+                else:
+                    video_path = os.path.join(video_dir, video_file)
+                
+                if not os.path.exists(video_path):
+                    missing_videos.append(video_file)
+            
+            if missing_videos:
+                error_msg = f"Cannot resume: {len(missing_videos)} video(s) from saved progress are missing:\n"
+                for video in missing_videos[:5]:  # Show first 5
+                    error_msg += f"  • {video}\n"
+                if len(missing_videos) > 5:
+                    error_msg += f"  • ... and {len(missing_videos) - 5} more\n"
+                error_msg += "\nPlease ensure all videos are accessible or start fresh processing."
+                
+                messagebox.showerror("Missing Videos", error_msg)
+                return
         
-        if not video_file_paths:
-            logger.error("No video files found in selected directory")
-            messagebox.showerror("Error", "No video files found in selected directory")
-            return
-        
-        # Convert to relative paths for display and processing
-        self.video_files = []
-        for video_path in video_file_paths:
+        else:
+            # Start fresh - get video files from directory
+            recursive_search = self.recursive_search_var.get()
+            logger.info(f"Recursive search: {'enabled' if recursive_search else 'disabled'}")
+            
+            # Find video files using the new function
+            video_file_paths = find_video_files(video_dir, recursive=recursive_search)
+            
+            if not video_file_paths:
+                logger.error("No video files found in selected directory")
+                messagebox.showerror("Error", "No video files found in selected directory")
+                return
+            
+            # Convert to relative paths for display and processing
+            self.video_files = []
+            for video_path in video_file_paths:
+                if recursive_search:
+                    # For recursive search, store the full path
+                    self.video_files.append(video_path)
+                else:
+                    # For non-recursive, store just the filename for compatibility
+                    self.video_files.append(os.path.basename(video_path))
+            
+            logger.info(f"Found {len(self.video_files)} video files to process")
             if recursive_search:
-                # For recursive search, store the full path
-                self.video_files.append(video_path)
-            else:
-                # For non-recursive, store just the filename for compatibility
-                self.video_files.append(os.path.basename(video_path))
-        
-        logger.info(f"Found {len(self.video_files)} video files to process")
-        if recursive_search:
-            logger.info("Videos found in:")
-            for video_file in video_file_paths:
-                rel_path = os.path.relpath(video_file, video_dir)
-                logger.info(f"  {rel_path}")
+                logger.info("Videos found in:")
+                for video_file in video_file_paths:
+                    rel_path = os.path.relpath(video_file, video_dir)
+                    logger.info(f"  {rel_path}")
+            
+            # Initialize processing progress for new session
+            self.processing_progress = {
+                'video_files': self.video_files.copy(),
+                'current_video_index': 0,
+                'current_frame_num': 0,
+                'processed_videos': [],
+                'last_save_time': None,
+                'total_videos': len(self.video_files)
+            }
+            
+            self.current_video_index = 0
+            resume_frame = 0
         
         # Create processing run directory
         self.run_dir = self.tracker.create_processing_run()
@@ -500,18 +576,15 @@ class CrowExtractorGUI:
         self.pause_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.NORMAL)
         
-        # Reset statistics
-        self._reset_stats()
+        # Reset statistics only if starting fresh
+        if not resume_from_progress:
+            self._reset_stats()
         
-        # Initialize processing state
-        self.current_video_index = 0
-        self.current_frame_num = 0
-        
-        # Start processing the first video
+        # Start processing from the correct video and frame
         logger.info("Starting video processing")
-        self._process_next_video(self.video_files, 0)
+        self._process_next_video(self.video_files, self.current_video_index, resume_frame)
     
-    def _process_next_video(self, video_files, current_index):
+    def _process_next_video(self, video_files, current_index, resume_frame=0):
         if not self.processing or current_index >= len(video_files):
             self._stop_processing()
             return
@@ -537,12 +610,18 @@ class CrowExtractorGUI:
         self.cap = cv2.VideoCapture(self.current_video)
         if not self.cap.isOpened():
             logger.error(f"Failed to open video: {self.current_video}")
-            self._process_next_video(video_files, current_index + 1)
+            self._process_next_video(video_files, current_index + 1, 0)
             return
         
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        self.current_frame_num = 0
+        self.current_frame_num = resume_frame
+        
+        # Skip to resume frame if needed
+        if resume_frame > 0:
+            logger.info(f"Skipping to frame {resume_frame} for resume")
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, resume_frame)
+        
         self.progress_var.set(0)
         
         # Reset video-specific stats
@@ -564,10 +643,17 @@ class CrowExtractorGUI:
                 self.cap.release()
                 # Update stats for completed video
                 self.stats['videos_processed'] += 1
+                
+                # Mark current video as fully processed
+                current_video_file = self.video_files[self.current_video_index]
+                if current_video_file not in self.processing_progress['processed_videos']:
+                    self.processing_progress['processed_videos'].append(current_video_file)
+                    logger.info(f"Marked video as completed: {current_video_file}")
+                
                 self.stats['current_video_detections'] = 0
                 self.stats['current_video_crows'].clear()
                 self._update_stats()
-                self._process_next_video(video_files, current_video_index + 1)
+                self._process_next_video(video_files, current_video_index + 1, 0)
                 return
             
             # Apply video orientation correction if enabled
@@ -583,6 +669,47 @@ class CrowExtractorGUI:
                 text=f"Processing {os.path.basename(self.current_video)}: "
                      f"{self.current_frame_num}/{self.total_frames} frames"
             )
+            
+            # Update processing progress
+            self.processing_progress['current_video_index'] = self.current_video_index
+            self.processing_progress['current_frame_num'] = self.current_frame_num
+            
+            # Save progress periodically (every 100 frames)
+            if self.current_frame_num % 100 == 0:
+                try:
+                    # Quick save without showing dialog
+                    progress_data = {
+                        'processing_progress': self.processing_progress.copy(),
+                        'current_settings': {
+                            'video_dir': self.video_dir_var.get(),
+                            'output_dir': self.output_dir_var.get(), 
+                            'min_confidence': self.min_confidence_var.get(),
+                            'min_detections': self.min_detections_var.get(),
+                            'mv_yolo': self.mv_yolo_var.get(),
+                            'mv_rcnn': self.mv_rcnn_var.get(),
+                            'orientation_correction': self.orientation_correction_var.get(),
+                            'video_orientation': self.video_orientation_var.get(),
+                            'recursive_search': self.recursive_search_var.get(),
+                            'nms_threshold': self.nms_threshold_var.get(),
+                            'bbox_padding': self.bbox_padding_var.get(),
+                            'enable_audio': self.enable_audio_var.get(),
+                            'audio_duration': self.audio_duration_var.get()
+                        },
+                        'session_stats': self._get_serializable_stats(),
+                        'saved_at': datetime.now().isoformat()
+                    }
+                    
+                    progress_data['processing_progress']['last_save_time'] = datetime.now().isoformat()
+                    
+                    # Save to processing progress file
+                    progress_file = self.tracker.metadata_dir / "processing_progress.json"
+                    with open(progress_file, 'w') as f:
+                        json.dump(progress_data, f, indent=2)
+                    
+                    logger.debug(f"Auto-saved progress at frame {self.current_frame_num}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to auto-save progress: {e}")
             
             # Detect crows with timeout
             try:
@@ -731,6 +858,13 @@ class CrowExtractorGUI:
                 value = self.stats[key]
             label.configure(text=str(value))
     
+    def _get_serializable_stats(self):
+        """Get a JSON-serializable copy of stats."""
+        serializable_stats = self.stats.copy()
+        if 'current_video_crows' in serializable_stats:
+            serializable_stats['current_video_crows'] = list(serializable_stats['current_video_crows'])
+        return serializable_stats
+    
     def _reset_stats(self):
         """Reset all statistics to zero."""
         for key in self.stats:
@@ -741,18 +875,62 @@ class CrowExtractorGUI:
         self._update_stats()
     
     def _save_progress(self):
-        """Manually save the current tracking data."""
+        """Manually save the current tracking data and processing progress."""
         try:
+            # Save crow tracking data
             self.tracker._save_tracking_data(force=True)
-            messagebox.showinfo("Save Progress", "Tracking data saved successfully!")
-            logger.info("Manual save completed")
+            
+            # Save processing progress
+            progress_data = {
+                'processing_progress': self.processing_progress.copy(),
+                'current_settings': {
+                    'video_dir': self.video_dir_var.get(),
+                    'output_dir': self.output_dir_var.get(), 
+                    'min_confidence': self.min_confidence_var.get(),
+                    'min_detections': self.min_detections_var.get(),
+                    'mv_yolo': self.mv_yolo_var.get(),
+                    'mv_rcnn': self.mv_rcnn_var.get(),
+                    'orientation_correction': self.orientation_correction_var.get(),
+                    'video_orientation': self.video_orientation_var.get(),
+                    'recursive_search': self.recursive_search_var.get(),
+                    'nms_threshold': self.nms_threshold_var.get(),
+                    'bbox_padding': self.bbox_padding_var.get(),
+                    'enable_audio': self.enable_audio_var.get(),
+                    'audio_duration': self.audio_duration_var.get()
+                },
+                'session_stats': self._get_serializable_stats(),
+                'saved_at': datetime.now().isoformat()
+            }
+            
+            # Update processing progress with current state if processing
+            if self.processing and hasattr(self, 'video_files'):
+                progress_data['processing_progress']['video_files'] = self.video_files.copy()
+                progress_data['processing_progress']['current_video_index'] = getattr(self, 'current_video_index', 0)
+                progress_data['processing_progress']['current_frame_num'] = getattr(self, 'current_frame_num', 0)
+                progress_data['processing_progress']['total_videos'] = len(self.video_files)
+                
+            progress_data['processing_progress']['last_save_time'] = datetime.now().isoformat()
+            
+            # Save to processing progress file
+            progress_file = self.tracker.metadata_dir / "processing_progress.json"
+            with open(progress_file, 'w') as f:
+                json.dump(progress_data, f, indent=2)
+            
+            messagebox.showinfo("Save Progress", 
+                f"Progress saved successfully!\n\n"
+                f"Crow tracking data: {len(self.tracker.tracking_data['crows'])} crows\n"
+                f"Processing progress: Video {getattr(self, 'current_video_index', 0) + 1} of {len(getattr(self, 'video_files', []))}\n"
+                f"Current frame: {getattr(self, 'current_frame_num', 0)}")
+            
+            logger.info("Manual save completed - both tracking data and processing progress saved")
+            
         except Exception as e:
-            error_msg = f"Error saving tracking data: {str(e)}"
+            error_msg = f"Error saving progress: {str(e)}"
             messagebox.showerror("Save Error", error_msg)
             logger.error(error_msg)
 
     def _load_progress(self):
-        """Load previously saved tracking data."""
+        """Load previously saved tracking data and processing progress."""
         try:
             # Initialize tracker if it doesn't exist
             if not hasattr(self, 'tracker'):
@@ -764,12 +942,14 @@ class CrowExtractorGUI:
                 enable_audio = self.enable_audio_var.get()
                 audio_duration = self.audio_duration_var.get()
                 correct_orientation = self.orientation_correction_var.get()
+                bbox_padding = self.bbox_padding_var.get()
                 
                 self.tracker = CrowTracker(
                     base_dir=self.output_dir_var.get(), 
                     enable_audio_extraction=enable_audio,
                     audio_duration=audio_duration,
-                    correct_orientation=correct_orientation
+                    correct_orientation=correct_orientation,
+                    bbox_padding=bbox_padding
                 )
             
             # Check if tracking file exists
@@ -777,38 +957,111 @@ class CrowExtractorGUI:
                 messagebox.showinfo("Load Progress", "No saved progress found.")
                 return
             
-            # Confirm with user
-            if not messagebox.askyesno("Load Progress", 
-                "This will load saved tracking data. Continue?"):
-                return
+            # Load processing progress if available
+            progress_file = self.tracker.metadata_dir / "processing_progress.json"
+            has_processing_progress = progress_file.exists()
             
-            # Load the tracking data
+            if has_processing_progress:
+                with open(progress_file, 'r') as f:
+                    progress_data = json.load(f)
+                
+                saved_processing_progress = progress_data.get('processing_progress', {})
+                saved_settings = progress_data.get('current_settings', {})
+                saved_stats = progress_data.get('session_stats', {})
+                
+                # Show detailed progress info and ask user what to do
+                current_video_idx = saved_processing_progress.get('current_video_index', 0)
+                current_frame = saved_processing_progress.get('current_frame_num', 0) 
+                total_videos = saved_processing_progress.get('total_videos', 0)
+                processed_videos = len(saved_processing_progress.get('processed_videos', []))
+                
+                progress_info = (
+                    f"Found saved processing progress!\n\n"
+                    f"Last session:\n"
+                    f"• Total videos: {total_videos}\n"
+                    f"• Fully processed: {processed_videos}\n"
+                    f"• Was processing video {current_video_idx + 1} of {total_videos}\n"
+                    f"• At frame {current_frame}\n"
+                    f"• Last saved: {progress_data.get('saved_at', 'Unknown')}\n\n"
+                    f"Do you want to:\n"
+                    f"• Resume from where you left off, or\n"
+                    f"• Load crow data but start processing fresh?"
+                )
+                
+                result = messagebox.askyesnocancel("Resume Processing?", 
+                    progress_info + "\n\nYes = Resume, No = Start Fresh, Cancel = Cancel Load")
+                
+                if result is None:  # Cancel
+                    return
+                elif result:  # Yes - Resume
+                    # Load complete processing state
+                    self.processing_progress = saved_processing_progress.copy()
+                    
+                    # Apply saved settings to GUI
+                    if saved_settings:
+                        self.video_dir_var.set(saved_settings.get('video_dir', ''))
+                        self.min_confidence_var.set(saved_settings.get('min_confidence', 0.2))
+                        self.min_detections_var.set(saved_settings.get('min_detections', 2))
+                        self.mv_yolo_var.set(saved_settings.get('mv_yolo', False))
+                        self.mv_rcnn_var.set(saved_settings.get('mv_rcnn', False))
+                        self.orientation_correction_var.set(saved_settings.get('orientation_correction', False))
+                        self.video_orientation_var.set(saved_settings.get('video_orientation', True))
+                        self.recursive_search_var.set(saved_settings.get('recursive_search', False))
+                        self.nms_threshold_var.set(saved_settings.get('nms_threshold', 0.3))
+                        self.bbox_padding_var.set(saved_settings.get('bbox_padding', 0.3))
+                        self.enable_audio_var.set(saved_settings.get('enable_audio', True))
+                        self.audio_duration_var.set(saved_settings.get('audio_duration', 2.0))
+                    
+                    # Restore session stats
+                    if saved_stats:
+                        # Convert sets back from lists for current_video_crows
+                        if 'current_video_crows' in saved_stats and isinstance(saved_stats['current_video_crows'], list):
+                            saved_stats['current_video_crows'] = set(saved_stats['current_video_crows'])
+                        self.stats.update(saved_stats)
+                    
+                    resume_msg = (
+                        f"Progress loaded and ready to resume!\n\n"
+                        f"Will continue from:\n"
+                        f"• Video {current_video_idx + 1} of {total_videos}\n"
+                        f"• Frame {current_frame}\n\n"
+                        f"Click 'Start Processing' to resume from this point."
+                    )
+                    messagebox.showinfo("Resume Ready", resume_msg)
+                    logger.info(f"Loaded progress for resume: video {current_video_idx + 1}, frame {current_frame}")
+                    
+                else:  # No - Start Fresh (just load crow data)
+                    has_processing_progress = False
+            
+            # Always load crow tracking data
             with open(self.tracker.tracking_file, 'r') as f:
                 self.tracker.tracking_data = json.load(f)
             
-            # Update statistics from loaded data
+            # Update statistics from loaded crow data
             total_crows = len(self.tracker.tracking_data["crows"])
             total_detections = sum(crow["total_detections"] for crow in self.tracker.tracking_data["crows"].values())
             
-            # Update stats display
-            self.stats['crows_created'] = total_crows
-            self.stats['detections'] = total_detections
-            self.stats['valid_crops'] = total_detections
+            if not has_processing_progress:
+                # Just update crow-related stats
+                self.stats['crows_created'] = total_crows
+                self.stats['detections'] = total_detections
+                self.stats['valid_crops'] = total_detections
+            
             self._update_stats()
             
-            # Show summary
-            summary = (
-                f"Progress loaded successfully!\n\n"
-                f"Total crows: {total_crows}\n"
-                f"Total detections: {total_detections}\n"
-                f"Last updated: {self.tracker.tracking_data['updated_at']}\n\n"
-                f"You can now start processing to continue from where you left off."
-            )
-            messagebox.showinfo("Load Progress", summary)
-            logger.info(f"Loaded tracking data: {total_crows} crows, {total_detections} detections")
+            if not has_processing_progress:
+                # Show summary for fresh start
+                summary = (
+                    f"Crow data loaded successfully!\n\n"
+                    f"Total crows: {total_crows}\n"
+                    f"Total detections: {total_detections}\n"
+                    f"Last updated: {self.tracker.tracking_data.get('updated_at', 'Unknown')}\n\n"
+                    f"You can now start processing videos. Existing crows will be recognized."
+                )
+                messagebox.showinfo("Load Progress", summary)
+                logger.info(f"Loaded crow tracking data: {total_crows} crows, {total_detections} detections")
             
         except Exception as e:
-            error_msg = f"Error loading tracking data: {str(e)}"
+            error_msg = f"Error loading progress: {str(e)}"
             messagebox.showerror("Load Error", error_msg)
             logger.error(error_msg)
 
