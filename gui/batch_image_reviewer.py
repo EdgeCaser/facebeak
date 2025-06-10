@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 def get_all_images_from_directory(directory, limit=1000):
     """
     Get image files from a directory, limited for performance.
+    Prioritizes labeled images to ensure they're included in the sample.
     
     Args:
         directory (str): Directory to scan for images
@@ -43,12 +44,47 @@ def get_all_images_from_directory(directory, limit=1000):
                     full_path_obj = Path(root) / file
                     image_files.append(full_path_obj.as_posix())
         
-        # Shuffle for good random sampling and limit for performance
-        random.shuffle(image_files)
-        limited_files = image_files[:limit]
-        
-        logger.info(f"Loaded {len(limited_files)} of {len(image_files)} total images from {directory}")
-        return limited_files
+        # Get labeled images from database to prioritize them
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT DISTINCT image_path FROM image_labels')
+            labeled_paths = {row[0] for row in cursor.fetchall()}
+            conn.close()
+            
+            # Separate labeled and unlabeled images
+            labeled_images = [img for img in image_files if img in labeled_paths]
+            unlabeled_images = [img for img in image_files if img not in labeled_paths]
+            
+            # Prioritize labeled images and fill remaining with random unlabeled
+            random.shuffle(unlabeled_images)
+            
+            # Include all labeled images first, then fill with unlabeled
+            selected_images = labeled_images.copy()
+            remaining_slots = limit - len(labeled_images)
+            
+            if remaining_slots > 0:
+                selected_images.extend(unlabeled_images[:remaining_slots])
+            else:
+                # If we have more labeled images than the limit, just take the first 'limit'
+                selected_images = labeled_images[:limit]
+            
+            # Shuffle the final list for display variety
+            random.shuffle(selected_images)
+            
+            logger.info(f"Loaded {len(selected_images)} of {len(image_files)} total images from {directory}")
+            logger.info(f"  - {len(labeled_images)} labeled images (all included)")
+            logger.info(f"  - {len(selected_images) - len(labeled_images)} unlabeled images (random sample)")
+            
+            return selected_images
+            
+        except Exception as db_e:
+            logger.warning(f"Could not prioritize labeled images due to database error: {db_e}")
+            # Fallback to original random sampling
+            random.shuffle(image_files)
+            limited_files = image_files[:limit]
+            logger.info(f"Loaded {len(limited_files)} of {len(image_files)} total images from {directory} (random fallback)")
+            return limited_files
         
     except Exception as e:
         logger.error(f"Error getting images from directory: {e}")

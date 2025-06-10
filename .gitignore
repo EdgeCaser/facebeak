@@ -333,6 +333,17 @@ changes_since_last_commit.diff
 *.diff
 *_report.txt
 
+# Model prediction outputs - These can be large
+model_predictions_*.json
+*_predictions.json
+*prediction*.json
+
+# Temporary test outputs and directories
+test_false_positives/
+test_hard_negatives/
+temp_test/
+temporary_*/
+
 # IDE and Editor files
 .cursor/
 .cursor.json
