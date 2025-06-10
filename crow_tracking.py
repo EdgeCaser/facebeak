@@ -594,18 +594,38 @@ class CrowTracker:
             video_name = "unknown"
             if video_path:
                 video_name = Path(video_path).stem  # Get filename without extension
-                # Sanitize video name for filesystem
-                video_name = "".join(c for c in video_name if c.isalnum() or c in ('-', '_'))[:20]
+                # Sanitize video name for filesystem (removed truncation)
+                video_name = "".join(c for c in video_name if c.isalnum() or c in ('-', '_'))
             
             # NEW: Create video-specific directory (prevents bias by not grouping by crow ID)
             video_dir = self.videos_dir / video_name
             video_dir.mkdir(parents=True, exist_ok=True)
             
-            # NEW: Generate frame-based filename to prevent training bias
-            # Format: frame_XXXXXX_crop_XXX.jpg (multiple crops per frame possible)
-            base_filename = f"frame_{frame_num:06d}_crop"
+            # NEW: Generate frame-based filename with version safety to prevent overwrites
+            # Format: frame_XXXXXX_crop_XXX.jpg (or frame_XXXXXX_v2_crop_XXX.jpg if versions needed)
             
-            # Find next available crop number for this frame
+            # First, check if any crops exist for this frame and determine version needed
+            frame_version = 1
+            while True:
+                if frame_version == 1:
+                    base_filename = f"frame_{frame_num:06d}_crop"
+                else:
+                    base_filename = f"frame_{frame_num:06d}_v{frame_version}_crop"
+                
+                # Check if any crops exist with this base filename
+                existing_crops = list(video_dir.glob(f"{base_filename}_*.jpg"))
+                if not existing_crops:
+                    # No crops with this base filename, safe to use
+                    break
+                else:
+                    # Crops exist with this base, try next version
+                    frame_version += 1
+                    # Safety limit to prevent infinite loops
+                    if frame_version > 100:
+                        logger.warning(f"Too many versions for frame {frame_num}, using v{frame_version}")
+                        break
+            
+            # Find next available crop number for this frame version
             crop_counter = 1
             while True:
                 filename = f"{base_filename}_{crop_counter:03d}.jpg"
@@ -613,6 +633,10 @@ class CrowTracker:
                 if not crop_path.exists():
                     break
                 crop_counter += 1
+                # Safety limit to prevent infinite loops
+                if crop_counter > 999:
+                    logger.warning(f"Too many crops for frame {frame_num}, using crop_{crop_counter:03d}")
+                    break
             
             # Handle both numpy array and tensor formats from crop input
             if isinstance(crop, dict):
@@ -656,13 +680,17 @@ class CrowTracker:
                 "frame": frame_num,
                 "video": video_name,
                 "video_path": str(video_path) if video_path else None,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "frame_version": frame_version,
+                "crop_number": crop_counter
             }
             
             # Save crop metadata
             self._save_crop_metadata()
             
-            logger.debug(f"Saved crop to {crop_path} (video/frame-based organization)")
+            # Log with version info for debugging
+            version_info = f" (v{frame_version})" if frame_version > 1 else ""
+            logger.debug(f"Saved crop to {crop_path} (video/frame-based organization{version_info})")
             logger.debug(f"Mapped crop to crow {crow_id} in metadata")
             
             return crop_path
