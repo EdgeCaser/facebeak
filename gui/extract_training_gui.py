@@ -226,6 +226,7 @@ class CrowExtractorGUI:
         # Initialize processing state
         self.processing = False
         self.paused = False
+        self.skip_current_video = False  # Flag for skipping current video
         self.cap = None
         self.current_video = None
         
@@ -341,14 +342,17 @@ class CrowExtractorGUI:
         self.pause_button = ttk.Button(control_frame, text="Pause", command=self._pause_processing, state=tk.DISABLED)
         self.pause_button.grid(row=0, column=1, padx=5)
         
+        self.skip_button = ttk.Button(control_frame, text="Skip Video", command=self._skip_current_video, state=tk.DISABLED)
+        self.skip_button.grid(row=0, column=2, padx=5)
+        
         self.stop_button = ttk.Button(control_frame, text="Stop", command=self._stop_processing, state=tk.DISABLED)
-        self.stop_button.grid(row=0, column=2, padx=5)
+        self.stop_button.grid(row=0, column=3, padx=5)
         
         self.save_button = ttk.Button(control_frame, text="Save Progress", command=self._save_progress)
-        self.save_button.grid(row=0, column=3, padx=5)
+        self.save_button.grid(row=0, column=4, padx=5)
         
         self.load_button = ttk.Button(control_frame, text="Load Progress", command=self._load_progress)
-        self.load_button.grid(row=0, column=4, padx=5)
+        self.load_button.grid(row=0, column=5, padx=5)
         
         # Progress tracking
         progress_frame = ttk.LabelFrame(self.left_panel, text="Progress", padding="5")
@@ -572,8 +576,10 @@ class CrowExtractorGUI:
         
         self.processing = True
         self.paused = False
+        self.skip_current_video = False  # Reset skip flag
         self.start_button.config(state=tk.DISABLED)
         self.pause_button.config(state=tk.NORMAL)
+        self.skip_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.NORMAL)
         
         # Reset statistics only if starting fresh
@@ -634,6 +640,25 @@ class CrowExtractorGUI:
     
     def _process_frame(self, video_files, current_video_index):
         if not self.processing or self.paused:
+            return
+        
+        # Check if we should skip the current video
+        if self.skip_current_video:
+            logger.info(f"Skipping video: {os.path.basename(self.current_video)}")
+            self.skip_current_video = False  # Reset flag
+            if self.cap:
+                self.cap.release()
+            # Mark current video as processed and move to next
+            current_video_file = self.video_files[self.current_video_index]
+            if current_video_file not in self.processing_progress['processed_videos']:
+                self.processing_progress['processed_videos'].append(current_video_file)
+                logger.info(f"Marked skipped video as completed: {current_video_file}")
+            
+            self.stats['videos_processed'] += 1
+            self.stats['current_video_detections'] = 0
+            self.stats['current_video_crows'].clear()
+            self._update_stats()
+            self._process_next_video(video_files, current_video_index + 1, 0)
             return
         
         try:
@@ -813,11 +838,19 @@ class CrowExtractorGUI:
             # Resume processing from where we left off
             self._process_frame(self.video_files, self.current_video_index)
     
+    def _skip_current_video(self):
+        """Skip the current video and move to the next one."""
+        if self.processing and not self.paused:
+            self.skip_current_video = True
+            logger.info(f"Skipping current video: {os.path.basename(self.current_video) if self.current_video else 'Unknown'}")
+            self.status_var.set("Skipping to next video...")
+    
     def _stop_processing(self):
         """Stop processing videos."""
         self.processing = False
         self.start_button.config(state=tk.NORMAL)
         self.pause_button.config(state=tk.DISABLED)
+        self.skip_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.DISABLED)
         # Keep save button enabled after stopping
         self.save_button.config(state=tk.NORMAL)

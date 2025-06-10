@@ -115,7 +115,7 @@ def extract_roi(frame, bbox, padding=0.1):
     
     return frame[y1:y2, x1:x2], (x1, y1, x2, y2)
 
-def compute_iou(bbox1, bbox2):
+def calculate_iou_boxes(bbox1, bbox2):
     """Compute Intersection over Union between two bounding boxes."""
     x1 = max(bbox1[0], bbox2[0])
     y1 = max(bbox1[1], bbox2[1])
@@ -147,13 +147,14 @@ def has_overlapping_crows(detections, iou_thresh=0.4):
         for j, det2 in enumerate(detections):
             if i >= j:  # Avoid duplicate comparisons and self-comparison
                 continue
-            if compute_iou(det1['bbox'], det2['bbox']) > iou_thresh:
+            if calculate_iou_boxes(det1['bbox'], det2['bbox']) > iou_thresh:
                 return True
     return False
 
 def merge_overlapping_detections(detections, iou_threshold=0.5):
     """
     Merge overlapping detections with improved consistency.
+    Uses both IOU and center distance for more aggressive merging.
     Args:
         detections: List of detection dictionaries
         iou_threshold: IOU threshold for merging
@@ -168,6 +169,28 @@ def merge_overlapping_detections(detections, iou_threshold=0.5):
     merged = []
     used = set()
     
+    def get_box_center(box):
+        return ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+    
+    def get_box_area(box):
+        return (box[2] - box[0]) * (box[3] - box[1])
+    
+    def center_distance_normalized(box1, box2):
+        """Calculate normalized distance between box centers"""
+        c1 = get_box_center(box1)
+        c2 = get_box_center(box2)
+        
+        # Get the average box dimension for normalization
+        avg_w = ((box1[2] - box1[0]) + (box2[2] - box2[0])) / 2
+        avg_h = ((box1[3] - box1[1]) + (box2[3] - box2[1])) / 2
+        avg_dim = (avg_w + avg_h) / 2
+        
+        # Calculate Euclidean distance
+        distance = ((c1[0] - c2[0])**2 + (c1[1] - c2[1])**2)**0.5
+        
+        # Normalize by average dimension
+        return distance / avg_dim if avg_dim > 0 else float('inf')
+    
     for i, det1 in enumerate(sorted_dets):
         if i in used:
             continue
@@ -176,58 +199,81 @@ def merge_overlapping_detections(detections, iou_threshold=0.5):
         used.add(i)
         scores = [det1['score']]
         views = [det1.get('view', 'single')]
-        boxes = [det1['bbox']]
         
-        # Find all overlapping detections
-        for j, det2 in enumerate(sorted_dets[i+1:], start=i+1):
+        # Find detections to merge with this one
+        for j, det2 in enumerate(sorted_dets[i+1:], i+1):
             if j in used:
                 continue
-                
-            iou = compute_iou(det1['bbox'], det2['bbox'])
-            # Only merge if IOU exceeds threshold AND classes are the same
-            # Don't merge different classes to preserve class diversity
-            if iou >= iou_threshold and det1['class'] == det2['class']:
+            
+            box1 = det1['bbox']
+            box2 = det2['bbox'] 
+            
+            # Calculate IOU
+            iou = calculate_iou_boxes(box1, box2)
+            
+            # Calculate center distance (normalized)
+            center_dist = center_distance_normalized(box1, box2)
+            
+            # More aggressive merging conditions:
+            # 1. Standard IOU threshold
+            # 2. OR center distance is very small (< 0.8 box dimensions)
+            # 3. OR boxes have significant overlap in either dimension
+            should_merge = (
+                iou >= iou_threshold or
+                center_dist < 0.8 or  # Centers are close
+                (box1[0] <= box2[2] and box2[0] <= box1[2] and  # X overlap
+                 max(0, min(box1[2], box2[2]) - max(box1[0], box2[0])) / 
+                 min(box1[2] - box1[0], box2[2] - box2[0]) > 0.3) or  # 30% X overlap
+                (box1[1] <= box2[3] and box2[1] <= box1[3] and  # Y overlap  
+                 max(0, min(box1[3], box2[3]) - max(box1[1], box2[1])) /
+                 min(box1[3] - box1[1], box2[3] - box2[1]) > 0.3)    # 30% Y overlap
+            )
+            
+            if should_merge:
                 current_group.append(det2)
-                used.add(j)
                 scores.append(det2['score'])
                 views.append(det2.get('view', 'single'))
-                boxes.append(det2['bbox'])
+                used.add(j)
         
+        # Create merged detection using weighted average of centers and max extents
         if len(current_group) > 1:
-            # Calculate view diversity bonus
-            unique_views = len(set(views))
-            view_bonus = 0.15 * (unique_views - 1) if unique_views > 1 else 0
+            # Calculate weighted center
+            total_weight = sum(scores)
+            weighted_x = sum(score * ((box[0] + box[2]) / 2) for score, box in zip(scores, [d['bbox'] for d in current_group])) / total_weight
+            weighted_y = sum(score * ((box[1] + box[3]) / 2) for score, box in zip(scores, [d['bbox'] for d in current_group])) / total_weight
             
-            # Calculate merged box using union of all boxes (encompasses entire crow)
-            # This ensures no part of the crow is missed regardless of confidence distribution
-            x1 = min(box[0] for box in boxes)  # Leftmost edge
-            y1 = min(box[1] for box in boxes)  # Topmost edge
-            x2 = max(box[2] for box in boxes)  # Rightmost edge
-            y2 = max(box[3] for box in boxes)  # Bottommost edge
-            merged_box = [x1, y1, x2, y2]
+            # Calculate max extents with some padding
+            all_boxes = [d['bbox'] for d in current_group]
+            min_x = min(box[0] for box in all_boxes)
+            min_y = min(box[1] for box in all_boxes)
+            max_x = max(box[2] for box in all_boxes)
+            max_y = max(box[3] for box in all_boxes)
             
-            # Calculate final score
-            base_score = max(scores)  # Use highest confidence as base
-            confidence_bonus = 0.1 * (len(current_group) - 1)  # Bonus for multiple detections
-            final_score = min(base_score + view_bonus + confidence_bonus, 1.0)  # Cap at 1.0
+            # Use weighted center but constrained by extents
+            width = max_x - min_x
+            height = max_y - min_y
             
-            merged.append({
-                'bbox': merged_box,  # Already a list from union calculation
-                'score': float(final_score),  # Ensure float type
-                'class': 'crow' if any(d['class'] == 'crow' for d in current_group) else 'bird',
+            final_box = [
+                max(min_x, weighted_x - width/3),  # Don't go beyond min extent
+                max(min_y, weighted_y - height/3),
+                min(max_x, weighted_x + width/3),  # Don't go beyond max extent  
+                min(max_y, weighted_y + height/3)
+            ]
+            
+            merged_det = {
+                'bbox': final_box,
+                'score': min(1.0, sum(scores) / len(scores)),  # Average score, capped at 1.0
+                'class': 'bird',
                 'model': 'merged',
                 'merged_scores': scores,
-                'views': views
-            })
+                'views': views,
+                'multi_crow_frame': True
+            }
         else:
-            # For single detections, ensure consistent types
-            merged.append({
-                'bbox': det1['bbox'] if isinstance(det1['bbox'], list) else det1['bbox'].tolist(),
-                'score': float(det1['score']),
-                'class': det1['class'],
-                'model': det1['model'],
-                'view': det1.get('view', 'single')
-            })
+            merged_det = current_group[0].copy()
+            merged_det['multi_crow_frame'] = True
+        
+        merged.append(merged_det)
     
     return merged
 

@@ -1,3 +1,8 @@
+# Set up path for importing from parent directory
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import os

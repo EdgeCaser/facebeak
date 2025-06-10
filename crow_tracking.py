@@ -420,7 +420,7 @@ class CrowTracker:
                     logger.warning(f"Could not get FPS from video: {e}")
                     fps = 30.0  # Default FPS
             
-            if crow_id is None:
+            if crow_id_match_result is None:
                 # Create new crow
                 crow_id = self._generate_crow_id()  # Changed to match test
                 if crow_id is None:
@@ -449,12 +449,7 @@ class CrowTracker:
                     embedding=current_crop_embedding_np_normalized,
                     video_path=str(video_path) if video_path else "unknown_video",
                     frame_number=frame_num,
-                    crow_id=crow_id, # The newly generated crow_id
-                    confidence=score,
-                    bbox_x=box[0],
-                    bbox_y=box[1],
-                    bbox_w=box[2] - box[0],
-                    bbox_h=box[3] - box[1]
+                    confidence=score
                 )
                 logger.debug(f"Saved new crow {crow_id} embedding to DB.")
                 # The line self.tracking_data["crows"][crow_id]["embedding"] = embedding.tolist() is now removed.
@@ -497,29 +492,24 @@ class CrowTracker:
                     embedding=current_crop_embedding_np_normalized,
                     video_path=str(video_path) if video_path else "unknown_video",
                     frame_number=frame_num,
-                    crow_id=crow_id, # The existing crow_id
-                    confidence=score,
-                    bbox_x=box[0],
-                    bbox_y=box[1],
-                    bbox_w=box[2] - box[0],
-                    bbox_h=box[3] - box[1]
+                    confidence=score
                 )
                 logger.debug(f"Saved embedding to DB for existing crow {crow_id}.")
                 # The logic for updating embedding in JSON (e.g. crow_data["embedding"] = ...tolist()) is removed.
 
-                    # Extract and save audio if enabled (original logic for audio extraction point)
-                    if self.enable_audio_extraction and video_path and fps and (crow_data["total_detections"] % 10 == 0) : # Example: align with crop saving
-                        try:
-                            # Calculate frame time in seconds from video start
-                            frame_time_seconds = frame_num / fps
-                            audio_path = extract_and_save_crow_audio(
-                                video_path, frame_time_seconds, fps, crow_id, frame_num, 
-                                self.audio_dir, self.audio_duration
-                            )
-                            if audio_path:
-                                logger.debug(f"Saved audio for existing crow {crow_id}: {audio_path}")
-                        except Exception as e:
-                            logger.warning(f"Failed to extract audio for existing crow {crow_id}: {e}")
+                # Extract and save audio if enabled (original logic for audio extraction point)
+                if self.enable_audio_extraction and video_path and fps and (crow_data["total_detections"] % 10 == 0) : # Example: align with crop saving
+                    try:
+                        # Calculate frame time in seconds from video start
+                        frame_time_seconds = frame_num / fps
+                        audio_path = extract_and_save_crow_audio(
+                            video_path, frame_time_seconds, fps, crow_id, frame_num, 
+                            self.audio_dir, self.audio_duration
+                        )
+                        if audio_path:
+                            logger.debug(f"Saved audio for existing crow {crow_id}: {audio_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to extract audio for existing crow {crow_id}: {e}")
             
             # Save tracking data periodically (contains detection records, but not embeddings themselves)
             self._save_tracking_data()
@@ -598,7 +588,7 @@ class CrowTracker:
     
     def save_crop(self, crop, crow_id, frame_num, video_path=None):
         """Save a crop image to disk using video/frame-based organization to prevent training bias."""
-        # Parameter 'crop' is now 'crop_dict'
+        # Handle both crop_dict and direct crop parameters
         try:
             # Extract video name if provided
             video_name = "unknown"
@@ -624,9 +614,9 @@ class CrowTracker:
                     break
                 crop_counter += 1
             
-            # Handle both numpy array and tensor formats from crop_dict
-            if isinstance(crop_dict, dict):
-                crop_data_full = crop_dict.get('full') # Use .get for safety
+            # Handle both numpy array and tensor formats from crop input
+            if isinstance(crop, dict):
+                crop_data_full = crop.get('full') # Use .get for safety
                 if crop_data_full is None:
                     logger.error("Crop dictionary does not contain 'full' key for saving.")
                     return None
@@ -644,10 +634,10 @@ class CrowTracker:
                 else:
                     logger.error(f"Unsupported crop_data['full'] type: {type(crop_data_full)}")
                     return None
-            elif isinstance(crop_dict, np.ndarray): # If crop_dict was actually just the np array
-                crop_np = (crop_dict * 255).astype(np.uint8) if np.max(crop_dict) <= 1.0 else crop_dict.astype(np.uint8)
+            elif isinstance(crop, np.ndarray): # If crop was actually just the np array
+                crop_np = (crop * 255).astype(np.uint8) if np.max(crop) <= 1.0 else crop.astype(np.uint8)
             else:
-                logger.error(f"Unsupported crop input type to save_crop: {type(crop_dict)}")
+                logger.error(f"Unsupported crop input type to save_crop: {type(crop)}")
                 return None
             
             # Save the crop (OpenCV expects BGR, ensure conversion if necessary, though extract_normalized_crow_crop usually gives RGB)
