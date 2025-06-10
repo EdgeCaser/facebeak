@@ -18,17 +18,17 @@ import random
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_all_images_from_directory(directory, limit=1000):
+def get_all_images_from_directory(directory, limit=None):
     """
-    Get image files from a directory, limited for performance.
-    Prioritizes labeled images to ensure they're included in the sample.
+    Get image files from a directory, with optional limiting for performance.
+    Prioritizes unlabeled images to ensure they're available for review.
     
     Args:
         directory (str): Directory to scan for images
-        limit (int): Maximum number of images to return (default 1000)
+        limit (int): Maximum number of images to return (None for all images)
         
     Returns:
-        list: List of up to 'limit' image file paths
+        list: List of image file paths
     """
     try:
         if not os.path.exists(directory):
@@ -44,7 +44,7 @@ def get_all_images_from_directory(directory, limit=1000):
                     full_path_obj = Path(root) / file
                     image_files.append(full_path_obj.as_posix())
         
-        # Get labeled images from database to prioritize them
+        # Get labeled images from database to prioritize unlabeled ones
         try:
             conn = get_connection()
             cursor = conn.cursor()
@@ -56,35 +56,65 @@ def get_all_images_from_directory(directory, limit=1000):
             labeled_images = [img for img in image_files if img in labeled_paths]
             unlabeled_images = [img for img in image_files if img not in labeled_paths]
             
-            # Prioritize labeled images and fill remaining with random unlabeled
-            random.shuffle(unlabeled_images)
+            # If no limit specified, return all images
+            if limit is None:
+                # Sort by modification time (newest first) to prioritize recently created crops
+                try:
+                    unlabeled_images.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                    labeled_images.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                except:
+                    # If sorting fails, shuffle for variety
+                    random.shuffle(unlabeled_images)
+                    random.shuffle(labeled_images)
+                
+                all_images = unlabeled_images + labeled_images
+                logger.info(f"Loaded all {len(all_images)} images from {directory}")
+                logger.info(f"  - {len(unlabeled_images)} unlabeled images")
+                logger.info(f"  - {len(labeled_images)} labeled images")
+                return all_images
             
-            # Include all labeled images first, then fill with unlabeled
-            selected_images = labeled_images.copy()
-            remaining_slots = limit - len(labeled_images)
+            # If limit specified, prioritize unlabeled images
+            selected_images = []
             
-            if remaining_slots > 0:
-                selected_images.extend(unlabeled_images[:remaining_slots])
-            else:
-                # If we have more labeled images than the limit, just take the first 'limit'
-                selected_images = labeled_images[:limit]
+            # Add as many unlabeled images as possible first
+            unlabeled_count = min(len(unlabeled_images), limit)
+            if unlabeled_count > 0:
+                # Sort unlabeled by modification time (newest first)
+                try:
+                    unlabeled_images.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                except:
+                    random.shuffle(unlabeled_images)
+                selected_images.extend(unlabeled_images[:unlabeled_count])
+            
+            # Fill remaining slots with labeled images
+            remaining_slots = limit - len(selected_images)
+            if remaining_slots > 0 and labeled_images:
+                try:
+                    labeled_images.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                except:
+                    random.shuffle(labeled_images)
+                selected_images.extend(labeled_images[:remaining_slots])
             
             # Shuffle the final list for display variety
             random.shuffle(selected_images)
             
             logger.info(f"Loaded {len(selected_images)} of {len(image_files)} total images from {directory}")
-            logger.info(f"  - {len(labeled_images)} labeled images (all included)")
-            logger.info(f"  - {len(selected_images) - len(labeled_images)} unlabeled images (random sample)")
+            logger.info(f"  - {len([img for img in selected_images if img in unlabeled_images])} unlabeled images")
+            logger.info(f"  - {len([img for img in selected_images if img in labeled_images])} labeled images")
             
             return selected_images
             
         except Exception as db_e:
-            logger.warning(f"Could not prioritize labeled images due to database error: {db_e}")
-            # Fallback to original random sampling
-            random.shuffle(image_files)
-            limited_files = image_files[:limit]
-            logger.info(f"Loaded {len(limited_files)} of {len(image_files)} total images from {directory} (random fallback)")
-            return limited_files
+            logger.warning(f"Could not prioritize images due to database error: {db_e}")
+            # Fallback to loading all images or random sampling
+            if limit is None:
+                logger.info(f"Loaded all {len(image_files)} images from {directory} (fallback)")
+                return image_files
+            else:
+                random.shuffle(image_files)
+                limited_files = image_files[:limit]
+                logger.info(f"Loaded {len(limited_files)} of {len(image_files)} total images from {directory} (random fallback)")
+                return limited_files
         
     except Exception as e:
         logger.error(f"Error getting images from directory: {e}")
@@ -191,7 +221,8 @@ class BatchImageReviewer:
         dir_entry = ttk.Entry(control_frame, textvariable=self.dir_var, width=40)
         dir_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
         ttk.Button(control_frame, text="Browse", command=self.browse_directory).grid(row=0, column=2, padx=(0, 5))
-        ttk.Button(control_frame, text="Load Images", command=self.load_images).grid(row=0, column=3)
+        ttk.Button(control_frame, text="Load Images", command=self.load_images).grid(row=0, column=3, padx=(0, 5))
+        ttk.Button(control_frame, text="Refresh", command=self.refresh_images).grid(row=0, column=4)
         
         # Filter options (second row)
         filter_frame = ttk.Frame(control_frame)
@@ -386,6 +417,26 @@ class BatchImageReviewer:
         directory = filedialog.askdirectory(title="Select Image Directory")
         if directory:
             self.dir_var.set(directory)
+    
+    def refresh_images(self):
+        """Refresh the current image list to pick up new images."""
+        if not self.dir_var.get():
+            messagebox.showinfo("Info", "Please select a directory first")
+            return
+        
+        # Store current filter to maintain user's view
+        current_filter = self.filter_var.get()
+        
+        # Reload images
+        self.load_images()
+        
+        # Restore filter after loading
+        self.root.after(500, lambda: self._restore_filter_view(current_filter))
+    
+    def _restore_filter_view(self, filter_name):
+        """Helper to restore filter view after refresh."""
+        self.filter_var.set(filter_name)
+        self.display_current_page()
             
     def load_images(self):
         """Load images from the specified directory."""
@@ -412,14 +463,14 @@ class BatchImageReviewer:
         self.label_cache.clear()
         self.cache_valid = True
         
-        # Load images in background thread
+        # Load images in background thread (load all images, not limited)
         threading.Thread(target=self._load_images_background, args=(directory,), daemon=True).start()
         
     def _load_images_background(self, directory):
         """Load images in background thread."""
         try:
-            # Get all images from the directory
-            all_images = get_all_images_from_directory(directory)
+            # Get all images from the directory (no limit to ensure all are loaded)
+            all_images = get_all_images_from_directory(directory, limit=None)
             
             if not all_images:
                 self.root.after(0, lambda: self.progress_label.config(text="No images found"))
@@ -489,7 +540,8 @@ class BatchImageReviewer:
             self.prev_btn.config(state='disabled')
             self.next_btn.config(state='disabled')
             filter_text = f" ({self.filter_var.get()})" if self.filter_var.get() != "All Images" else ""
-            self.progress_label.config(text=f"No images found{filter_text}")
+            refresh_hint = " - Click 'Refresh' to check for new images" if self.filter_var.get() == "Unlabeled Only" else ""
+            self.progress_label.config(text=f"No images found{filter_text}{refresh_hint}")
             return
             
         total_pages = (len(working_images) + self.images_per_page - 1) // self.images_per_page
@@ -1004,9 +1056,10 @@ def main():
 
 Instructions:
 1. Select directory containing crow crop images
-2. Click 'Load Images' to display thumbnails (loads 1000 random images for performance)
-3. Use pagination controls to navigate through pages
-4. Use the "Show" dropdown to filter by label type:
+2. Click 'Load Images' to display all available thumbnails
+3. Use 'Refresh' button to reload images after new crops are added
+4. Use pagination controls to navigate through pages
+5. Use the "Show" dropdown to filter by label type:
    - All Images: Show everything
    - Unlabeled Only: Show only unlabeled images
    - Crow Only: Show only good crow images  
@@ -1014,18 +1067,19 @@ Instructions:
    - Bad Crow Only: Show only poor quality crow images
    - Not Sure Only: Show only uncertain images
    - Multi Crow Only: Show only multi-crow images
-5. Adjust thumbnail size using the slider in the filter bar
-6. Click on images or checkboxes to select them
-7. Double-click any image to view it enlarged
-8. Use selection controls:
+6. Adjust thumbnail size using the slider in the filter bar
+7. Click on images or checkboxes to select them
+8. Double-click any image to view it enlarged
+9. Use selection controls:
    - Select All / Clear Selection / Invert Selection
-9. Choose label and apply to all selected images
+10. Choose label and apply to all selected images
 
 Performance Features:
-• Loads 1000 random images per session for fast performance
+• Loads ALL images from directory (prioritizes unlabeled)
 • Intelligent caching for instant filter switching
 • Batch database queries for faster labeling
-• Smart refresh - only updates changed images
+• Smart refresh - automatically updates after labeling
+• Refresh button to pick up newly processed crops
 
 Label Categories:
 • Crow - Good quality crow images suitable for training
