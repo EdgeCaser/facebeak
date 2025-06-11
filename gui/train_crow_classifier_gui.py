@@ -44,12 +44,10 @@ class CrowDataset(Dataset):
         self.labels = labels
         self.transform = transform
         
-        # Label mapping
+        # Label mapping (only crow and not_a_crow)
         self.label_to_idx = {
             'crow': 0,
-            'not_a_crow': 1, 
-            'multi_crow': 2,
-            'bad_crow': 1  # Treat bad_crow same as not_a_crow
+            'not_a_crow': 1
         }
         self.idx_to_label = {v: k for k, v in self.label_to_idx.items()}
         
@@ -134,10 +132,17 @@ def load_labeled_data():
     else:
         logger.warning(f"Non-crow directory not found: {non_crow_dir}")
 
+    # Filter out any images that are not 'crow' or 'not_a_crow' (defensive, in case of DB use)
+    filtered = [(p, l) for p, l in zip(image_paths, labels) if l in ("crow", "not_a_crow")]
+    if filtered:
+        image_paths, labels = zip(*filtered)
+    else:
+        image_paths, labels = [], []
+
     logger.info(f"Total dataset: {len(image_paths)} images")
     label_counts = Counter(labels)
     logger.info(f"Label distribution: {dict(label_counts)}")
-    return image_paths, labels
+    return list(image_paths), list(labels)
 
 def train_model(model, train_loader, val_loader, num_epochs=50, device='cuda'):
     """Train the classification model"""
@@ -228,7 +233,7 @@ def evaluate_model(model, test_loader, device='cuda'):
             all_labels.extend(labels.cpu().numpy())
     
     # Convert indices back to label names
-    label_names = ['crow', 'not_a_crow', 'multi_crow']
+    label_names = ['crow', 'not_a_crow']
     
     # Print classification report
     logger.info("\nClassification Report:")
@@ -245,7 +250,7 @@ def save_model(model, filepath='crow_classifier.pth'):
     """Save the trained model"""
     model_info = {
         'model_state_dict': model.state_dict(),
-        'label_to_idx': {'crow': 0, 'not_a_crow': 1, 'multi_crow': 2},
+        'label_to_idx': {'crow': 0, 'not_a_crow': 1},
         'model_architecture': 'resnet18'
     }
     
