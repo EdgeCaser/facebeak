@@ -168,7 +168,7 @@ def find_video_files(video_dir, recursive=False):
 def main():
     parser = argparse.ArgumentParser(description="Extract crow crops from videos with full parameter control")
     parser.add_argument("video_dir", help="Directory containing input videos")
-    parser.add_argument("--output-dir", default="crow_crops", help="Base directory to save crops")
+    parser.add_argument("--output-dir", default="dataset/crows/generic", help="Base directory to save crops")
     parser.add_argument("--min-confidence", type=float, default=0.2, help="Minimum detection confidence")
     parser.add_argument("--min-detections", type=int, default=2, help="Minimum detections per crow")
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size for processing")

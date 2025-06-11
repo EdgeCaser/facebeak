@@ -12,12 +12,14 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 class CrowTripletDataset(Dataset):
-    def __init__(self, data_dir, transform=None):
+    def __init__(self, data_dir, transform=None, include_non_crow=True, non_crow_dir=None):
         """Initialize dataset.
         
         Args:
             data_dir: Path to data directory
             transform: Optional transform to apply to images
+            include_non_crow: Whether to include non-crow images as negatives
+            non_crow_dir: Directory for non-crow images (default: dataset/not_crow)
         """
         self.data_dir = Path(data_dir)
         if not self.data_dir.exists():
@@ -111,10 +113,31 @@ class CrowTripletDataset(Dataset):
                     
                     self.samples.append((img_path, video_path, audio_path, crow_id))
         
+        if include_non_crow:
+            if non_crow_dir is None:
+                non_crow_dir = Path("dataset/not_crow")
+            else:
+                non_crow_dir = Path(non_crow_dir)
+            self._load_non_crow_samples(non_crow_dir)
+        
         if not self.samples:
             raise ValueError("No valid samples found in dataset")
         
         logger.info(f"Initialized dataset with {len(self.samples)} samples from {len(self.crow_dirs)} crows")
+    
+    def _load_non_crow_samples(self, non_crow_dir):
+        if not non_crow_dir.exists():
+            logger.warning(f"Non-crow directory not found: {non_crow_dir}")
+            return
+        non_crow_images = []
+        for img_path in non_crow_dir.glob("*.jpg"):
+            non_crow_images.append((img_path, None, None, "not_a_crow"))
+        for img_path in non_crow_dir.glob("*.jpeg"):
+            non_crow_images.append((img_path, None, None, "not_a_crow"))
+        for img_path in non_crow_dir.glob("*.png"):
+            non_crow_images.append((img_path, None, None, "not_a_crow"))
+        self.samples.extend(non_crow_images)
+        logger.info(f"Added {len(non_crow_images)} non-crow images as negative examples from {non_crow_dir}")
     
     def __len__(self):
         return len(self.samples)

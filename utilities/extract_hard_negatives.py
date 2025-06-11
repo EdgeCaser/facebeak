@@ -128,7 +128,7 @@ def process_video_file(video_path: str, output_dir: str, max_crops_per_video: in
     logger.info(f"Video stats: {total_frames} frames, {fps:.2f} fps, {duration:.2f} seconds")
     
     video_name = Path(video_path).stem
-    video_output_dir = Path(output_dir) / video_name
+    video_output_dir = Path('dataset/not_crow/hard_negatives') / video_name
     video_output_dir.mkdir(parents=True, exist_ok=True)
     
     extracted_count = 0
@@ -274,8 +274,8 @@ def add_crops_to_database(crops_dir: str, label: str = "not_a_crow", confidence:
 def main():
     parser = argparse.ArgumentParser(description="Extract hard negative crops from videos")
     parser.add_argument("input_path", help="Path to video file or directory containing videos")
-    parser.add_argument("--output-dir", "-o", default="crow_crops/hard_negatives", 
-                       help="Output directory for extracted crops")
+    parser.add_argument("--output-dir", "-o", default="dataset/not_crow/hard_negatives", 
+                       help="Output directory for extracted crops (default: dataset/not_crow/hard_negatives)")
     parser.add_argument("--max-crops-per-video", "-c", type=int, default=200,
                        help="Maximum number of crops to extract per video")
     parser.add_argument("--frame-skip", "-s", type=int, default=30,
@@ -291,6 +291,10 @@ def main():
                        help="Video file extensions to process")
     
     args = parser.parse_args()
+    
+    # Warn if user tries to use an old directory
+    if 'crow_crops' in args.output_dir or 'hard_negatives' in args.output_dir and 'dataset' not in args.output_dir:
+        logger.warning("You are using a legacy output directory. Please use the new structure: dataset/not_crow/hard_negatives")
     
     # Validate arguments
     valid_labels = ['crow', 'not_a_crow', 'bad_crow', 'not_sure', 'multi_crow']

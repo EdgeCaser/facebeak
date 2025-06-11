@@ -23,6 +23,8 @@ from collections import defaultdict
 import json
 from datetime import datetime
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from db import get_connection, get_all_labeled_images
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -334,4 +336,62 @@ def main():
         consolidator.consolidate(target_dir=args.target)
 
 if __name__ == "__main__":
-    main() 
+    from db import get_connection
+    from pathlib import Path
+    import os
+
+    # Gather all image files in the new dataset structure
+    search_dirs = [
+        Path('dataset/crows/generic'),
+        Path('dataset/not_crow'),
+        Path('dataset/not_crow/hard_negatives')
+    ]
+    all_files = []
+    for d in search_dirs:
+        if d.exists():
+            all_files.extend(list(d.rglob('*.jpg')))
+            all_files.extend(list(d.rglob('*.jpeg')))
+            all_files.extend(list(d.rglob('*.png')))
+
+    # Map filename to new path
+    filename_to_newpath = {f.name: f.as_posix() for f in all_files}
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    updated = 0
+    deduped = 0
+    removed = 0
+    missing = 0
+
+    for filename, new_path in filename_to_newpath.items():
+        # Find all DB entries with this filename (regardless of old path)
+        cursor.execute("SELECT id, image_path, updated_at FROM image_labels WHERE image_path LIKE ?", (f"%{filename}",))
+        rows = cursor.fetchall()
+        if not rows:
+            missing += 1
+            continue
+        # If only one, just update its path
+        if len(rows) == 1:
+            record_id, old_path, _ = rows[0]
+            if old_path != new_path:
+                cursor.execute('UPDATE image_labels SET image_path = ? WHERE id = ?', (new_path, record_id))
+                updated += 1
+            continue
+        # If multiple, keep the most recent
+        rows.sort(key=lambda r: r[2] or '', reverse=True)  # Sort by updated_at desc
+        keep_id, keep_old_path, _ = rows[0]
+        if keep_old_path != new_path:
+            cursor.execute('UPDATE image_labels SET image_path = ? WHERE id = ?', (new_path, keep_id))
+            updated += 1
+        # Remove the others
+        for record_id, old_path, _ in rows[1:]:
+            cursor.execute('DELETE FROM image_labels WHERE id = ?', (record_id,))
+            removed += 1
+        deduped += 1 if len(rows) > 1 else 0
+
+    conn.commit()
+    conn.close()
+    print(f"✅ Updated {updated} image paths in database to new dataset/ locations.")
+    print(f"🗑️ Deduplicated {deduped} sets of duplicate labels (kept most recent).")
+    print(f"❌ Removed {removed} duplicate label entries.")
+    print(f"❓ {missing} images in dataset/ had no matching label in the database.") 

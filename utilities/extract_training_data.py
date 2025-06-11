@@ -42,6 +42,11 @@ def extract_crops_from_video_task(
     logger.info(f"  Target FPS: {target_frame_rate_val if target_frame_rate_val else 'Not set'}")
 
     try:
+        # NEW: Output to dataset/crows/generic/<video_name> for generic crows
+        # For future: use dataset/crows/<crow_id>/<video_name> for identified crows
+        video_name = Path(video_path_str).stem
+        base_dir_str = os.path.join('dataset', 'crows', 'generic', video_name)
+        os.makedirs(base_dir_str, exist_ok=True)
         tracker = CrowTracker(
             base_dir=base_dir_str,
             enable_audio_extraction=enable_audio_val,

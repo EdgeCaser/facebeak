@@ -11,7 +11,7 @@ CUB_IMG_MAP_FILE = os.path.join(CUB_DIR, "images.txt")
 COCO_DIR = "val2017"
 COCO_ANN_FILE = "annotations/instances_val2017.json"
 COCO_INPUT_DIR = "not_crow_samples"
-OUTPUT_DIR = "not_crow_samples_cropped_512"
+OUTPUT_DIR = "dataset/not_crow"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def crop_square_and_resize(img, bbox):

@@ -90,6 +90,10 @@ class VideoCropDeletor:
     def _find_crops_in_directories(self):
         """Find crops in standard crop directories."""
         crop_directories = [
+            Path("dataset/crows/generic"),
+            Path("dataset/not_crow"),
+            Path("dataset/not_crow/hard_negatives"),
+            # Legacy folders below:
             Path("crow_crops"),
             Path("crow_crops2"), 
             Path("videos"),

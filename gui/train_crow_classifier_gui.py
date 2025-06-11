@@ -106,31 +106,37 @@ def get_transforms():
     return train_transform, val_transform
 
 def load_labeled_data():
-    """Load all labeled images from database"""
-    logger.info("Loading labeled images from database...")
-    
-    labeled_images = get_all_labeled_images()
-    
+    """Load all labeled images from unified dataset structure"""
+    logger.info("Loading labeled images from unified dataset...")
+
     image_paths = []
     labels = []
-    
-    for image_info in labeled_images:
-        image_path = image_info['image_path']
-        label = image_info['label']
-        
-        # Check if image file exists
-        if os.path.exists(image_path):
-            image_paths.append(image_path)
-            labels.append(label)
-        else:
-            logger.warning(f"Image not found: {image_path}")
-    
-    logger.info(f"Loaded {len(image_paths)} valid labeled images")
-    
-    # Print label distribution
+
+    # Load crow images
+    crow_dir = os.path.join("dataset", "crows", "generic")
+    if os.path.exists(crow_dir):
+        for fname in os.listdir(crow_dir):
+            if fname.lower().endswith((".jpg", ".jpeg", ".png")):
+                image_paths.append(os.path.join(crow_dir, fname))
+                labels.append("crow")
+        logger.info(f"Loaded {len([l for l in labels if l == 'crow'])} crow images from {crow_dir}")
+    else:
+        logger.warning(f"Crow directory not found: {crow_dir}")
+
+    # Load non-crow images
+    non_crow_dir = os.path.join("dataset", "not_crow")
+    if os.path.exists(non_crow_dir):
+        for fname in os.listdir(non_crow_dir):
+            if fname.lower().endswith((".jpg", ".jpeg", ".png")):
+                image_paths.append(os.path.join(non_crow_dir, fname))
+                labels.append("not_a_crow")
+        logger.info(f"Loaded {len([l for l in labels if l == 'not_a_crow'])} non-crow images from {non_crow_dir}")
+    else:
+        logger.warning(f"Non-crow directory not found: {non_crow_dir}")
+
+    logger.info(f"Total dataset: {len(image_paths)} images")
     label_counts = Counter(labels)
     logger.info(f"Label distribution: {dict(label_counts)}")
-    
     return image_paths, labels
 
 def train_model(model, train_loader, val_loader, num_epochs=50, device='cuda'):

@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 class ImprovedCrowTripletDataset(Dataset):
     def __init__(self, base_dir, split='train', transform_mode='standard',
                  min_samples_per_crow=5, max_samples_per_crow=200,
-                 curriculum_epoch=0, max_curriculum_epochs=20, model=None, class_config_path=None):
+                 curriculum_epoch=0, max_curriculum_epochs=20, model=None, class_config_path=None,
+                 include_non_crow=True, non_crow_dir=None):
         """
         Improved Crow Triplet Dataset with curriculum learning and balancing, using crop_metadata.json.
         
@@ -37,6 +38,8 @@ class ImprovedCrowTripletDataset(Dataset):
             max_curriculum_epochs: Maximum epochs for curriculum phase
             model: Optional model for hard negative mining.
             class_config_path: Optional path to class configuration JSON for balancing/grouping.
+            include_non_crow: Whether to include non-crow images as negatives
+            non_crow_dir: Directory for non-crow images (default: dataset/not_crow)
         """
         self.base_dir = Path(base_dir)
         self.split = split
@@ -61,6 +64,13 @@ class ImprovedCrowTripletDataset(Dataset):
         self.samples = [] # List of (Path, crow_id) for training, after balancing and curriculum
 
         self._load_and_balance_dataset()
+        
+        if include_non_crow:
+            if non_crow_dir is None:
+                non_crow_dir = Path("dataset/not_crow")
+            else:
+                non_crow_dir = Path(non_crow_dir)
+            self._load_non_crow_samples(non_crow_dir)
         
         self._setup_curriculum() # Operates on self.samples
 
@@ -657,6 +667,21 @@ class ImprovedCrowTripletDataset(Dataset):
         label = anchor_crow_id
         
         return imgs, audio, label
+
+    def _load_non_crow_samples(self, non_crow_dir):
+        """Load non-crow images as negative examples"""
+        if not non_crow_dir.exists():
+            logger.warning(f"Non-crow directory not found: {non_crow_dir}")
+            return
+        non_crow_images = []
+        for img_path in non_crow_dir.glob("*.jpg"):
+            non_crow_images.append((img_path, "not_a_crow"))
+        for img_path in non_crow_dir.glob("*.jpeg"):
+            non_crow_images.append((img_path, "not_a_crow"))
+        for img_path in non_crow_dir.glob("*.png"):
+            non_crow_images.append((img_path, "not_a_crow"))
+        self.samples.extend(non_crow_images)
+        logger.info(f"Added {len(non_crow_images)} non-crow images as negative examples from {non_crow_dir}")
 
 class DatasetStats:
     """Utility class for dataset statistics."""

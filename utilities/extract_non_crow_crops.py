@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def extract_non_crow_crops(
     video_path,
-    output_dir="non_crow_crops",
+    output_dir="dataset/not_crow",
     confidence_threshold=0.5,
     frame_skip=10,
     max_crops_per_video=100,
@@ -201,8 +201,8 @@ def process_video_directory(input_dir, output_dir="non_crow_crops", **kwargs):
 def main():
     parser = argparse.ArgumentParser(description="Extract non-crow bird crops from videos")
     parser.add_argument("input", help="Input video file or directory")
-    parser.add_argument("--output", "-o", default="non_crow_crops", 
-                       help="Output directory for crops (default: non_crow_crops)")
+    parser.add_argument("--output", "-o", default="dataset/not_crow", 
+                       help="Output directory for crops (default: dataset/not_crow)")
     parser.add_argument("--confidence", "-c", type=float, default=0.5,
                        help="Minimum confidence threshold (default: 0.5)")
     parser.add_argument("--skip", "-s", type=int, default=10,
@@ -213,6 +213,10 @@ def main():
                        help="Crop size as width height (default: 512 512)")
     
     args = parser.parse_args()
+    
+    # Warn if user tries to use an old directory
+    if 'non_crow_crops' in args.output or 'not_crow_samples' in args.output or 'not_crow_crops' in args.output and 'dataset' not in args.output:
+        logger.warning("You are using a legacy output directory. Please use the new structure: dataset/not_crow")
     
     input_path = Path(args.input)
     crop_size = tuple(args.size)

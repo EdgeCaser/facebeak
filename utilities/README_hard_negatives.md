@@ -20,10 +20,10 @@ Extract hard negative crops from videos via command line.
 
 ```bash
 # Extract from single video (extract all available hard negatives)
-python utilities/extract_hard_negatives.py "path/to/video.mp4" --output-dir hard_negatives
+python utilities/extract_hard_negatives.py "path/to/video.mp4" --output-dir dataset/not_crow/hard_negatives
 
 # Extract from directory of videos with custom limit
-python utilities/extract_hard_negatives.py "path/to/videos/" --output-dir hard_negatives --max-crops-per-video 300
+python utilities/extract_hard_negatives.py "path/to/videos/" --output-dir dataset/not_crow/hard_negatives --max-crops-per-video 300
 
 # Extract and add to database automatically
 python utilities/extract_hard_negatives.py "path/to/videos/" --add-to-database --label "not_a_crow"
@@ -32,7 +32,7 @@ python utilities/extract_hard_negatives.py "path/to/videos/" --add-to-database -
 #### Parameters
 
 - `input_path`: Path to video file or directory containing videos
-- `--output-dir, -o`: Output directory for extracted crops (default: "hard_negatives_output")
+- `--output-dir, -o`: Output directory for extracted crops (default: "dataset/not_crow/hard_negatives")
 - `--max-crops-per-video, -c`: Maximum number of crops to extract per video (default: 200)
 - `--frame-skip, -s`: Number of frames to skip between samples (default: 30)
 
@@ -41,6 +41,8 @@ python utilities/extract_hard_negatives.py "path/to/videos/" --add-to-database -
 - `--video-extensions`: Video file extensions to process (default: .mp4, .avi, .mov, .mkv, .MOV)
 
 ### 2. GUI Tool: `hard_negatives_extractor_gui.py`
+
+# NOTE: Legacy folders like crow_crops/hard_negatives are no longer standard. Use dataset/not_crow/hard_negatives for all new projects.
 
 User-friendly graphical interface for the same functionality.
 

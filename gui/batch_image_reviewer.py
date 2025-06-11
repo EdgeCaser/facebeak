@@ -185,6 +185,9 @@ class BatchImageReviewer:
         # Image viewer window reference
         self.viewer_window = None
         
+        # Add to __init__:
+        self.last_clicked_index = None  # Track last clicked image index for shift selection
+        
         # Create main layout
         self.create_layout()
         
@@ -210,12 +213,19 @@ class BatchImageReviewer:
         
         # Directory selection (first row)
         ttk.Label(control_frame, text="Directory:").grid(row=0, column=0, padx=(0, 5))
-        self.dir_var = tk.StringVar(value="crow_crops")
+        self.dir_var = tk.StringVar(value="dataset")
         dir_entry = ttk.Entry(control_frame, textvariable=self.dir_var, width=40)
         dir_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
         ttk.Button(control_frame, text="Browse", command=self.browse_directory).grid(row=0, column=2, padx=(0, 5))
         ttk.Button(control_frame, text="Load Images", command=self.load_images).grid(row=0, column=3, padx=(0, 5))
         ttk.Button(control_frame, text="Refresh", command=self.refresh_images).grid(row=0, column=4)
+        
+        # Quick-select buttons
+        quick_select_frame = ttk.Frame(control_frame)
+        quick_select_frame.grid(row=2, column=0, columnspan=5, sticky=(tk.W, tk.E), pady=(5, 0))
+        ttk.Label(quick_select_frame, text="Quick Select:").grid(row=0, column=0, padx=(0, 5))
+        ttk.Button(quick_select_frame, text="Crows (generic)", command=lambda: self.dir_var.set("dataset/crows/generic")).grid(row=0, column=1, padx=(0, 5))
+        ttk.Button(quick_select_frame, text="Not Crow", command=lambda: self.dir_var.set("dataset/not_crow")).grid(row=0, column=2, padx=(0, 5))
         
         # Filter options (second row)
         filter_frame = ttk.Frame(control_frame)
@@ -631,7 +641,7 @@ class BatchImageReviewer:
             None: ''
         }
         
-        for image_path, photo in thumbnails:
+        for idx, (image_path, photo) in enumerate(thumbnails):
             # Check current label status
             label_info = get_image_label(image_path)
             current_label = label_info['label'] if label_info else None
@@ -651,9 +661,23 @@ class BatchImageReviewer:
             var.set(image_path in self.selected_images)
             self.checkbox_vars[image_path] = var  # Store reference
             
-            checkbox = ttk.Checkbutton(inner_frame, variable=var,
-                                       command=lambda path=image_path, v=var: self.toggle_selection(path, v.get()))
+            checkbox = ttk.Checkbutton(inner_frame, variable=var)
             checkbox.grid(row=0, column=0, sticky=tk.W)
+            
+            # Bind <Button-1> to checkbox for shift selection
+            # This handler will do range selection if shift is held, and prevent default toggle
+
+            def make_checkbox_click_handler(path, check_var, idx):
+                def handler(event):
+                    if event.state & 0x0001:  # Shift is held
+                        self.toggle_selection(path, not check_var.get(), index=idx, event=event)
+                        check_var.set(path in self.selected_images)
+                        return "break"  # Prevent default toggle
+                    # Otherwise, allow default toggle, but track last clicked
+                    self.toggle_selection(path, not check_var.get(), index=idx, event=event)
+                    # Let default behavior proceed
+                return handler
+            checkbox.bind("<Button-1>", make_checkbox_click_handler(image_path, var, idx))
             
             # Add status text if labeled
             if current_label:
@@ -682,13 +706,14 @@ class BatchImageReviewer:
             checkbox.image_path = image_path
             
             # Bind click events to image for easy selection
-            def make_click_handler(path, check_var):
+            def make_click_handler(path, check_var, idx):
                 def handler(event):
-                    check_var.set(not check_var.get())
-                    self.toggle_selection(path, check_var.get())
+                    # Toggle selection with shift support
+                    self.toggle_selection(path, not check_var.get(), index=idx, event=event)
+                    check_var.set(path in self.selected_images)
                 return handler
             
-            img_label.bind("<Button-1>", make_click_handler(image_path, var))
+            img_label.bind("<Button-1>", make_click_handler(image_path, var, idx))
             
             # Bind double-click to show enlarged image
             img_label.bind("<Double-Button-1>", lambda e, path=image_path: self.show_enlarged_image(path))
@@ -710,12 +735,29 @@ class BatchImageReviewer:
         self.photo_objects.clear()
         self.checkbox_vars.clear()  # Clear checkbox variable references
         
-    def toggle_selection(self, image_path, selected):
-        """Toggle selection of an image."""
-        if selected:
-            self.selected_images.add(image_path)
+    def toggle_selection(self, image_path, selected, index=None, event=None):
+        """Toggle selection of an image, with optional shift-click support."""
+        if event and hasattr(event, 'state') and (event.state & 0x0001):  # Shift is held
+            if self.last_clicked_index is not None and index is not None:
+                start = min(self.last_clicked_index, index)
+                end = max(self.last_clicked_index, index)
+                for i in range(start, end + 1):
+                    path = self.displayed_images[i]
+                    self.selected_images.add(path)
+                    if path in self.checkbox_vars:
+                        self.checkbox_vars[path].set(True)
+            else:
+                if selected:
+                    self.selected_images.add(image_path)
+                else:
+                    self.selected_images.discard(image_path)
         else:
-            self.selected_images.discard(image_path)
+            if selected:
+                self.selected_images.add(image_path)
+            else:
+                self.selected_images.discard(image_path)
+            if index is not None:
+                self.last_clicked_index = index
         self.update_selection_label()
         
     def select_all(self):
@@ -895,21 +937,18 @@ class BatchImageReviewer:
     def update_stats(self):
         """Update the statistics display."""
         try:
-            stats = get_training_data_stats()
-            
+            # Use the currently selected directory for stats
+            stats = get_training_data_stats(self.dir_var.get())
             if not stats:
                 self.stats_label.config(text="No labeled data yet")
                 return
-                
             crow_count = stats.get('crow', {}).get('count', 0)
             not_crow_count = stats.get('not_a_crow', {}).get('count', 0)
             bad_crow_count = stats.get('bad_crow', {}).get('count', 0)
             not_sure_count = stats.get('not_sure', {}).get('count', 0)
             multi_crow_count = stats.get('multi_crow', {}).get('count', 0)
-            
             stats_text = f"Labeled: {crow_count} crows, {not_crow_count} not-crows, {bad_crow_count} bad-crows, {not_sure_count} unsure, {multi_crow_count} multi"
             self.stats_label.config(text=stats_text)
-            
         except Exception as e:
             logger.error(f"Error updating stats: {e}")
             self.stats_label.config(text="Error loading stats")

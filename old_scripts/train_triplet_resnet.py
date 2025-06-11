@@ -1,3 +1,6 @@
+# NOTE: This script is legacy and may reference old data locations.
+# For new projects, use the dataset/ structure (dataset/crows/<crow_id>, dataset/not_crow) and updated training scripts.
+
 import os
 import torch
 from torch.utils.data import DataLoader, Dataset, random_split
