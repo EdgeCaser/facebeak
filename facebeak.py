@@ -11,6 +11,7 @@ from db import clear_database
 import json # Added import
 from pathlib import Path # Added import
 import platform # Added import
+import logging
 
 def ensure_requirements():
     """Ensure all required packages are installed."""
@@ -60,9 +61,9 @@ class FacebeakGUI:
             with open("config.json", "r") as f:
                 self.config = json.load(f)
         except FileNotFoundError:
-            messagebox.showwarning("Configuration Error", "config.json not found. Using default settings.")
+            logging.getLogger(__name__).info("config.json not found. Using default settings.")
         except json.JSONDecodeError:
-            messagebox.showwarning("Configuration Error", "Error decoding config.json. Using default settings.")
+            logging.getLogger(__name__).info("Error decoding config.json. Using default settings.")
 
         root.geometry("900x1100")  # Increased window height for more vertical space
 
@@ -207,15 +208,19 @@ class FacebeakGUI:
         review_frame.grid(row=13, column=0, columnspan=3, sticky="ew", pady=5)
         
         ttk.Label(review_frame, text="Review and label crow images for training data quality", 
-                 font=("Arial", 8)).grid(row=0, column=0, columnspan=2, sticky="w")
+                 font=("Arial", 8)).grid(row=0, column=0, columnspan=3, sticky="w")
         
         # Image review button
         self.review_button = ttk.Button(review_frame, text="Launch Image Reviewer", command=self.launch_image_reviewer)
         self.review_button.grid(row=1, column=0, pady=5, padx=(0, 5), sticky="w")
 
+        # Image ingestion button
+        self.ingestion_button = ttk.Button(review_frame, text="Launch Image Ingestion", command=self.launch_image_ingestion)
+        self.ingestion_button.grid(row=1, column=1, pady=5, padx=(0, 5), sticky="w")
+
         # Suspect lineup button
         self.suspect_lineup_button = ttk.Button(review_frame, text="Launch Suspect Lineup", command=self.launch_suspect_lineup)
-        self.suspect_lineup_button.grid(row=1, column=1, pady=5, sticky="w")
+        self.suspect_lineup_button.grid(row=1, column=2, pady=5, sticky="w")
 
         # Output box with scrollbar (made taller)
         output_frame = ttk.Frame(root)
@@ -643,6 +648,31 @@ class FacebeakGUI:
             
         except Exception as e:
             error_msg = f"Failed to launch Suspect Lineup: {str(e)}"
+            self._update_output(f"ERROR: {error_msg}\n")
+            messagebox.showerror("Error", error_msg)
+
+    def launch_image_ingestion(self):
+        """Launch the image ingestion tool."""
+        try:
+            python_path = get_venv_python() # This already uses sys.executable
+            script_dir = Path(__file__).resolve().parent
+            script_path = script_dir / 'gui' / 'image_ingestion_gui.py'
+            
+            # Check if the script exists
+            if not script_path.exists():
+                messagebox.showerror("Error", f"Image ingestion script not found: {str(script_path)}")
+                return
+            
+            # Launch in separate process
+            creation_flags = 0
+            if platform.system() == "Windows":
+                creation_flags = subprocess.CREATE_NEW_CONSOLE
+            subprocess.Popen([python_path, str(script_path)], creationflags=creation_flags)
+            
+            self._update_output("Launched Image Ingestion tool\n")
+            
+        except Exception as e:
+            error_msg = f"Failed to launch Image Ingestion: {str(e)}"
             self._update_output(f"ERROR: {error_msg}\n")
             messagebox.showerror("Error", error_msg)
 

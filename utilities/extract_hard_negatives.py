@@ -214,7 +214,8 @@ def generate_embedding_from_image(image_path: str) -> np.ndarray:
         
         # Apply standard transforms (512x512 to match pipeline)
         transform = transforms.Compose([
-            transforms.Resize((512, 512)),
+            transforms.Resize((580, 580)),  # Resize to larger square to preserve aspect ratio
+            transforms.CenterCrop((512, 512)),  # Crop to target size
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])

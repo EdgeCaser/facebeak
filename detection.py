@@ -24,9 +24,9 @@ try:
     with open("config.json", "r") as f:
         CONFIG = json.load(f)
 except FileNotFoundError:
-    print("WARNING: config.json not found in detection.py. Using default model paths.")
+    logging.getLogger(__name__).info("config.json not found in detection.py. Using default model paths.")
 except json.JSONDecodeError:
-    print("WARNING: Error decoding config.json in detection.py. Using default model paths.")
+    logging.getLogger(__name__).info("Error decoding config.json in detection.py. Using default model paths.")
 
 # Set up logger
 logger = logging.getLogger(__name__)

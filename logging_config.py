@@ -10,10 +10,9 @@ try:
     with open("config.json", "r") as f:
         CONFIG = json.load(f)
 except FileNotFoundError:
-    # Use a basic print here since logger isn't set up yet
-    print("WARNING: config.json not found in logging_config.py. Using default log path logic.")
+    logging.getLogger(__name__).info("config.json not found in logging_config.py. Using default log path logic.")
 except json.JSONDecodeError:
-    print("WARNING: Error decoding config.json in logging_config.py. Using default log path logic.")
+    logging.getLogger(__name__).info("Error decoding config.json in logging_config.py. Using default log path logic.")
 
 def setup_logging():
     """Set up logging configuration."""

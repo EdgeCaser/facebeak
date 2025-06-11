@@ -122,8 +122,18 @@ def extract_non_crow_crops(
                             if crop.shape[0] < 32 or crop.shape[1] < 32:
                                 continue
                             
-                            # Resize crop
-                            crop_resized = cv2.resize(crop, crop_size, interpolation=cv2.INTER_LANCZOS4)
+                            # Make square crop to preserve aspect ratio (like tracking.py)
+                            crop_h, crop_w = crop.shape[:2]
+                            max_side = max(crop_w, crop_h)
+                            
+                            # Create square crop with padding
+                            square_crop = np.zeros((max_side, max_side, 3), dtype=np.uint8)
+                            start_x = (max_side - crop_w) // 2
+                            start_y = (max_side - crop_h) // 2
+                            square_crop[start_y:start_y + crop_h, start_x:start_x + crop_w] = crop
+                            
+                            # Resize square crop to target size
+                            crop_resized = cv2.resize(square_crop, crop_size, interpolation=cv2.INTER_LANCZOS4)
                             
                             # Save crop
                             crop_filename = f"{video_name}_frame{frame_count}_bird{crops_extracted:04d}.jpg"

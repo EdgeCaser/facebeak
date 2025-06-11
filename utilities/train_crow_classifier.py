@@ -63,7 +63,7 @@ class CrowDataset(Dataset):
         except Exception as e:
             logger.error(f"Error loading image {image_path}: {e}")
             # Return a black image and unknown label as fallback
-            black_image = torch.zeros(3, 224, 224)
+            black_image = torch.zeros(3, 512, 512)
             return black_image, 1  # Default to not_a_crow
 
 def create_model(num_classes=3):
@@ -78,7 +78,8 @@ def create_model(num_classes=3):
 def get_transforms():
     """Get data augmentation transforms"""
     train_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((580, 580)),  # Resize to larger square to preserve aspect ratio
+        transforms.CenterCrop((512, 512)),  # Crop to target size
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomRotation(10),
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
@@ -87,7 +88,8 @@ def get_transforms():
     ])
     
     val_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((580, 580)),  # Resize to larger square to preserve aspect ratio
+        transforms.CenterCrop((512, 512)),  # Crop to target size
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
@@ -95,7 +97,7 @@ def get_transforms():
     return train_transform, val_transform
 
 def load_labeled_data():
-    """Load all labeled images from database"""
+    """Load all labeled images from database and non-crow images"""
     logger.info("Loading labeled images from database...")
     
     labeled_images = get_all_labeled_images()
@@ -114,7 +116,25 @@ def load_labeled_data():
         else:
             logger.warning(f"Image not found: {image_path}")
     
-    logger.info(f"Loaded {len(image_paths)} valid labeled images")
+    logger.info(f"Loaded {len(image_paths)} valid labeled images from database")
+    
+    # Add non-crow images from the cropped dataset
+    non_crow_dir = "not_crow_samples_cropped_512"
+    if os.path.exists(non_crow_dir):
+        non_crow_images = []
+        for filename in os.listdir(non_crow_dir):
+            if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                non_crow_images.append(os.path.join(non_crow_dir, filename))
+        
+        # Add all non-crow images with 'not_a_crow' label
+        image_paths.extend(non_crow_images)
+        labels.extend(['not_a_crow'] * len(non_crow_images))
+        
+        logger.info(f"Added {len(non_crow_images)} non-crow images from {non_crow_dir}")
+    else:
+        logger.warning(f"Non-crow directory not found: {non_crow_dir}")
+    
+    logger.info(f"Total dataset: {len(image_paths)} images")
     
     # Print label distribution
     label_counts = Counter(labels)

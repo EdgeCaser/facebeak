@@ -68,9 +68,9 @@ try:
     with open("config.json", "r") as f:
         CONFIG = json.load(f)
 except FileNotFoundError:
-    logger.warning("config.json not found in tracking.py. Using default model paths.")
+    logger.info("config.json not found in tracking.py. Using default model paths.")
 except json.JSONDecodeError:
-    logger.warning("Error decoding config.json in tracking.py. Using default model paths.")
+    logger.info("Error decoding config.json in tracking.py. Using default model paths.")
 
 # --- PATCH: Platform check for signal.SIGALRM ---
 IS_WINDOWS = platform.system() == 'Windows'
@@ -287,34 +287,69 @@ def extract_normalized_crow_crop(frame, bbox, expected_size=(512, 512), correct_
             logger.warning(f"Padding resulted in invalid bbox, using original: {bbox}")
             x1_padded, y1_padded, x2_padded, y2_padded = x1, y1, x2, y2
             
-        crop = frame[y1_padded:y2_padded, x1_padded:x2_padded]
-        if crop.size == 0:
-            raise ValueError(f"Crop resulted in empty image for bbox {bbox} with padding")
-
+        # SQUARE EXPANSION FIX: Expand bounding box to square before cropping to prevent distortion
+        # Instead of letterboxing, we take more of the surrounding image to make it square
+        
+        # Recalculate square bounding box from the original bbox (before padding was applied)
+        orig_bbox_w = x2 - x1
+        orig_bbox_h = y2 - y1
+        
+        # Determine the size of the square crop (use the larger dimension)
+        square_size = max(orig_bbox_w, orig_bbox_h)
+        
+        # Calculate the center of the original bounding box
+        center_x = (x1 + x2) // 2
+        center_y = (y1 + y2) // 2
+        
+        # Calculate square bounding box centered on the detection
+        half_square = square_size // 2
+        square_x1 = center_x - half_square
+        square_y1 = center_y - half_square
+        square_x2 = center_x + half_square
+        square_y2 = center_y + half_square
+        
+        # Apply the same padding to the square box
+        square_pad_w = int(square_size * padding)
+        square_pad_h = int(square_size * padding)
+        
+        square_x1_padded = max(0, square_x1 - square_pad_w)
+        square_y1_padded = max(0, square_y1 - square_pad_h)
+        square_x2_padded = min(w, square_x2 + square_pad_w)
+        square_y2_padded = min(h, square_y2 + square_pad_h)
+        
+        # Extract the square crop from the frame
+        square_crop = frame[square_y1_padded:square_y2_padded, square_x1_padded:square_x2_padded]
+        if square_crop.size == 0:
+            raise ValueError(f"Square crop resulted in empty image for bbox {bbox}")
+        
+        logger.debug(f"Square expansion applied: {orig_bbox_w}x{orig_bbox_h} -> {square_size}x{square_size} (with padding)")
+        
+        # Apply orientation correction to the square crop if needed
         if correct_orientation:
             try:
                 from crow_orientation import correct_crow_crop_orientation
-                crop = correct_crow_crop_orientation(crop)
+                square_crop = correct_crow_crop_orientation(square_crop)
             except ImportError:
                 logger.warning("Crow orientation module not available, skipping orientation correction.")
             except Exception as e:
                 logger.warning(f"Error applying orientation correction: {e}. Using original crop.")
         
         # Apply super-resolution if crop is small (before final resize)
-        crop_h, crop_w = crop.shape[:2]
+        crop_h, crop_w = square_crop.shape[:2]
         if crop_h < 100 or crop_w < 100:
             try:
                 logger.debug(f"Applying super-resolution to small crop: {crop_w}x{crop_h}")
                 # Convert to tensor format for super-resolution
-                crop_tensor = torch.from_numpy(crop.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0)  # HWC -> CHW -> BCHW
+                crop_tensor = torch.from_numpy(square_crop.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0)  # HWC -> CHW -> BCHW
                 enhanced_tensor = apply_super_resolution(crop_tensor, min_size=100)
                 # Convert back to numpy HWC format
-                crop = (enhanced_tensor.squeeze().permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
-                logger.debug(f"Super-resolution enhanced crop to: {crop.shape[1]}x{crop.shape[0]}")
+                square_crop = (enhanced_tensor.squeeze().permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+                logger.debug(f"Super-resolution enhanced crop to: {square_crop.shape[1]}x{square_crop.shape[0]}")
             except Exception as e:
                 logger.warning(f"Super-resolution failed, using original crop: {e}")
         
-        crop_resized = cv2.resize(crop, (expected_size[1], expected_size[0]), interpolation=cv2.INTER_LANCZOS4)
+        # Now resize the square crop to expected size (no distortion!)
+        crop_resized = cv2.resize(square_crop, (expected_size[1], expected_size[0]), interpolation=cv2.INTER_LANCZOS4)
         crop_normalized = crop_resized.astype(np.float32) / 255.0 # HWC, [0,1]
         
         head_height = expected_size[0] // 3

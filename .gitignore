@@ -381,3 +381,19 @@ test_multi_crow.py
 
 # Large training configuration files (>100MB should be managed with Git LFS)
 training_config.json
+
+# User photos and images
+Photos/
+
+# Ignore CUB-200-2011 dataset files
+CUB_200_2011/
+CUB_200_2011.tgz
+
+# Ignore COCO dataset files
+val2017/
+val2017.zip
+annotations/
+annotations_trainval2017.zip
+
+# Ignore generated not-crow samples
+not_crow_samples/

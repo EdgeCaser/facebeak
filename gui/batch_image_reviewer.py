@@ -22,6 +22,7 @@ def get_all_images_from_directory(directory, limit=None):
     """
     Get image files from a directory, with optional limiting for performance.
     Prioritizes unlabeled images to ensure they're available for review.
+    Uses randomization to maximize diversity of labeled images for better training data.
     
     Args:
         directory (str): Directory to scan for images
@@ -58,14 +59,9 @@ def get_all_images_from_directory(directory, limit=None):
             
             # If no limit specified, return all images
             if limit is None:
-                # Sort by modification time (newest first) to prioritize recently created crops
-                try:
-                    unlabeled_images.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                    labeled_images.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                except:
-                    # If sorting fails, shuffle for variety
-                    random.shuffle(unlabeled_images)
-                    random.shuffle(labeled_images)
+                # Randomize for diversity while prioritizing unlabeled images
+                random.shuffle(unlabeled_images)
+                random.shuffle(labeled_images)
                 
                 all_images = unlabeled_images + labeled_images
                 logger.info(f"Loaded all {len(all_images)} images from {directory}")
@@ -79,20 +75,15 @@ def get_all_images_from_directory(directory, limit=None):
             # Add as many unlabeled images as possible first
             unlabeled_count = min(len(unlabeled_images), limit)
             if unlabeled_count > 0:
-                # Sort unlabeled by modification time (newest first)
-                try:
-                    unlabeled_images.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                except:
-                    random.shuffle(unlabeled_images)
+                # Randomize unlabeled images for diversity
+                random.shuffle(unlabeled_images)
                 selected_images.extend(unlabeled_images[:unlabeled_count])
             
             # Fill remaining slots with labeled images
             remaining_slots = limit - len(selected_images)
             if remaining_slots > 0 and labeled_images:
-                try:
-                    labeled_images.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                except:
-                    random.shuffle(labeled_images)
+                # Randomize labeled images for diversity
+                random.shuffle(labeled_images)
                 selected_images.extend(labeled_images[:remaining_slots])
             
             # Shuffle the final list for display variety
@@ -108,7 +99,9 @@ def get_all_images_from_directory(directory, limit=None):
             logger.warning(f"Could not prioritize images due to database error: {db_e}")
             # Fallback to loading all images or random sampling
             if limit is None:
-                logger.info(f"Loaded all {len(image_files)} images from {directory} (fallback)")
+                # Randomize for diversity in fallback case
+                random.shuffle(image_files)
+                logger.info(f"Loaded all {len(image_files)} images from {directory} (randomized fallback)")
                 return image_files
             else:
                 random.shuffle(image_files)
@@ -1075,7 +1068,8 @@ Instructions:
 10. Choose label and apply to all selected images
 
 Performance Features:
-• Loads ALL images from directory (prioritizes unlabeled)
+• Loads ALL images from directory in random order for diversity
+• Prioritizes unlabeled images while maintaining random ordering
 • Intelligent caching for instant filter switching
 • Batch database queries for faster labeling
 • Smart refresh - automatically updates after labeling

@@ -27,6 +27,9 @@ import shutil
 import numpy as np
 
 # Import your database functions
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db import get_all_labeled_images
 
 # Set up logging

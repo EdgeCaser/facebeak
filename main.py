@@ -13,6 +13,7 @@ import numpy as np
 from typing import List
 import json # Added import
 from pathlib import Path # Added import
+import logging
 
 # Load configuration at the start of the script
 CONFIG = {}
@@ -20,9 +21,9 @@ try:
     with open("config.json", "r") as f:
         CONFIG = json.load(f)
 except FileNotFoundError:
-    print("WARNING: config.json not found. Using default settings.")
+    logging.getLogger(__name__).info("config.json not found. Using default settings.")
 except json.JSONDecodeError:
-    print("WARNING: Error decoding config.json. Using default settings.")
+    logging.getLogger(__name__).info("Error decoding config.json. Using default settings.")
 
 
 class TeeLogger:

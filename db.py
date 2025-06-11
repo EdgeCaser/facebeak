@@ -18,9 +18,9 @@ try:
     with open("config.json", "r") as f:
         CONFIG = json.load(f)
 except FileNotFoundError:
-    logger.warning("config.json not found in db.py. Using default DB path logic.")
+    logger.info("config.json not found in db.py. Using default DB path logic.")
 except json.JSONDecodeError:
-    logger.warning("Error decoding config.json in db.py. Using default DB path logic.")
+    logger.info("Error decoding config.json in db.py. Using default DB path logic.")
 import json # Ensure json is imported, though it should be if CONFIG is used
 
 def get_db_path():
